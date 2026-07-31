@@ -124,6 +124,7 @@ $(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc
 		--remove-section=.gcc_except_table \
 		--strip-symbol=rust_eh_personality $@.tmp $@
 	@rm -f $@.tmp
+	python3 scripts/btf_rename.py $@ $(LLVM_OBJCOPY)
 
 # --- Kernel verifier gate (all built objects) ---
 verify: all

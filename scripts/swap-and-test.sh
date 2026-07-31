@@ -70,7 +70,7 @@ sfmake "${SKELS[@]}" > /dev/null
 # rebuild each explicitly (PERMISSIVE mode silently drops deleted test
 # objects from the link, so each must be named as a goal), then relink.
 TESTS=()
-for d in $(grep -l -E "/${NAME}\.l?skel\.h" "${OUT}"/*.test.d); do
+for d in $(grep -l -E "(^| |/)${NAME}\.l?skel\.h" "${OUT}"/*.test.d); do
     base="$(basename "${d}" .test.d)"
     TESTS+=("${base}")
     rm -f "${OUT}/${base}.test.o"

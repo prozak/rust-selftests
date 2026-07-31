@@ -56,33 +56,46 @@ sfmake() {
         -j"$(nproc)" -k "$@"
 }
 
-# Regenerate the skeleton headers derived from this object.
+# Regenerate the skeleton headers derived from this object, if any. Tests
+# without skeletons load the .bpf.o from disk at runtime, so the swap alone
+# is enough for them.
 SKELS=()
 for h in "${OUT}/${NAME}.skel.h" "${OUT}/${NAME}.lskel.h"; do
     [ -f "${h}" ] || continue
     rm -f "${h}"
     SKELS+=("${OUT}//$(basename "${h}")")
 done
-[ "${#SKELS[@]}" -gt 0 ] || { echo "no skeletons derive from ${NAME}.bpf.o?" >&2; exit 1; }
-sfmake "${SKELS[@]}" > /dev/null
 
-# Find every test object whose dep file pulls in one of those skeletons,
-# rebuild each explicitly (PERMISSIVE mode silently drops deleted test
-# objects from the link, so each must be named as a goal), then relink.
 TESTS=()
-for d in $(grep -l -E "(^| |/)${NAME}\.l?skel\.h" "${OUT}"/*.test.d); do
-    base="$(basename "${d}" .test.d)"
-    TESTS+=("${base}")
-    rm -f "${OUT}/${base}.test.o"
-    sfmake "${OUT}//${base}.test.o" > /dev/null
-    [ -f "${OUT}/${base}.test.o" ] || { echo "failed to rebuild ${base}.test.o" >&2; exit 1; }
-done
-[ "${#TESTS[@]}" -gt 0 ] || { echo "no prog_tests consume ${NAME}; nothing to run" >&2; exit 1; }
+if [ "${#SKELS[@]}" -gt 0 ]; then
+    sfmake "${SKELS[@]}" > /dev/null
 
-rm -f "${OUT}/test_progs"
-sfmake "${OUT}//test_progs" > /dev/null
-[ -x "${OUT}/test_progs" ] || { echo "test_progs relink failed" >&2; exit 1; }
-echo "[swap] test_progs relinked; affected tests: ${TESTS[*]}"
+    # Find every test object whose dep file pulls in one of those skeletons,
+    # rebuild each explicitly (PERMISSIVE mode silently drops deleted test
+    # objects from the link, so each must be named as a goal), then relink.
+    for d in $(grep -l -E "(^| |/)${NAME}\.l?skel\.h" "${OUT}"/*.test.d); do
+        base="$(basename "${d}" .test.d)"
+        TESTS+=("${base}")
+        rm -f "${OUT}/${base}.test.o"
+        sfmake "${OUT}//${base}.test.o" > /dev/null
+        [ -f "${OUT}/${base}.test.o" ] || { echo "failed to rebuild ${base}.test.o" >&2; exit 1; }
+    done
+    [ "${#TESTS[@]}" -gt 0 ] || { echo "skeletons exist but no prog_tests consume them?" >&2; exit 1; }
+
+    rm -f "${OUT}/test_progs"
+    sfmake "${OUT}//test_progs" > /dev/null
+    [ -x "${OUT}/test_progs" ] || { echo "test_progs relink failed" >&2; exit 1; }
+    echo "[swap] test_progs relinked"
+fi
+
+# Tests may also reference the object file by name and load it at runtime
+# (no skeleton involved); those need no rebuild, just the swapped file.
+for f in $(grep -l -E "\"[^\"]*${NAME}\.bpf\.o\"" "${SELFTESTS_SRC}"/prog_tests/*.c); do
+    base="$(basename "${f}" .c)"
+    case " ${TESTS[*]-} " in *" ${base} "*) ;; *) TESTS+=("${base}") ;; esac
+done
+[ "${#TESTS[@]}" -gt 0 ] || { echo "no prog_tests consume ${NAME}" >&2; exit 1; }
+echo "[swap] affected tests: ${TESTS[*]}"
 
 FILTER="$(IFS=,; echo "${TESTS[*]}")"
 TEST_PROGS="${OUT}/test_progs" \

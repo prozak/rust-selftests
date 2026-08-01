@@ -137,3 +137,37 @@ Verus pass would want to reason about.
 6. File the upstream issues: rustc decl_tag attribute, libbpf btf_dump int
    names; minimally reproduce the llvm-objcopy claim before filing that
    one.
+
+## 6. Outcome (same day, commit 2e5e64e)
+
+Steps 1–4 executed; results against the plan:
+
+- **Spike correction.** The spike's original verdict ("kernel accepts
+  mangled generic struct names") was a **false positive**: veristat's
+  program verified *without* BTF because libbpf silently drops BTF the
+  kernel rejects (`Error loading .BTF into kernel: -EINVAL. BTF is
+  optional, ignoring`). The kernel DOES require identifier-valid type
+  names. htab_update's bpf_timer field detection (which hard-requires
+  kernel-loaded value BTF) exposed it. Fix: `btf_rename.py` now sanitizes
+  non-identifier type names (`BpfMap<u32, val, 1, 1>` →
+  `BpfMap_u32__val__1__1_`); DATASEC names are exempt (section names
+  legally contain dots and are load-bearing for libbpf). Lesson for the
+  gate design: *silence is not success* — a missing-BTF object can pass
+  programs that don't need BTF.
+- **Crate built** (`bpf-rs-core/`, ~400 lines): header-only by
+  construction, so the link pipeline is untouched. bpf_object!, generic
+  BpfMap + bpf_map!, all helper thunks (single thunk! macro owns the
+  transmute), full UAPI __sk_buff, vload!/vload_as!/vstore!, fentry_arg,
+  sink/sink_val, sync_fetch_and_add.
+- **All 11 programs migrated**; every verifiable one re-passed the full
+  oracle (0 FAILED), stacktrace_map (harness-blocked) passes the
+  verifier. Program code 1321 → 787 lines (−40%), unsafe sites 76 → 24
+  (−68%), program-side transmutes 24 → 0.
+- **Globals (step 4) resolved as documentation, not code.** A `Global<T>`
+  wrapper is impossible under the ABI: any wrapper adds a struct layer in
+  DWARF→BTF and the skeleton must see plain primitives. The actual hazard
+  (UB / edition-2024 `static_mut_refs`) is about *creating references* to
+  `static mut`, which none of our access patterns do. Canon (now in
+  TRANSLATING.md): `static mut` stays; copy-reads, place-writes and
+  `addr_of_mut!` only; never `&`/`&mut` a static mut; atomics via
+  `helpers::sync_fetch_and_add` on `addr_of_mut!`.

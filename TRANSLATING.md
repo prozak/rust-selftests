@@ -4,10 +4,12 @@ Rules for translating `tools/testing/selftests/bpf/progs/<name>.c` to
 `progs/<name>.rs` in this repo. The Rust is compiled **directly to BPF by
 upstream rustc/LLVM** — there is NO aya, NO libbpf-rs, NO bpf crate. Every
 kernel-facing construct is expressed with core Rust + `#[link_section]` +
-BTF emitted from debuginfo. The compiled object must be a drop-in
-replacement for the clang-built one: same section names, same global
-symbol names/types, same BTF shape — the kernel's unmodified test harness
-(skeletons, prog_tests) is the acceptance oracle.
+BTF emitted from debuginfo, through the local support crate
+`bpf-rs-core/` (`use bpf_rs_core::...` — linked automatically by the
+Makefile). The compiled object must be a drop-in replacement for the
+clang-built one: same section names, same global symbol names/types, same
+BTF shape — the kernel's unmodified test harness (skeletons, prog_tests)
+is the acceptance oracle.
 
 ## Crate skeleton
 
@@ -15,18 +17,16 @@ symbol names/types, same BTF shape — the kernel's unmodified test harness
 #![no_std]
 #![no_main]
 
+use bpf_rs_core::bpf_object;
+
 // ... programs ...
 
-#[link_section = "license"]
-#[no_mangle]
-static _license: [u8; 4] = *b"GPL\0";   // size = strlen + NUL, match C
-
-#[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! { loop {} }
+bpf_object!("GPL");   // license static (strlen+NUL, same as C) + panic handler
 ```
 
-Panics must be unreachable (no unwrap/indexing that can panic); the loop{}
-handler is dead code removed by DCE. Edition 2021, builds as rlib.
+Panics must be unreachable (no unwrap/indexing that can panic); the
+`loop {}` handler `bpf_object!` emits is dead code removed by DCE.
+Edition 2021, builds as rlib.
 
 ## Programs
 
@@ -40,17 +40,18 @@ extern "C" fn <same_function_name_as_C>(ctx: *const CTX) -> i32 { ... 0 }
 
 - Function name and section string must match the C source exactly.
 - tracing programs (fentry/fexit/tp_btf/...): ctx is `*const u64`, one slot
-  per target-function argument. `unsafe { *ctx.add(i) }` reads arg i;
-  truncate with `as i32` / `as i8` etc. to the target arg's C type (this is
-  what C's BPF_PROG macro does).
+  per target-function argument. `bpf_rs_core::progs::fentry_arg(ctx, i)`
+  reads arg i; truncate with `as i32` / `as i8` etc. to the target arg's C
+  type (this is what C's BPF_PROG macro does).
 - tracepoint ("tp/..."): ctx points at the tracepoint record; if the body
   never dereferences it use `*const core::ffi::c_void`.
-- tc/XDP/socket: ctx is a pointer to the UAPI context struct. Declare the
-  needed prefix of it yourself, `#[repr(C)]`, and — CRITICAL — give it the
-  exact C name (`__sk_buff`, `xdp_md`, ...) with
-  `#[allow(non_camel_case_types)]`. The kernel matches BTF struct types BY
-  NAME for freplace/fexit attach compatibility; a differently-named struct
-  loads but breaks C extension programs attaching to yours.
+- tc/XDP/socket: ctx is a pointer to the UAPI context struct.
+  `bpf_rs_core::ctx` provides the full UAPI `__sk_buff` (and TC_ACT_*).
+  CRITICAL if you declare a ctx struct yourself: it must carry the exact C
+  name (`__sk_buff`, `xdp_md`, ...) — the kernel matches BTF struct types
+  BY NAME for freplace/fexit attach compatibility and global-function ctx
+  args; a differently-named struct loads but breaks C extension programs
+  attaching to yours.
 - BTF-typed pointer args (fentry arg that is a struct pointer): the loaded
   value may be dereferenced directly (`*(p as *const u64)` for first
   field); the verifier converts these to fault-tolerant PROBE_MEM loads,
@@ -65,9 +66,21 @@ C globals the harness reads/writes (`__u64 test1_result = 0;`):
 static mut test1_result: u64 = 0;    // zero-init => .bss, same as C
 ```
 
-Same names, same types, same zero/nonzero init (nonzero => .data). Access
-with `unsafe { test1_result = ... }`. Do NOT invent extra global statics:
-some harnesses iterate the whole bss section and assert every slot.
+Same names, same types, same zero/nonzero init (nonzero => .data). This
+representation is FORCED by the ABI: the regenerated skeleton must see a
+plain primitive-typed member, so no wrapper type (UnsafeCell, newtype) is
+possible — any wrapper adds a struct layer in BTF and breaks harness C.
+
+Access rule (keeps the pattern sound and edition-2024-clean): NEVER create
+a reference to a `static mut`. Copy-read (`unsafe { pid }`), place-write
+(`unsafe { update_err = e }`), and read-modify-write of the place
+(`unsafe { seq += 1 }`) are all fine; for pointers use
+`core::ptr::addr_of_mut!`. C's `__sync_fetch_and_add` on a global becomes
+`helpers::sync_fetch_and_add(core::ptr::addr_of_mut!(total), 1)` — the
+global stays a plain int in BTF, the atomicity lives at the access site.
+
+Do NOT invent extra global statics: some harnesses iterate the whole bss
+section and assert every slot.
 
 Read-only config globals (`const volatile` in C) go to .rodata:
 `#[link_section = ".rodata"] #[no_mangle] static tgt_pid: u32 = 0;` and are
@@ -77,65 +90,60 @@ loader patches the value before load).
 ## Maps
 
 libbpf reads map definitions purely from BTF: a VAR in DATASEC ".maps"
-whose struct type encodes parameters as pointer members. C's
-`__uint(type, V)` becomes `*const [i32; V]`; `__type(key, T)` becomes
-`*const T`. Example — translation of:
-
-```c
-struct { __uint(type, BPF_MAP_TYPE_HASH); __uint(max_entries, 2);
-         __type(key, __u64); __type(value, __u64); } hash_map SEC(".maps");
-```
+whose struct type encodes parameters as pointer members (`__uint(type, V)`
+= `int (*type)[V]`, `__type(key, T)` = `T *key`). The common shape is one
+line:
 
 ```rust
-#[allow(non_camel_case_types)]
-#[repr(C)]
-struct hash_map_def {
-    r#type: *const [i32; 1],      // BPF_MAP_TYPE_HASH = 1
-    max_entries: *const [i32; 2],
-    key: *const u64,
-    value: *const u64,
-}
-unsafe impl Sync for hash_map_def {}
+use bpf_rs_core::maps::{self, BpfMap};
 
 #[link_section = ".maps"]
 #[no_mangle]
-static hash_map: hash_map_def = hash_map_def {
-    r#type: core::ptr::null(), max_entries: core::ptr::null(),
-    key: core::ptr::null(), value: core::ptr::null(),
-};
+static hash_map: BpfMap<u64, u64, { maps::HASH }, 2> = BpfMap::new();
+//                key  value  type            max_entries
 ```
 
-Map type values (enum bpf_map_type): HASH=1 ARRAY=2 PROG_ARRAY=3
-PERF_EVENT_ARRAY=4 PERCPU_HASH=5 PERCPU_ARRAY=6 STACK_TRACE=7 ...
-RINGBUF=27. Other C map attrs map the same way: `__uint(key_size, N)` ->
-`key_size: *const [i32; N]`, `__uint(map_flags, F)` -> `map_flags:
-*const [i32; F]`.
+Map-type constants live in `bpf_rs_core::maps` (HASH, ARRAY, PROG_ARRAY,
+PERF_EVENT_ARRAY, PERCPU_HASH, PERCPU_ARRAY, STACK_TRACE, LRU_HASH,
+RINGBUF, ...; values = enum bpf_map_type).
 
-## Helper calls
-
-Like C's bpf_helpers.h: call through a fn pointer whose value is the
-helper ID constant; LLVM folds it into the direct BPF helper-call insn.
+Any other member set (pinning, key_size/value_size, absent max_entries,
+...) uses the escape hatch, which encodes members exactly like the
+hand-written C-equivalent struct:
 
 ```rust
-#[inline(always)]
-fn bpf_get_current_pid_tgid() -> u64 {
-    let f: extern "C" fn() -> u64 = unsafe { core::mem::transmute(14usize) };
-    f()
+bpf_map! {
+    perf_buf_map {
+        r#type: *const [i32; 4], // BPF_MAP_TYPE_PERF_EVENT_ARRAY
+        key: *const i32,
+        value: *const i32,      // no max_entries: libbpf sizes to nr_cpus
+    }
 }
 ```
 
-Common helper IDs: map_lookup_elem=1 map_update_elem=2 map_delete_elem=3
-probe_read=4 ktime_get_ns=5 trace_printk=6 get_prandom_u32=7
-get_smp_processor_id=8 tail_call=12 get_current_pid_tgid=14
-get_current_uid_gid=15 get_current_comm=16 perf_event_output=25
-probe_read_str=45 probe_read_user=112 probe_read_kernel=113
-probe_read_user_str=114 probe_read_kernel_str=115 ringbuf_output=130
-ringbuf_reserve=131 ringbuf_submit=132 ringbuf_discard=133
-ktime_get_boot_ns=125. (Full list: include/uapi/linux/bpf.h FN macros.)
+(Generic instantiations reach BTF with names like `BpfMap<u64, u64, 1, 2>`;
+the kernel rejects non-identifier chars in type names, and
+`scripts/btf_rename.py` sanitizes them post-build. Map def struct names
+are not load-bearing for libbpf — only the VAR name and member layout
+are.)
 
-Map-helper signatures take `*const <map_def_struct>` as the map argument
-and `*const c_void` key/value pointers; lookup returns `*mut c_void`
-(check for null!).
+## Helper calls
+
+All helpers live in `bpf_rs_core::helpers` as `#[inline(always)]` thunks
+(fn pointer whose value is the helper ID — same mechanism as C's
+bpf_helpers.h; LLVM folds it into the direct helper-call insn). Map
+arguments are generic over the map-def type:
+
+```rust
+use bpf_rs_core::helpers::{bpf_map_lookup_elem, bpf_map_update_elem};
+
+let v = bpf_map_lookup_elem(&hash_map, &key);   // *mut c_void — check null!
+bpf_map_update_elem(&hash_map, &key, &value, BPF_NOEXIST);
+```
+
+If a helper you need is missing, ADD it to `bpf-rs-core/src/helpers.rs`
+following the existing `thunk!` pattern (IDs: include/uapi/linux/bpf.h FN
+macros) — append-only; never change existing signatures.
 
 ## kfuncs
 
@@ -159,12 +167,30 @@ struct task_struct { pid: i32 }
 let pid = *unsafe { &*tsk }.pid().get().unwrap();
 ```
 
+## Volatile / ctx field access
+
+Where C uses `volatile` (narrow ctx loads, cb[] stepping), use the crate's
+place-expression macros — they keep every access separate and
+correctly-sized (the verifier rewrites each ctx load individually):
+
+```rust
+use bpf_rs_core::{vload, vload_as, vstore};
+
+let full = vload!((*skb).len);            // volatile u32 load
+let low  = vload_as!((*skb).len, u8);     // volatile narrow load
+vstore!((*skb).mark, v.wrapping_add(1));  // volatile store
+```
+
+C's `__sink(x)` compiler barriers: `helpers::sink(&mut ptr)` (forces a
+stack buffer to materialize), `helpers::sink_val(v)` (consumes a value in
+a register, keeps dead-arg-elim from dropping a function argument).
+
 ## Things that break and why
 
 - Wrong int types in comparisons: C promotes/truncates implicitly; be
   explicit with `as` casts, matching C semantics bit-for-bit.
-- LLVM merging loads the C kept separate: use `core::ptr::read_volatile`
-  wherever C used `volatile`.
+- LLVM merging loads the C kept separate: use `vload!`/`vstore!` wherever
+  C used `volatile`.
 - Reachable panics (slice indexing, unwrap): verifier sees the loop{} —
   rejected. Use get()/pointer arithmetic.
 - Extra/missing global symbols vs the C object: the build derives the
@@ -172,6 +198,10 @@ let pid = *unsafe { &*tsk }.pid().get().unwrap();
   your Rust must define all of them with matching names.
 - Never name a helper wrapper the same as a real kfunc/extern unless you
   mean a relocated call.
+- `__failure`/`__msg` negative verifier tests are untranslatable as
+  negative tests: rustc cannot emit BTF_KIND_DECL_TAG, so test_loader
+  defaults to expect-success. Keep the program structure but make it load
+  (see test_global_func1.rs), or classify the program as blocked.
 
 ## Build & validate
 

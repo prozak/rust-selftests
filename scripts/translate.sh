@@ -74,9 +74,12 @@ Then iterate until done:
   the C original — read the log, fix progs/${NAME}.rs, re-run.
 
 Hard rules:
-- Only create/modify progs/${NAME}.rs. Never modify the C sources, the
-  Makefile, scripts/, TRANSLATING.md, other translations, or anything in
-  the kernel tree.
+- Only create/modify progs/${NAME}.rs. The single exception: you may
+  APPEND new helper thunks to bpf-rs-core/src/helpers.rs (following its
+  existing thunk! pattern) when a helper you need is missing — never
+  change existing crate items. Never modify the C sources, the Makefile,
+  scripts/, TRANSLATING.md, other translations, or anything in the
+  kernel tree.
 - Do not run 'make restore-*' or git commands.
 - When 'make test-${NAME}' passes, print TRANSLATION-OK as your last line.
   If you conclude you cannot make it pass, print TRANSLATION-FAIL and a

@@ -27,7 +27,9 @@ cd "${REPO}"
 PROGS=("$@")
 [ "${#PROGS[@]}" -gt 0 ] || PROGS=($(ls progs/*.rs | xargs -n1 basename | sed 's/\.rs$//'))
 
-BENCH="bench/${MODEL_ID}"
+# BENCH_TAG overrides the results directory name (e.g. to bench the same
+# model against a changed prompt/canon without appending to old results).
+BENCH="bench/${BENCH_TAG:-${MODEL_ID}}"
 mkdir -p "${BENCH}"
 RESULTS="${BENCH}/results.md"
 [ -f "${RESULTS}" ] || {

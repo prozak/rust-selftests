@@ -1,7 +1,8 @@
 #![no_std]
 #![no_main]
 
-// Direct translation of tools/testing/selftests/bpf/progs/htab_update.c.
+// Direct translation of tools/testing/selftests/bpf/progs/htab_update.c,
+// bpf-rs-core idiom.
 //
 // The map value embeds struct bpf_timer: the kernel recognizes the field
 // purely by the member's BTF struct name ("bpf_timer") and size (16), so
@@ -9,6 +10,10 @@
 // timer field is what routes a replace-update of the old element through
 // bpf_obj_cancel_fields(), where the fentry program re-enters
 // bpf_map_update_elem() and observes -EDEADLK.
+
+use bpf_rs_core::bpf_object;
+use bpf_rs_core::helpers::{bpf_get_current_pid_tgid, bpf_map_update_elem};
+use bpf_rs_core::maps::{self, BpfMap};
 
 // struct bpf_timer { __u64 __opaque[2]; } __attribute__((aligned(8)));
 #[allow(non_camel_case_types)]
@@ -24,24 +29,9 @@ struct val {
     payload: u64,
 }
 
-#[allow(non_camel_case_types)]
-#[repr(C)]
-struct htab_def {
-    r#type: *const [i32; 1], // BPF_MAP_TYPE_HASH = 1
-    max_entries: *const [i32; 1],
-    key: *const u32,
-    value: *const val,
-}
-unsafe impl Sync for htab_def {}
-
 #[link_section = ".maps"]
 #[no_mangle]
-static htab: htab_def = htab_def {
-    r#type: core::ptr::null(),
-    max_entries: core::ptr::null(),
-    key: core::ptr::null(),
-    value: core::ptr::null(),
-};
+static htab: BpfMap<u32, val, { maps::HASH }, 1> = BpfMap::new();
 
 #[no_mangle]
 static mut pid: i32 = 0;
@@ -49,28 +39,6 @@ static mut pid: i32 = 0;
 static mut update_err: i32 = 0;
 
 const BPF_ANY: u64 = 0;
-
-#[inline(always)]
-fn bpf_get_current_pid_tgid() -> u64 {
-    let f: extern "C" fn() -> u64 = unsafe { core::mem::transmute(14usize) };
-    f()
-}
-
-#[inline(always)]
-fn bpf_map_update_elem<K, V>(map: *const htab_def, key: &K, value: &V, flags: u64) -> i64 {
-    let f: extern "C" fn(
-        *const htab_def,
-        *const core::ffi::c_void,
-        *const core::ffi::c_void,
-        u64,
-    ) -> i64 = unsafe { core::mem::transmute(2usize) };
-    f(
-        map,
-        key as *const K as *const core::ffi::c_void,
-        value as *const V as *const core::ffi::c_void,
-        flags,
-    )
-}
 
 #[link_section = "?fentry/bpf_obj_cancel_fields"]
 #[no_mangle]
@@ -89,11 +57,4 @@ extern "C" fn bpf_obj_cancel_fields(_ctx: *const core::ffi::c_void) -> i32 {
     0
 }
 
-#[link_section = "license"]
-#[no_mangle]
-static _license: [u8; 4] = *b"GPL\0";
-
-#[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
+bpf_object!("GPL");

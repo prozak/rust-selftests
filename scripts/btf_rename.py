@@ -12,9 +12,17 @@ Strings are appended to the BTF string table (offsets of existing strings
 never change, so .BTF.ext line-info references stay valid) and the .BTF
 section is rewritten in place via llvm-objcopy.
 
+Additionally, sanitize type names that are not valid BTF identifiers: the
+kernel rejects the whole .BTF blob (-EINVAL at load, libbpf then silently
+drops BTF) if any named type contains characters outside [A-Za-z0-9_].
+Rust generics reach BTF as e.g. "BpfMap<u32, val, 1, 1>"; type names of
+map-def structs are not load-bearing, so they are rewritten to
+"BpfMap_u32__val__1__1_". Names that are already valid are never touched.
+
 Usage: btf_rename.py <obj.o> <llvm-objcopy>
 """
 
+import re
 import struct
 import subprocess
 import sys
@@ -73,24 +81,34 @@ def main(path, objcopy):
             new_strings.extend(name.encode() + b"\0")
         return appended[name]
 
+    valid_ident = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
     pos = types_base
     end = types_base + type_len
     renamed = 0
+    sanitized = 0
     while pos < end:
         name_off, info, _ = struct.unpack_from("<III", data, pos)
         kind = (info >> 24) & 0x1F
         vlen = info & 0xFFFF
-        if kind == BTF_KIND_INT and name_off:
+        if name_off:
             name = get_str(name_off)
-            if name in RENAME:
+            if kind == BTF_KIND_INT and name in RENAME:
                 struct.pack_into("<I", data, pos, intern(RENAME[name]))
                 renamed += 1
+            # DATASEC (15) names are section names (".maps", ".bss", ...):
+            # the kernel validates those with section-name rules, dots are
+            # legal and load-bearing for libbpf — never touch them.
+            elif kind != 15 and not valid_ident.match(name):
+                struct.pack_into(
+                    "<I", data, pos, intern(re.sub(r"[^A-Za-z0-9_]", "_", name)))
+                sanitized += 1
         extra = FIXED_EXTRA.get(kind)
         if extra is None:
             extra = vlen * PER_VLEN[kind]
         pos += 12 + extra
 
-    if not renamed:
+    if not renamed and not sanitized:
         return
 
     # string table is the last section in the .BTF blob; append and fix str_len
@@ -104,7 +122,7 @@ def main(path, objcopy):
         subprocess.check_call(
             [objcopy, f"--update-section=.BTF={raw}", path])
     print(f"[btf_rename] {os.path.basename(path)}: "
-          f"renamed {renamed} int type(s)")
+          f"renamed {renamed} int type(s), sanitized {sanitized} name(s)")
 
 
 if __name__ == "__main__":

@@ -2,18 +2,10 @@
 #![no_main]
 
 // Direct translation of tools/testing/selftests/bpf/progs/fentry_test.c
-// (bpf-next 520d7d79) to Rust, compiled straight to BPF by upstream
-// rustc/LLVM — no aya, no bpf-linker.
-//
-// An fentry program's ctx is an array of u64 slots, one per argument of
-// the attach target; the verifier types each ctx[i] load from the
-// target's BTF proto. arg_i::<T>(ctx, i) mirrors C's BPF_PROG macro:
-// read slot i, truncate to the target arg's type.
+// (bpf-next 520d7d79), bpf-rs-core idiom.
 
-#[inline(always)]
-fn arg(ctx: *const u64, i: usize) -> u64 {
-    unsafe { *ctx.add(i) }
-}
+use bpf_rs_core::bpf_object;
+use bpf_rs_core::progs::fentry_arg as arg;
 
 #[no_mangle]
 static mut test1_result: u64 = 0;
@@ -125,11 +117,4 @@ extern "C" fn test8(ctx: *const u64) -> i32 {
     0
 }
 
-#[link_section = "license"]
-#[no_mangle]
-static _license: [u8; 4] = *b"GPL\0";
-
-#[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
+bpf_object!("GPL");

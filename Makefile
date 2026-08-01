@@ -74,13 +74,24 @@ $(BLDDIR)/%.keep: $(SELFTESTS_OUTPUT)/%.bpf.o.corig
 $(SELFTESTS_OUTPUT)/%.bpf.o.corig:
 	cp $(SELFTESTS_OUTPUT)/$*.bpf.o $@
 
+# --- Support crate: header-only by construction (macros/generics/inline),
+# --- so its bodies monomorphize into each program's bitcode and the
+# --- link/postproc pipeline is unchanged.
+$(BLDDIR)/libbpf_rs_core.rlib: $(wildcard bpf-rs-core/src/*.rs)
+	@mkdir -p $(BLDDIR)
+	$(RUSTFLAGS_ENV) $(RUSTC) --edition 2021 --crate-type rlib $(RUSTC_COMMON) \
+		--sysroot=/dev/null -L$(DEPDIR) \
+		--crate-name bpf_rs_core \
+		-o $@ bpf-rs-core/src/lib.rs
+
 # --- Rust -> LLVM bitcode ---
-$(BLDDIR)/%.bc: progs/%.rs
+$(BLDDIR)/%.bc: progs/%.rs $(BLDDIR)/libbpf_rs_core.rlib
 	@mkdir -p $(BLDDIR)
 	$(RUSTFLAGS_ENV) $(RUSTC) --edition 2021 --crate-type rlib $(RUSTC_COMMON) \
 		--sysroot=/dev/null -L$(DEPDIR) \
 		--extern btf=$(DEPDIR)/libbtf.rlib \
 		--extern btf_macros=$(BTF_MACROS) \
+		--extern bpf_rs_core=$(BLDDIR)/libbpf_rs_core.rlib \
 		-Zcrate-attr='feature(alloc_error_handler)' \
 		--crate-name $* \
 		--emit=llvm-bc -o $@ $<

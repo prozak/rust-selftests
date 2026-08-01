@@ -2,79 +2,39 @@
 #![no_main]
 
 // Direct translation of
-// tools/testing/selftests/bpf/progs/test_pinning.c.
+// tools/testing/selftests/bpf/progs/test_pinning.c, bpf-rs-core idiom.
 //
 // Maps-only object: no programs, just three map definitions whose BTF
 // drives libbpf's auto-pinning logic (prog_tests/pinning.c is the
 // consumer). `__uint(pinning, V)` is encoded like any other __uint:
-// a `int (*)[V]` member — LIBBPF_PIN_BY_NAME = 1, LIBBPF_PIN_NONE = 0.
+// a `int (*)[V]` member — LIBBPF_PIN_BY_NAME = 1, LIBBPF_PIN_NONE = 0,
+// so pinmap/nopinmap2 need the bpf_map! escape hatch.
 
-#[allow(non_camel_case_types)]
-#[repr(C)]
-struct pinmap_def {
-    r#type: *const [i32; 2], // BPF_MAP_TYPE_ARRAY = 2
-    max_entries: *const [i32; 1],
-    key: *const u32,
-    value: *const u64,
-    pinning: *const [i32; 1], // LIBBPF_PIN_BY_NAME = 1
+use bpf_rs_core::maps::{self, BpfMap};
+use bpf_rs_core::{bpf_map, bpf_object};
+
+bpf_map! {
+    pinmap {
+        r#type: *const [i32; 2], // BPF_MAP_TYPE_ARRAY = 2
+        max_entries: *const [i32; 1],
+        key: *const u32,
+        value: *const u64,
+        pinning: *const [i32; 1], // LIBBPF_PIN_BY_NAME = 1
+    }
 }
-unsafe impl Sync for pinmap_def {}
 
 #[link_section = ".maps"]
 #[no_mangle]
-static pinmap: pinmap_def = pinmap_def {
-    r#type: core::ptr::null(),
-    max_entries: core::ptr::null(),
-    key: core::ptr::null(),
-    value: core::ptr::null(),
-    pinning: core::ptr::null(),
-};
+static nopinmap: BpfMap<u32, u64, { maps::HASH }, 1> = BpfMap::new();
 
-#[allow(non_camel_case_types)]
-#[repr(C)]
-struct nopinmap_def {
-    r#type: *const [i32; 1], // BPF_MAP_TYPE_HASH = 1
-    max_entries: *const [i32; 1],
-    key: *const u32,
-    value: *const u64,
+bpf_map! {
+    nopinmap2 {
+        r#type: *const [i32; 1], // BPF_MAP_TYPE_HASH = 1
+        max_entries: *const [i32; 1],
+        key: *const u32,
+        value: *const u64,
+        pinning: *const [i32; 0], // LIBBPF_PIN_NONE = 0
+    }
 }
-unsafe impl Sync for nopinmap_def {}
 
-#[link_section = ".maps"]
-#[no_mangle]
-static nopinmap: nopinmap_def = nopinmap_def {
-    r#type: core::ptr::null(),
-    max_entries: core::ptr::null(),
-    key: core::ptr::null(),
-    value: core::ptr::null(),
-};
-
-#[allow(non_camel_case_types)]
-#[repr(C)]
-struct nopinmap2_def {
-    r#type: *const [i32; 1], // BPF_MAP_TYPE_HASH = 1
-    max_entries: *const [i32; 1],
-    key: *const u32,
-    value: *const u64,
-    pinning: *const [i32; 0], // LIBBPF_PIN_NONE = 0
-}
-unsafe impl Sync for nopinmap2_def {}
-
-#[link_section = ".maps"]
-#[no_mangle]
-static nopinmap2: nopinmap2_def = nopinmap2_def {
-    r#type: core::ptr::null(),
-    max_entries: core::ptr::null(),
-    key: core::ptr::null(),
-    value: core::ptr::null(),
-    pinning: core::ptr::null(),
-};
-
-#[link_section = "license"]
-#[no_mangle]
-static _license: [u8; 4] = *b"GPL\0";
-
-#[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
+bpf_object!("GPL");

@@ -93,10 +93,32 @@ ATTEMPT=1
 EXTRA=""
 while [ ${ATTEMPT} -le ${MAX_ATTEMPTS} ]; do
     echo "=== attempt ${ATTEMPT}/${MAX_ATTEMPTS} for ${NAME} ===" | tee -a "${LOG}"
-    ${CLAUDE_BIN} -p "${PROMPT_BASE}${EXTRA}" \
-        --allowedTools "Bash,Read,Write,Edit,Glob,Grep" \
-        ${MODEL:+--model "${MODEL}"} \
-        2>&1 | tee -a "${LOG}"
+    if [ -n "${TRANSLATE_JSON:-}" ]; then
+        # JSON result mode: capture per-invocation cost/turn metrics for
+        # benchmarking (bench.sh sums the AGENT-COST-USD lines).
+        RAW="bld/agent-${NAME}-attempt${ATTEMPT}.json"
+        ${CLAUDE_BIN} -p "${PROMPT_BASE}${EXTRA}" \
+            --allowedTools "Bash,Read,Write,Edit,Glob,Grep" \
+            ${MODEL:+--model "${MODEL}"} \
+            --output-format json > "${RAW}" 2>>"${LOG}"
+        python3 - "${RAW}" <<'EOF' | tee -a "${LOG}"
+import json, sys
+try:
+    r = json.load(open(sys.argv[1]))
+except Exception as e:
+    print(f"AGENT-COST-USD: 0 (unparseable result: {e})")
+    raise SystemExit
+print(r.get("result", ""))
+print(f"AGENT-COST-USD: {r.get('total_cost_usd', 0)} "
+      f"turns={r.get('num_turns', '?')} "
+      f"duration_ms={r.get('duration_ms', '?')}")
+EOF
+    else
+        ${CLAUDE_BIN} -p "${PROMPT_BASE}${EXTRA}" \
+            --allowedTools "Bash,Read,Write,Edit,Glob,Grep" \
+            ${MODEL:+--model "${MODEL}"} \
+            2>&1 | tee -a "${LOG}"
+    fi
 
     if gate; then
         echo "=== ${NAME}: ALL GATES PASS (attempt ${ATTEMPT}) ===" | tee -a "${LOG}"

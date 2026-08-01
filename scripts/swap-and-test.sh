@@ -80,12 +80,15 @@ if [ "${#SKELS[@]}" -gt 0 ]; then
         sfmake "${OUT}//${base}.test.o" > /dev/null
         [ -f "${OUT}/${base}.test.o" ] || { echo "failed to rebuild ${base}.test.o" >&2; exit 1; }
     done
-    [ "${#TESTS[@]}" -gt 0 ] || { echo "skeletons exist but no prog_tests consume them?" >&2; exit 1; }
-
-    rm -f "${OUT}/test_progs"
-    sfmake "${OUT}//test_progs" > /dev/null
-    [ -x "${OUT}/test_progs" ] || { echo "test_progs relink failed" >&2; exit 1; }
-    echo "[swap] test_progs relinked"
+    # The selftests build auto-generates skeletons for every prog; some tests
+    # ignore them and load the .bpf.o from disk instead, so an unconsumed
+    # skeleton is normal — fall through to runtime discovery.
+    if [ "${#TESTS[@]}" -gt 0 ]; then
+        rm -f "${OUT}/test_progs"
+        sfmake "${OUT}//test_progs" > /dev/null
+        [ -x "${OUT}/test_progs" ] || { echo "test_progs relink failed" >&2; exit 1; }
+        echo "[swap] test_progs relinked"
+    fi
 fi
 
 # Tests may also reference the object file by name and load it at runtime

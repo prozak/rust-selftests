@@ -28,12 +28,7 @@ CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 
 cd "${REPO}"
 
-KERNEL_SRC="${KERNEL_SRC:-$(make -s -f /dev/stdin <<'EOF'
-include Makefile
-print-kernel:
-	@echo $(KERNEL_SRC)
-EOF
-print-kernel 2>/dev/null || true)}"
+KERNEL_SRC="${KERNEL_SRC:-$(make -s echo-kernel-src)}"
 [ -n "${KERNEL_SRC}" ] || { echo "cannot resolve KERNEL_SRC" >&2; exit 1; }
 CSRC="${KERNEL_SRC}/tools/testing/selftests/bpf/progs/${NAME}.c"
 [ -f "${CSRC}" ] || { echo "no such selftest program: ${CSRC}" >&2; exit 1; }
@@ -49,8 +44,9 @@ gate() {
         make "$(pwd)/bld/${NAME}.bpf.o" && make "test-${NAME}"
     } > "${GATE_OUT}" 2>&1
     local rc=$?
-    if [ ${rc} -eq 0 ] && grep -qE "0 FAILED" "${GATE_OUT}" \
-        && grep -qE "Summary: [1-9][0-9]* PASSED" "${GATE_OUT}"; then
+    # test_progs prints "Summary: <passed>/<subtests> PASSED, ... <n> FAILED"
+    if [ ${rc} -eq 0 ] && grep -qE " 0 FAILED" "${GATE_OUT}" \
+        && grep -qE "Summary: [1-9][0-9]*(/[0-9]+)? PASSED" "${GATE_OUT}"; then
         return 0
     fi
     return 1
@@ -85,6 +81,13 @@ Hard rules:
 - When 'make test-${NAME}' passes, print TRANSLATION-OK as your last line.
   If you conclude you cannot make it pass, print TRANSLATION-FAIL and a
   one-paragraph reason."
+
+# Existing translation that already passes needs no agent at all.
+if [ -f "progs/${NAME}.rs" ] && gate; then
+    echo "=== ${NAME}: existing translation passes all gates ===" | tee -a "${LOG}"
+    grep -E "affected tests|Summary" "${GATE_OUT}" | tail -3 || true
+    exit 0
+fi
 
 ATTEMPT=1
 EXTRA=""

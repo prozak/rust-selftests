@@ -139,6 +139,9 @@ test-%: $(BLDDIR)/%.bpf.o
 restore-%:
 	scripts/swap-and-test.sh $* c
 
+echo-kernel-src:
+	@echo $(KERNEL_SRC)
+
 status:
 	@total=$$(ls $(SELFTESTS_SRC)/progs/*.c | wc -l); \
 	done=$$(ls progs/*.rs 2>/dev/null | wc -l); \

@@ -59,10 +59,13 @@ for NAME in "${PROGS[@]}"; do
     rm -f "progs/${NAME}.rs"
     mv "bench/.stash-${NAME}.rs" "progs/${NAME}.rs"
     rm -f bld/${NAME}.* bld/${NAME}-*.bc
+    # raw per-attempt cost JSONs (TRANSLATE_JSON mode) survive the bld
+    # cleanup pattern above and would be clobbered by the next bench run
+    mv bld/agent-"${NAME}"-attempt*.json "${BENCH}/" 2>/dev/null || true
 
     # restore pristine C object + skeletons; re-runs affected tests as a
     # restoration check (failure here is a harness problem, not the model's)
-    if ! scripts/swap-and-test.sh "${NAME}" c > "${BENCH}/${NAME}.restore.log" 2>&1; then
+    if ! make "restore-${NAME}" > "${BENCH}/${NAME}.restore.log" 2>&1; then
         echo "WARNING: C-restore for ${NAME} failed, see ${BENCH}/${NAME}.restore.log" >&2
     fi
 

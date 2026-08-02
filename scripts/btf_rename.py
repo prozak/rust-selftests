@@ -9,8 +9,10 @@ types makes Rust-built objects indistinguishable from clang-built ones at
 the skeleton level.
 
 Strings are appended to the BTF string table (offsets of existing strings
-never change, so .BTF.ext line-info references stay valid) and the .BTF
-section is rewritten in place via llvm-objcopy.
+never change, so .BTF.ext line-info references stay valid) and the grown
+.BTF payload is appended at EOF with its section header repointed — never
+via llvm-objcopy --update-section, whose section-table rewrite corrupts
+.rel.BTF's sh_info nondeterministically.
 
 Additionally, sanitize type names that are not valid BTF identifiers: the
 kernel rejects the whole .BTF blob (-EINVAL at load, libbpf then silently
@@ -19,15 +21,13 @@ Rust generics reach BTF as e.g. "BpfMap<u32, val, 1, 1>"; type names of
 map-def structs are not load-bearing, so they are rewritten to
 "BpfMap_u32__val__1__1_". Names that are already valid are never touched.
 
-Usage: btf_rename.py <obj.o> <llvm-objcopy>
+Usage: btf_rename.py <obj.o>
 """
 
+import os
 import re
 import struct
-import subprocess
 import sys
-import tempfile
-import os
 
 RENAME = {
     "u8": "unsigned char",
@@ -55,11 +55,41 @@ FIXED_EXTRA[5] = None
 PER_VLEN[5] = 12
 
 
-def main(path, objcopy):
-    with tempfile.TemporaryDirectory() as td:
-        raw = os.path.join(td, "btf.bin")
-        subprocess.check_call([objcopy, "--dump-section", f".BTF={raw}", path])
-        data = bytearray(open(raw, "rb").read())
+# --- Minimal ELF64-LE section access -----------------------------------
+#
+# llvm-objcopy's --update-section nondeterministically corrupts the
+# rewritten .rel.BTF section header's sh_info (reproduced on
+# cgroup_iter_memcg, originally seen on stacktrace_map). ELF section data
+# need not be contiguous or ordered, so growing a section safely is just:
+# append the new payload at EOF and patch that one section header's
+# sh_offset/sh_size — nothing else in the file moves.
+
+def elf_find_section(buf, want):
+    assert buf[:4] == b"\x7fELF" and buf[4] == 2 and buf[5] == 1, \
+        "not an ELF64-LE object"
+    (e_shoff,) = struct.unpack_from("<Q", buf, 0x28)
+    e_shentsize, e_shnum, e_shstrndx = struct.unpack_from("<HHH", buf, 0x3A)
+
+    def shdr(i):
+        base = e_shoff + i * e_shentsize
+        sh_name, = struct.unpack_from("<I", buf, base)
+        sh_offset, sh_size = struct.unpack_from("<QQ", buf, base + 24)
+        sh_addralign, = struct.unpack_from("<Q", buf, base + 48)
+        return base, sh_name, sh_offset, sh_size, sh_addralign
+
+    _, _, stroff, _, _ = shdr(e_shstrndx)
+    for i in range(e_shnum):
+        base, sh_name, sh_offset, sh_size, sh_addralign = shdr(i)
+        end = buf.index(b"\0", stroff + sh_name)
+        if buf[stroff + sh_name:end].decode() == want:
+            return base, sh_offset, sh_size, sh_addralign
+    raise KeyError(f"no section {want}")
+
+
+def main(path, objcopy=None):
+    buf = bytearray(open(path, "rb").read())
+    shdr_base, btf_off, btf_size, btf_align = elf_find_section(buf, ".BTF")
+    data = bytearray(buf[btf_off:btf_off + btf_size])
 
     magic, version, flags, hdr_len, type_off, type_len, str_off, str_len = \
         struct.unpack_from("<HBBIIIII", data, 0)
@@ -118,14 +148,17 @@ def main(path, objcopy):
     data.extend(new_strings)
     struct.pack_into("<I", data, 20, str_len + len(new_strings))
 
-    with tempfile.TemporaryDirectory() as td:
-        raw = os.path.join(td, "btf.bin")
-        open(raw, "wb").write(data)
-        subprocess.check_call(
-            [objcopy, f"--update-section=.BTF={raw}", path])
+    # Append the grown .BTF at EOF (aligned) and repoint its header.
+    align = max(btf_align, 1)
+    pad = (-len(buf)) % align
+    new_off = len(buf) + pad
+    buf.extend(b"\0" * pad)
+    buf.extend(data)
+    struct.pack_into("<QQ", buf, shdr_base + 24, new_off, len(data))
+    open(path, "wb").write(buf)
     print(f"[btf_rename] {os.path.basename(path)}: "
           f"renamed {renamed} int type(s), sanitized {sanitized} name(s)")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)

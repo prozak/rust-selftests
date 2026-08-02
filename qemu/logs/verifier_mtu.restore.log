@@ -1,0 +1,2594 @@
+#586/1   verifier_align/mov:OK
+#586/2   verifier_align/shift:OK
+#586/3   verifier_align/addsub:OK
+#586/4   verifier_align/mul:OK
+#586/5   verifier_align/unknown_shift:OK
+#586/6   verifier_align/unknown_mul:OK
+#586/7   verifier_align/packet_const_offset:OK
+#586/8   verifier_align/packet_variable_offset:OK
+#586/9   verifier_align/packet_variable_offset_2:OK
+#586/10  verifier_align/dubious_pointer_arithmetic:OK
+#586/11  verifier_align/variable_subtraction:OK
+#586/12  verifier_align/pointer_variable_subtraction:OK
+#586     verifier_align:OK
+#587/1   verifier_and/invalid and of negative number:OK
+#587/2   verifier_and/invalid and of negative number @unpriv:OK
+#587/3   verifier_and/invalid range check:OK
+#587/4   verifier_and/invalid range check @unpriv:OK
+#587/5   verifier_and/check known subreg with unknown reg:OK
+#587/6   verifier_and/check known subreg with unknown reg @unpriv:OK
+#587     verifier_and:OK
+#588/1   verifier_arena/basic_alloc1_nosleep:OK
+#588/2   verifier_arena/basic_alloc2_nosleep:OK
+#588/3   verifier_arena/basic_alloc3_nosleep:OK
+#588/4   verifier_arena/basic_reserve1_nosleep:OK
+#588/5   verifier_arena/basic_reserve2_nosleep:OK
+#588/6   verifier_arena/reserve_twice_nosleep:OK
+#588/7   verifier_arena/reserve_invalid_region_nosleep:OK
+#588/8   verifier_arena/basic_alloc1:OK
+#588/9   verifier_arena/basic_alloc2:OK
+#588/10  verifier_arena/basic_alloc3:OK
+#588/11  verifier_arena/basic_reserve1:OK
+#588/12  verifier_arena/basic_reserve2:OK
+#588/13  verifier_arena/reserve_twice:OK
+#588/14  verifier_arena/reserve_invalid_region:OK
+#588/15  verifier_arena/arena_kfuncs_under_bpf_lock:OK
+#588/16  verifier_arena/scalar_add_arena_ptr:OK
+#588/17  verifier_arena/arena_ptr_add_arena_ptr:OK
+#588/18  verifier_arena/scalar_xor_arena_ptr:OK
+#588/19  verifier_arena/arena_ptr_add_to_non_arena_ptr:OK
+#588/20  verifier_arena/non_arena_ptr_add_to_arena_ptr:OK
+#588/21  verifier_arena/check_arena_arg_ret:OK
+#588/22  verifier_arena/iter_maps1:OK
+#588/23  verifier_arena/iter_maps2:OK
+#588/24  verifier_arena/iter_maps3:OK
+#588     verifier_arena:OK
+#589/1   verifier_arena_globals1/check_reserve1:OK
+#589/2   verifier_arena_globals1/check_relocation:OK
+#589     verifier_arena_globals1:OK
+#590/1   verifier_arena_globals2/check_reserve2:OK
+#590     verifier_arena_globals2:OK
+#591/1   verifier_arena_large/big_alloc1:OK
+#591/2   verifier_arena_large/access_reserved:OK
+#591/3   verifier_arena_large/request_partially_reserved:OK
+#591/4   verifier_arena_large/free_reserved:OK
+#591/5   verifier_arena_large/big_alloc2:OK
+#591/6   verifier_arena_large/big_alloc3:OK
+#591     verifier_arena_large:OK
+#592/1   verifier_array_access/valid map access into an array with a constant:OK
+#592/2   verifier_array_access/valid map access into an array with a constant @unpriv:OK
+#592/3   verifier_array_access/valid map access into an array with a register:OK
+#592/4   verifier_array_access/valid map access into an array with a register @unpriv:OK
+#592/5   verifier_array_access/valid map access into an array with a variable:OK
+#592/6   verifier_array_access/valid map access into an array with a variable @unpriv:OK
+#592/7   verifier_array_access/valid map access into an array with a signed variable:OK
+#592/8   verifier_array_access/valid map access into an array with a signed variable @unpriv:OK
+#592/9   verifier_array_access/invalid map access into an array with a constant:OK
+#592/10  verifier_array_access/invalid map access into an array with a constant @unpriv:OK
+#592/11  verifier_array_access/invalid map access into an array with a register:OK
+#592/12  verifier_array_access/invalid map access into an array with a register @unpriv:OK
+#592/13  verifier_array_access/invalid map access into an array with a variable:OK
+#592/14  verifier_array_access/invalid map access into an array with a variable @unpriv:OK
+#592/15  verifier_array_access/invalid map access into an array with no floor check:OK
+#592/16  verifier_array_access/invalid map access into an array with no floor check @unpriv:OK
+#592/17  verifier_array_access/invalid map access into an array with a invalid max check:OK
+#592/18  verifier_array_access/invalid map access into an array with a invalid max check @unpriv:OK
+#592/19  verifier_array_access/invalid map access into an array with a invalid max check:OK
+#592/20  verifier_array_access/invalid map access into an array with a invalid max check @unpriv:OK
+#592/21  verifier_array_access/valid read map access into a read-only array 1:OK
+#592/22  verifier_array_access/valid read map access into a read-only array 1 @unpriv:OK
+#592/23  verifier_array_access/invalid write map access into a read-only array 1:OK
+#592/24  verifier_array_access/invalid write map access into a read-only array 1 @unpriv:OK
+#592/25  verifier_array_access/valid write map access into a write-only array 1:OK
+#592/26  verifier_array_access/valid write map access into a write-only array 1 @unpriv:OK
+#592/27  verifier_array_access/invalid read map access into a write-only array 1:OK
+#592/28  verifier_array_access/invalid read map access into a write-only array 1 @unpriv:OK
+#592/29  verifier_array_access/valid map access into an array using constant without nullness:OK
+#592/30  verifier_array_access/valid multiple map access into an array using constant without nullness:OK
+#592/31  verifier_array_access/valid map access into an array using natural aligned 32-bit constant 0 without nullness:OK
+#592/32  verifier_array_access/valid map access into a pcpu array using constant without nullness:OK
+#592/33  verifier_array_access/invalid map access into an array using constant without nullness:OK
+#592/34  verifier_array_access/invalid map access into an array using constant smaller than key_size:OK
+#592/35  verifier_array_access/invalid map access into an array using constant larger than key_size:OK
+#592/36  verifier_array_access/invalid elided lookup using const and non-const key:OK
+#592/37  verifier_array_access/key_lookup_at_invalid_fp:OK
+#592/38  verifier_array_access/invalid elided lookup using non-stack key:OK
+#592/39  verifier_array_access/doesn't reject UINT64_MAX as s64 for irrelevant maps:OK
+#592/40  verifier_array_access/valid read map access into a read-only array 2:OK
+#592/41  verifier_array_access/invalid write map access into a read-only array 2:OK
+#592/42  verifier_array_access/valid write map access into a write-only array 2:OK
+#592/43  verifier_array_access/invalid read map access into a write-only array 2:OK
+#592     verifier_array_access:OK
+#593/1   verifier_async_cb_context/timer_non_sleepable_prog:OK
+#593/2   verifier_async_cb_context/wq_non_sleepable_prog:OK
+#593/3   verifier_async_cb_context/task_work_non_sleepable_prog:OK
+#593/4   verifier_async_cb_context/timer_sleepable_prog:OK
+#593/5   verifier_async_cb_context/wq_sleepable_prog:OK
+#593/6   verifier_async_cb_context/task_work_sleepable_prog:OK
+#593     verifier_async_cb_context:OK
+#594/1   verifier_basic_stack/stack out of bounds:OK
+#594/2   verifier_basic_stack/stack out of bounds @unpriv:OK
+#594/3   verifier_basic_stack/uninitialized stack1:OK
+#594/4   verifier_basic_stack/uninitialized stack1 @unpriv:OK
+#594/5   verifier_basic_stack/uninitialized stack2:OK
+#594/6   verifier_basic_stack/uninitialized stack2 @unpriv:OK
+#594/7   verifier_basic_stack/invalid fp arithmetic:OK
+#594/8   verifier_basic_stack/invalid fp arithmetic @unpriv:OK
+#594/9   verifier_basic_stack/non-invalid fp arithmetic:OK
+#594/10  verifier_basic_stack/non-invalid fp arithmetic @unpriv:OK
+#594/11  verifier_basic_stack/misaligned read from stack:OK
+#594/12  verifier_basic_stack/misaligned read from stack @unpriv:OK
+#594     verifier_basic_stack:OK
+#595/1   verifier_bitfield_write/single CO-RE bitfield roundtrip:OK
+#595/2   verifier_bitfield_write/multiple CO-RE bitfield roundtrip:OK
+#595/3   verifier_bitfield_write/adjacent CO-RE bitfield roundtrip:OK
+#595/4   verifier_bitfield_write/multibyte CO-RE bitfield roundtrip:OK
+#595     verifier_bitfield_write:OK
+#596/1   verifier_bits_iter/bits iter without destroy:OK
+#596/2   verifier_bits_iter/uninitialized iter in ->next():OK
+#596/3   verifier_bits_iter/uninitialized iter in ->destroy():OK
+#596/4   verifier_bits_iter/null pointer:OK
+#596/5   verifier_bits_iter/bits copy:OK
+#596/6   verifier_bits_iter/bits memalloc:OK
+#596/7   verifier_bits_iter/bit index:OK
+#596/8   verifier_bits_iter/bits too big:OK
+#596/9   verifier_bits_iter/fewer words:OK
+#596/10  verifier_bits_iter/zero words:OK
+#596/11  verifier_bits_iter/huge words:OK
+#596/12  verifier_bits_iter/max words:OK
+#596/13  verifier_bits_iter/bad words:OK
+#596     verifier_bits_iter:OK
+#597/1   verifier_bounds/subtraction bounds (map value) variant 1:OK
+#597/2   verifier_bounds/subtraction bounds (map value) variant 1 @unpriv:OK
+#597/3   verifier_bounds/subtraction bounds (map value) variant 2:OK
+#597/4   verifier_bounds/subtraction bounds (map value) variant 2 @unpriv:OK
+#597/5   verifier_bounds/check subtraction on pointers for unpriv:OK
+#597/6   verifier_bounds/check subtraction on pointers for unpriv @unpriv:OK
+#597/7   verifier_bounds/bounds check based on zero-extended MOV:OK
+#597/8   verifier_bounds/bounds check based on zero-extended MOV @unpriv:OK
+#597/9   verifier_bounds/bounds check based on sign-extended MOV. test1:OK
+#597/10  verifier_bounds/bounds check based on sign-extended MOV. test1 @unpriv:OK
+#597/11  verifier_bounds/bounds check based on sign-extended MOV. test2:OK
+#597/12  verifier_bounds/bounds check based on sign-extended MOV. test2 @unpriv:OK
+#597/13  verifier_bounds/bounds check after truncation of non-boundary-crossing range:OK
+#597/14  verifier_bounds/bounds check after truncation of non-boundary-crossing range @unpriv:OK
+#597/15  verifier_bounds/bounds check after truncation of boundary-crossing range (1):OK
+#597/16  verifier_bounds/bounds check after truncation of boundary-crossing range (1) @unpriv:OK
+#597/17  verifier_bounds/bounds check after truncation of boundary-crossing range (2):OK
+#597/18  verifier_bounds/bounds check after truncation of boundary-crossing range (2) @unpriv:OK
+#597/19  verifier_bounds/bounds check after wrapping 32-bit addition:OK
+#597/20  verifier_bounds/bounds check after wrapping 32-bit addition @unpriv:OK
+#597/21  verifier_bounds/bounds check after shift with oversized count operand:OK
+#597/22  verifier_bounds/bounds check after shift with oversized count operand @unpriv:OK
+#597/23  verifier_bounds/bounds check after right shift of maybe-negative number:OK
+#597/24  verifier_bounds/bounds check after right shift of maybe-negative number @unpriv:OK
+#597/25  verifier_bounds/bounds check after 32-bit right shift with 64-bit input:OK
+#597/26  verifier_bounds/bounds check after 32-bit right shift with 64-bit input @unpriv:OK
+#597/27  verifier_bounds/bounds check map access with off+size signed 32bit overflow. test1:OK
+#597/28  verifier_bounds/bounds check map access with off+size signed 32bit overflow. test1 @unpriv:OK
+#597/29  verifier_bounds/bounds check map access with off+size signed 32bit overflow. test2:OK
+#597/30  verifier_bounds/bounds check map access with off+size signed 32bit overflow. test2 @unpriv:OK
+#597/31  verifier_bounds/bounds check map access with off+size signed 32bit overflow. test3:OK
+#597/32  verifier_bounds/bounds check map access with off+size signed 32bit overflow. test3 @unpriv:OK
+#597/33  verifier_bounds/bounds check map access with off+size signed 32bit overflow. test4:OK
+#597/34  verifier_bounds/bounds check map access with off+size signed 32bit overflow. test4 @unpriv:OK
+#597/35  verifier_bounds/bounds check mixed 32bit and 64bit arithmetic. test1:OK
+#597/36  verifier_bounds/bounds check mixed 32bit and 64bit arithmetic. test1 @unpriv:OK
+#597/37  verifier_bounds/bounds check mixed 32bit and 64bit arithmetic. test2:OK
+#597/38  verifier_bounds/bounds check mixed 32bit and 64bit arithmetic. test2 @unpriv:OK
+#597/39  verifier_bounds/bounds check for reg = 0, reg xor 1:OK
+#597/40  verifier_bounds/bounds check for reg = 0, reg xor 1 @unpriv:OK
+#597/41  verifier_bounds/bounds check for reg32 = 0, reg32 xor 1:OK
+#597/42  verifier_bounds/bounds check for reg32 = 0, reg32 xor 1 @unpriv:OK
+#597/43  verifier_bounds/bounds check for reg = 2, reg xor 3:OK
+#597/44  verifier_bounds/bounds check for reg = 2, reg xor 3 @unpriv:OK
+#597/45  verifier_bounds/bounds check for reg = any, reg xor 3:OK
+#597/46  verifier_bounds/bounds check for reg = any, reg xor 3 @unpriv:OK
+#597/47  verifier_bounds/bounds check for reg32 = any, reg32 xor 3:OK
+#597/48  verifier_bounds/bounds check for reg32 = any, reg32 xor 3 @unpriv:OK
+#597/49  verifier_bounds/bounds check for reg > 0, reg xor 3:OK
+#597/50  verifier_bounds/bounds check for reg > 0, reg xor 3 @unpriv:OK
+#597/51  verifier_bounds/bounds check for reg32 > 0, reg32 xor 3:OK
+#597/52  verifier_bounds/bounds check for reg32 > 0, reg32 xor 3 @unpriv:OK
+#597/53  verifier_bounds/bounds check for non const xor src dst:OK
+#597/54  verifier_bounds/bounds check for non const or src dst:OK
+#597/55  verifier_bounds/bounds check for non const mul regs:OK
+#597/56  verifier_bounds/bounds checks after 32-bit truncation. test 1:OK
+#597/57  verifier_bounds/bounds checks after 32-bit truncation. test 1 @unpriv:OK
+#597/58  verifier_bounds/bounds checks after 32-bit truncation. test 2:OK
+#597/59  verifier_bounds/bounds checks after 32-bit truncation. test 2 @unpriv:OK
+#597/60  verifier_bounds/64-bit addition, all outcomes overflow:OK
+#597/61  verifier_bounds/64-bit addition, partial overflow, result in unbounded reg:OK
+#597/62  verifier_bounds/32-bit addition overflow, all outcomes overflow:OK
+#597/63  verifier_bounds/32-bit addition, partial overflow, result in unbounded u32 bounds:OK
+#597/64  verifier_bounds/64-bit subtraction, all outcomes underflow:OK
+#597/65  verifier_bounds/64-bit subtraction, partial overflow, result in unbounded reg:OK
+#597/66  verifier_bounds/32-bit subtraction overflow, all outcomes underflow:OK
+#597/67  verifier_bounds/32-bit subtraction, partial overflow, result in unbounded u32 bounds:OK
+#597/68  verifier_bounds/dead branch on jset, does not result in invariants violation error:OK
+#597/69  verifier_bounds/bounds deduction cross sign boundary, negative overlap:OK
+#597/70  verifier_bounds/bounds deduction cross sign boundary, positive overlap:OK
+#597/71  verifier_bounds/bounds deduction cross sign boundary, two overlaps:OK
+#597/72  verifier_bounds/dead jne branch due to disagreeing tnums:OK
+#597/73  verifier_bounds/dead jeq branch due to disagreeing tnums:OK
+#597/74  verifier_bounds/conditional jump on same register, branch taken:OK
+#597/75  verifier_bounds/jset on same register, constant value branch taken:OK
+#597/76  verifier_bounds/jset on same register, scalar value branch taken:OK
+#597/77  verifier_bounds/jset on same register, scalar value unknown branch 1:OK
+#597/78  verifier_bounds/jset on same register, scalar value unknown branch 2:OK
+#597/79  verifier_bounds/jset on same register, scalar value unknown branch 3:OK
+#597/80  verifier_bounds/bounds refinement with single-value tnum on umax:OK
+#597/81  verifier_bounds/bounds refinement with single-value tnum on umin:OK
+#597/82  verifier_bounds/bounds refinement with single-value tnum in middle of range:OK
+#597/83  verifier_bounds/bounds refinement: several overlaps between tnum and u64:OK
+#597/84  verifier_bounds/bounds refinement: multiple overlaps between tnum and u64:OK
+#597/85  verifier_bounds/signed_unsigned_intersection32_case1:OK
+#597/86  verifier_bounds/signed_unsigned_intersection32_case2:OK
+#597/87  verifier_bounds/bounds refinement: 64bits ranges not overwritten by 32bits ranges:OK
+#597/88  verifier_bounds/maybe_fork_scalars: OR with constant rejects OOB:OK
+#597/89  verifier_bounds/maybe_fork_scalars: AND with constant still works:OK
+#597/90  verifier_bounds/maybe_fork_scalars: OR with constant allows in-bounds:OK
+#597/91  verifier_bounds/dead branch: tnums give impossible constant if equal:OK
+#597/92  verifier_bounds/deduce64_from_32_before_block_start:OK
+#597/93  verifier_bounds/deduce64_from_32_wrapping_32bit:OK
+#597/94  verifier_bounds/range_within_cnum_cross_both_boundaries:OK
+#597/95  verifier_bounds/bounds check based on reg_off + var_off + insn_off. test1:OK
+#597/96  verifier_bounds/bounds check based on reg_off + var_off + insn_off. test2:OK
+#597/97  verifier_bounds/assigning 32bit bounds to 64bit for wA = 0, wB = wA:OK
+#597/98  verifier_bounds/bounds check with JMP_NE for reg edge:OK
+#597/99  verifier_bounds/bounds check with JMP_EQ for reg edge:OK
+#597/100 verifier_bounds/multiply mixed sign bounds. test 1:OK
+#597/101 verifier_bounds/multiply mixed sign bounds. test 2:OK
+#597/102 verifier_bounds/multiply negative bounds:OK
+#597/103 verifier_bounds/multiply bounds that don't cross signed boundary:OK
+#597/104 verifier_bounds/multiplication overflow, result in unbounded reg. test 1:OK
+#597/105 verifier_bounds/multiplication overflow, result in unbounded reg. test 2:OK
+#597/106 verifier_bounds/bound check with JMP_JLT for crossing 64-bit signed boundary:OK
+#597/107 verifier_bounds/bound check with JMP_JSLT for crossing 64-bit signed boundary:OK
+#597/108 verifier_bounds/bound check for loop upper bound greater than U32_MAX:OK
+#597/109 verifier_bounds/bound check with JMP32_JLT for crossing 32-bit signed boundary:OK
+#597/110 verifier_bounds/bound check with JMP32_JSLT for crossing 32-bit signed boundary:OK
+#597     verifier_bounds:OK
+#598/1   verifier_bounds_deduction/check deducing bounds from const, 1:OK
+#598/2   verifier_bounds_deduction/check deducing bounds from const, 1 @unpriv:OK
+#598/3   verifier_bounds_deduction/check deducing bounds from const, 2:OK
+#598/4   verifier_bounds_deduction/check deducing bounds from const, 2 @unpriv:OK
+#598/5   verifier_bounds_deduction/check deducing bounds from const, 3:OK
+#598/6   verifier_bounds_deduction/check deducing bounds from const, 3 @unpriv:OK
+#598/7   verifier_bounds_deduction/check deducing bounds from const, 4:OK
+#598/8   verifier_bounds_deduction/check deducing bounds from const, 4 @unpriv:OK
+#598/9   verifier_bounds_deduction/check deducing bounds from const, 5:OK
+#598/10  verifier_bounds_deduction/check deducing bounds from const, 5 @unpriv:OK
+#598/11  verifier_bounds_deduction/check deducing bounds from const, 6:OK
+#598/12  verifier_bounds_deduction/check deducing bounds from const, 6 @unpriv:OK
+#598/13  verifier_bounds_deduction/check deducing bounds from const, 7:OK
+#598/14  verifier_bounds_deduction/check deducing bounds from const, 7 @unpriv:OK
+#598/15  verifier_bounds_deduction/check deducing bounds from const, 8:OK
+#598/16  verifier_bounds_deduction/check deducing bounds from const, 8 @unpriv:OK
+#598/17  verifier_bounds_deduction/check deducing bounds from const, 9:OK
+#598/18  verifier_bounds_deduction/check deducing bounds from const, 9 @unpriv:OK
+#598/19  verifier_bounds_deduction/check deducing bounds from const, 10:OK
+#598/20  verifier_bounds_deduction/check deducing bounds from const, 10 @unpriv:OK
+#598     verifier_bounds_deduction:OK
+#599/1   verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp64, <non_const> == <const>, 1:OK
+#599/2   verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp64, <non_const> == <const>, 2:OK
+#599/3   verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp64, <non_const> != <const>, 1:OK
+#599/4   verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp64, <non_const> != <const>, 2:OK
+#599/5   verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp32, <non_const> == <const>, 1:OK
+#599/6   verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp32, <non_const> == <const>, 2:OK
+#599/7   verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp32, <non_const> != <const>, 1:OK
+#599/8   verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp32, <non_const> != <const>, 2:OK
+#599/9   verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp64, <const> > <non_const>, 1:OK
+#599/10  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp64, <const> > <non_const>, 2:OK
+#599/11  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp64, <const> >= <non_const>:OK
+#599/12  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp64, <const> < <non_const>:OK
+#599/13  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp64, <const> <= <non_const>:OK
+#599/14  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp64, <const> == <non_const>:OK
+#599/15  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp64, <const> s> <non_const>:OK
+#599/16  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp64, <const> s>= <non_const>:OK
+#599/17  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp64, <const> s< <non_const>:OK
+#599/18  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp64, <const> s<= <non_const>:OK
+#599/19  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp64, <const> != <non_const>:OK
+#599/20  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp32, <const> > <non_const>, 1:OK
+#599/21  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp32, <const> > <non_const>, 2:OK
+#599/22  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp32, <const> >= <non_const>:OK
+#599/23  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp32, <const> < <non_const>:OK
+#599/24  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp32, <const> <= <non_const>:OK
+#599/25  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp32, <const> == <non_const>:OK
+#599/26  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp32, <const> s> <non_const>:OK
+#599/27  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp32, <const> s>= <non_const>:OK
+#599/28  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp32, <const> s< <non_const>:OK
+#599/29  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp32, <const> s<= <non_const>:OK
+#599/30  verifier_bounds_deduction_non_const/check deducing bounds from non-const, jmp32, <const> != <non_const>:OK
+#599     verifier_bounds_deduction_non_const:OK
+#600/1   verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, positive bounds:OK
+#600/2   verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, positive bounds @unpriv:OK
+#600/3   verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned:OK
+#600/4   verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned @unpriv:OK
+#600/5   verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 2:OK
+#600/6   verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 2 @unpriv:OK
+#600/7   verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 3:OK
+#600/8   verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 3 @unpriv:OK
+#600/9   verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 4:OK
+#600/10  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 4 @unpriv:OK
+#600/11  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 5:OK
+#600/12  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 5 @unpriv:OK
+#600/13  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 6:OK
+#600/14  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 6 @unpriv:OK
+#600/15  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 7:OK
+#600/16  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 7 @unpriv:OK
+#600/17  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 8:OK
+#600/18  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 8 @unpriv:OK
+#600/19  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 9:OK
+#600/20  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 9 @unpriv:OK
+#600/21  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 10:OK
+#600/22  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 10 @unpriv:OK
+#600/23  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 11:OK
+#600/24  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 11 @unpriv:OK
+#600/25  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 12:OK
+#600/26  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 12 @unpriv:OK
+#600/27  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 13:OK
+#600/28  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 13 @unpriv:OK
+#600/29  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 14:OK
+#600/30  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 14 @unpriv:OK
+#600/31  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 15:OK
+#600/32  verifier_bounds_mix_sign_unsign/bounds checks mixing signed and unsigned, variant 15 @unpriv:OK
+#600     verifier_bounds_mix_sign_unsign:OK
+#601/1   verifier_bpf_fastcall/simple:OK
+#601/2   verifier_bpf_fastcall/canary_arm64_riscv64:SKIP
+#601/3   verifier_bpf_fastcall/canary_zero_spills:OK
+#601/4   verifier_bpf_fastcall/wrong_reg_in_pattern1:OK
+#601/5   verifier_bpf_fastcall/wrong_reg_in_pattern2:OK
+#601/6   verifier_bpf_fastcall/wrong_reg_in_pattern3:OK
+#601/7   verifier_bpf_fastcall/wrong_base_in_pattern:OK
+#601/8   verifier_bpf_fastcall/wrong_insn_in_pattern:OK
+#601/9   verifier_bpf_fastcall/wrong_off_in_pattern1:OK
+#601/10  verifier_bpf_fastcall/wrong_off_in_pattern2:OK
+#601/11  verifier_bpf_fastcall/wrong_size_in_pattern:OK
+#601/12  verifier_bpf_fastcall/partial_pattern:OK
+#601/13  verifier_bpf_fastcall/min_stack_offset:OK
+#601/14  verifier_bpf_fastcall/bad_fixed_read:OK
+#601/15  verifier_bpf_fastcall/bad_fixed_write:OK
+#601/16  verifier_bpf_fastcall/bad_varying_read:OK
+#601/17  verifier_bpf_fastcall/bad_varying_write:OK
+#601/18  verifier_bpf_fastcall/bad_write_in_subprog:OK
+#601/19  verifier_bpf_fastcall/bad_helper_write:OK
+#601/20  verifier_bpf_fastcall/invalidate_one_subprog:OK
+#601/21  verifier_bpf_fastcall/subprogs_use_independent_offsets:OK
+#601/22  verifier_bpf_fastcall/helper_call_does_not_prevent_bpf_fastcall:OK
+#601/23  verifier_bpf_fastcall/may_goto_interaction_x86_64:OK
+#601/24  verifier_bpf_fastcall/may_goto_interaction_arm64:SKIP
+#601/25  verifier_bpf_fastcall/bpf_loop_interaction1:OK
+#601/26  verifier_bpf_fastcall/bpf_loop_interaction2:OK
+#601/27  verifier_bpf_fastcall/cumulative_stack_depth:OK
+#601/28  verifier_bpf_fastcall/kfunc_bpf_rdonly_cast:OK
+#601/29  verifier_bpf_fastcall/kfunc_bpf_cast_to_kern_ctx:OK
+#601     verifier_bpf_fastcall:OK (SKIP: 2/29)
+#602/1   verifier_bpf_get_stack/bpf_get_stack return R0 within range:OK
+#602/2   verifier_bpf_get_stack/bpf_get_task_stack return R0 range is refined:OK
+#602     verifier_bpf_get_stack:OK
+#603/1   verifier_bpf_trap/__bpf_trap with simple c code:OK
+#603/2   verifier_bpf_trap/__bpf_trap as the second-from-last insn:OK
+#603/3   verifier_bpf_trap/dead code __bpf_trap in the middle of code:OK
+#603/4   verifier_bpf_trap/reachable __bpf_trap in the middle of code:OK
+#603     verifier_bpf_trap:OK
+#604/1   verifier_bswap/BSWAP, 16:OK
+#604/2   verifier_bswap/BSWAP, 16 @unpriv:OK
+#604/3   verifier_bswap/BSWAP, 32:OK
+#604/4   verifier_bswap/BSWAP, 32 @unpriv:OK
+#604/5   verifier_bswap/BSWAP, 64:OK
+#604/6   verifier_bswap/BSWAP, 64 @unpriv:OK
+#604/7   verifier_bswap/bswap16_range:OK
+#604/8   verifier_bswap/bswap32_range:OK
+#604/9   verifier_bswap/bswap64_range:OK
+#604/10  verifier_bswap/be16_range:OK
+#604/11  verifier_bswap/be32_range:OK
+#604/12  verifier_bswap/be64_range:OK
+#604/13  verifier_bswap/le16_range:OK
+#604/14  verifier_bswap/le32_range:OK
+#604/15  verifier_bswap/le64_range:OK
+#604/16  verifier_bswap/BSWAP, reset reg id:OK
+#604     verifier_bswap:OK
+#605/1   verifier_btf_ctx_access/btf_ctx_access accept:OK
+#605/2   verifier_btf_ctx_access/btf_ctx_access u32 pointer accept:OK
+#605/3   verifier_btf_ctx_access/btf_ctx_access u32 pointer reject u32:OK
+#605/4   verifier_btf_ctx_access/btf_ctx_access u32 pointer reject u16:OK
+#605/5   verifier_btf_ctx_access/btf_ctx_access u32 pointer reject u8:OK
+#605/6   verifier_btf_ctx_access/btf_ctx_access const void pointer accept:OK
+#605     verifier_btf_ctx_access:OK
+#606/1   verifier_btf_unreliable_prog/btf_unreliable_kprobe:OK
+#606     verifier_btf_unreliable_prog:OK
+#607/1   verifier_call_large_imm/call_large_imm_test:OK
+#607     verifier_call_large_imm:OK
+#608/1   verifier_cfg/unreachable:OK
+#608/2   verifier_cfg/unreachable @unpriv:OK
+#608/3   verifier_cfg/unreachable2:OK
+#608/4   verifier_cfg/unreachable2 @unpriv:OK
+#608/5   verifier_cfg/out of range jump:OK
+#608/6   verifier_cfg/out of range jump @unpriv:OK
+#608/7   verifier_cfg/out of range jump2:OK
+#608/8   verifier_cfg/out of range jump2 @unpriv:OK
+#608/9   verifier_cfg/loop (back-edge):OK
+#608/10  verifier_cfg/loop (back-edge) @unpriv:OK
+#608/11  verifier_cfg/loop2 (back-edge):OK
+#608/12  verifier_cfg/loop2 (back-edge) @unpriv:OK
+#608/13  verifier_cfg/conditional loop:OK
+#608/14  verifier_cfg/conditional loop @unpriv:OK
+#608/15  verifier_cfg/conditional loop (2):OK
+#608/16  verifier_cfg/conditional loop (2) @unpriv:OK
+#608/17  verifier_cfg/unconditional loop after conditional jump:OK
+#608/18  verifier_cfg/unconditional loop after conditional jump @unpriv:OK
+#608/19  verifier_cfg/unconditional loop after conditional jump:OK
+#608     verifier_cfg:OK
+#609/1   verifier_cgroup_inv_retcode/bpf_exit with invalid return code. test1:OK
+#609/2   verifier_cgroup_inv_retcode/bpf_exit with invalid return code. test2:OK
+#609/3   verifier_cgroup_inv_retcode/bpf_exit with invalid return code. test3:OK
+#609/4   verifier_cgroup_inv_retcode/bpf_exit with invalid return code. test4:OK
+#609/5   verifier_cgroup_inv_retcode/bpf_exit with invalid return code. test5:OK
+#609/6   verifier_cgroup_inv_retcode/bpf_exit with invalid return code. test6:OK
+#609/7   verifier_cgroup_inv_retcode/bpf_exit with invalid return code. test7:OK
+#609     verifier_cgroup_inv_retcode:OK
+#610/1   verifier_cgroup_skb/direct packet read test#1 for CGROUP_SKB:OK
+#610/2   verifier_cgroup_skb/direct packet read test#1 for CGROUP_SKB @unpriv:OK
+#610/3   verifier_cgroup_skb/direct packet read test#2 for CGROUP_SKB:OK
+#610/4   verifier_cgroup_skb/direct packet read test#2 for CGROUP_SKB @unpriv:OK
+#610/5   verifier_cgroup_skb/direct packet read test#3 for CGROUP_SKB:OK
+#610/6   verifier_cgroup_skb/direct packet read test#3 for CGROUP_SKB @unpriv:OK
+#610/7   verifier_cgroup_skb/direct packet read test#4 for CGROUP_SKB:OK
+#610/8   verifier_cgroup_skb/direct packet read test#4 for CGROUP_SKB @unpriv:OK
+#610/9   verifier_cgroup_skb/invalid access of tc_classid for CGROUP_SKB:OK
+#610/10  verifier_cgroup_skb/invalid access of tc_classid for CGROUP_SKB @unpriv:OK
+#610/11  verifier_cgroup_skb/invalid access of data_meta for CGROUP_SKB:OK
+#610/12  verifier_cgroup_skb/invalid access of data_meta for CGROUP_SKB @unpriv:OK
+#610/13  verifier_cgroup_skb/invalid access of flow_keys for CGROUP_SKB:OK
+#610/14  verifier_cgroup_skb/invalid access of flow_keys for CGROUP_SKB @unpriv:OK
+#610/15  verifier_cgroup_skb/invalid write access to napi_id for CGROUP_SKB:OK
+#610/16  verifier_cgroup_skb/invalid write access to napi_id for CGROUP_SKB @unpriv:OK
+#610/17  verifier_cgroup_skb/write tstamp from CGROUP_SKB:OK
+#610/18  verifier_cgroup_skb/write tstamp from CGROUP_SKB @unpriv:OK
+#610/19  verifier_cgroup_skb/read tstamp from CGROUP_SKB:OK
+#610/20  verifier_cgroup_skb/read tstamp from CGROUP_SKB @unpriv:OK
+#610     verifier_cgroup_skb:OK
+#611/1   verifier_cgroup_storage/valid cgroup storage access:OK
+#611/2   verifier_cgroup_storage/valid cgroup storage access @unpriv:OK
+#611/3   verifier_cgroup_storage/invalid cgroup storage access 1:OK
+#611/4   verifier_cgroup_storage/invalid cgroup storage access 1 @unpriv:OK
+#611/5   verifier_cgroup_storage/invalid cgroup storage access 2:OK
+#611/6   verifier_cgroup_storage/invalid cgroup storage access 2 @unpriv:OK
+#611/7   verifier_cgroup_storage/invalid cgroup storage access 3:OK
+#611/8   verifier_cgroup_storage/invalid cgroup storage access 3 @unpriv:OK
+#611/9   verifier_cgroup_storage/invalid cgroup storage access 4:OK
+#611/10  verifier_cgroup_storage/invalid cgroup storage access 4 @unpriv:OK
+#611/11  verifier_cgroup_storage/invalid cgroup storage access 5:OK
+#611/12  verifier_cgroup_storage/invalid cgroup storage access 5 @unpriv:OK
+#611/13  verifier_cgroup_storage/invalid cgroup storage access 6:OK
+#611/14  verifier_cgroup_storage/invalid cgroup storage access 6 @unpriv:OK
+#611/15  verifier_cgroup_storage/valid per-cpu cgroup storage access:OK
+#611/16  verifier_cgroup_storage/valid per-cpu cgroup storage access @unpriv:OK
+#611/17  verifier_cgroup_storage/invalid per-cpu cgroup storage access 1:OK
+#611/18  verifier_cgroup_storage/invalid per-cpu cgroup storage access 1 @unpriv:OK
+#611/19  verifier_cgroup_storage/invalid per-cpu cgroup storage access 2:OK
+#611/20  verifier_cgroup_storage/invalid per-cpu cgroup storage access 2 @unpriv:OK
+#611/21  verifier_cgroup_storage/invalid per-cpu cgroup storage access 3:OK
+#611/22  verifier_cgroup_storage/invalid per-cpu cgroup storage access 3 @unpriv:OK
+#611/23  verifier_cgroup_storage/invalid per-cpu cgroup storage access 4:OK
+#611/24  verifier_cgroup_storage/invalid per-cpu cgroup storage access 4 @unpriv:OK
+#611/25  verifier_cgroup_storage/invalid per-cpu cgroup storage access 5:OK
+#611/26  verifier_cgroup_storage/invalid per-cpu cgroup storage access 5 @unpriv:OK
+#611/27  verifier_cgroup_storage/invalid per-cpu cgroup storage access 6:OK
+#611/28  verifier_cgroup_storage/invalid per-cpu cgroup storage access 6 @unpriv:OK
+#611     verifier_cgroup_storage:OK
+#612/1   verifier_const/rodata/strtol: write rejected:OK
+#612/2   verifier_const/bss/strtol: write accepted:OK
+#612/3   verifier_const/data/strtol: write accepted:OK
+#612/4   verifier_const/rodata/mtu: write rejected:OK
+#612/5   verifier_const/bss/mtu: write accepted:OK
+#612/6   verifier_const/data/mtu: write accepted:OK
+#612/7   verifier_const/rodata/mark: write with unknown reg rejected:OK
+#612/8   verifier_const/rodata/mark: write with unknown reg rejected:OK
+#612     verifier_const:OK
+#613/1   verifier_const_or/constant register |= constant should keep constant type:OK
+#613/2   verifier_const_or/constant register |= constant should not bypass stack boundary checks:OK
+#613/3   verifier_const_or/constant register |= constant register should keep constant type:OK
+#613/4   verifier_const_or/constant register |= constant register should not bypass stack boundary checks:OK
+#613     verifier_const_or:OK
+#614/1   verifier_ctx/context stores via BPF_ATOMIC:OK
+#614/2   verifier_ctx/arithmetic ops make PTR_TO_CTX unusable:OK
+#614/3   verifier_ctx/pass unmodified ctx pointer to helper:OK
+#614/4   verifier_ctx/pass modified ctx pointer to helper, 1:OK
+#614/5   verifier_ctx/pass modified ctx pointer to helper, 3:OK
+#614/6   verifier_ctx/narrow load on field sk of __sk_buff:OK
+#614/7   verifier_ctx/access on __sk_buff padding after tstamp_type:OK
+#614/8   verifier_ctx/pass modified ctx pointer to helper, 2:OK
+#614/9   verifier_ctx/pass ctx or null check, 1: ctx:OK
+#614/10  verifier_ctx/pass ctx or null check, 2: null:OK
+#614/11  verifier_ctx/pass ctx or null check, 3: 1:OK
+#614/12  verifier_ctx/pass ctx or null check, 4: ctx - const:OK
+#614/13  verifier_ctx/pass ctx or null check, 5: null (connect):OK
+#614/14  verifier_ctx/pass ctx or null check, 6: null (bind):OK
+#614/15  verifier_ctx/pass ctx or null check, 7: ctx (bind):OK
+#614/16  verifier_ctx/pass ctx or null check, 8: null (bind):OK
+#614/17  verifier_ctx/access on bpf_sock padding after dst_port:OK
+#614/18  verifier_ctx/narrow load on field sk of bpf_sockopt:OK
+#614/19  verifier_ctx/narrow load on field optval of bpf_sockopt:OK
+#614/20  verifier_ctx/narrow load on field optval_end of bpf_sockopt:OK
+#614/21  verifier_ctx/narrow load on field sk of bpf_sock_addr:OK
+#614/22  verifier_ctx/access on bpf_sock_addr padding after msg_src_ip6[3]:OK
+#614/23  verifier_ctx/narrow load on field sk of bpf_sock_ops:OK
+#614/24  verifier_ctx/narrow load on field skb_data of bpf_sock_ops:OK
+#614/25  verifier_ctx/narrow load on field skb_data_end of bpf_sock_ops:OK
+#614/26  verifier_ctx/narrow load on field skb_hwtstamp of bpf_sock_ops:OK
+#614/27  verifier_ctx/unaligned access on field data of __sk_buff:OK
+#614/28  verifier_ctx/unaligned access on field skb of bpf_nf[   28.361159] test_progs (197) used greatest stack depth: 10152 bytes left
+[   28.369324] smc: removing smcd device lo
+[   28.436507] ACPI: PM: Preparing to enter system sleep state S5
+[   28.437827] reboot: Power down
+2  verifier_ctx/syscall: read ctx with fixed offset:OK
+#614/33  verifier_ctx/syscall: unaligned read ctx with fixed offset:OK
+#614/34  verifier_ctx/syscall: unaligned write ctx with fixed offset:OK
+#614/35  verifier_ctx/syscall: read ctx with variable offset:OK
+#614/36  verifier_ctx/syscall: write ctx with variable offset:OK
+#614/37  verifier_ctx/syscall: unaligned read ctx with variable offset:OK
+#614/38  verifier_ctx/syscall: unaligned write ctx with variable offset:OK
+#614/39  verifier_ctx/syscall: reject ctx access past U16_MAX with fixed offset:OK
+#614/40  verifier_ctx/syscall: reject ctx access past U16_MAX with variable offset:OK
+#614/41  verifier_ctx/syscall: reject negative variable offset ctx access:OK
+#614/42  verifier_ctx/syscall: reject unbounded variable offset ctx access:OK
+#614/43  verifier_ctx/syscall: helper read ctx with fixed offset:OK
+#614/44  verifier_ctx/syscall: helper write ctx with fixed offset:OK
+#614/45  verifier_ctx/syscall: helper unaligned read ctx with fixed offset:OK
+#614/46  verifier_ctx/syscall: helper unaligned write ctx with fixed offset:OK
+#614/47  verifier_ctx/syscall: helper read ctx with variable offset:OK
+#614/48  verifier_ctx/syscall: helper write ctx with variable offset:OK
+#614/49  verifier_ctx/syscall: helper unaligned read ctx with variable offset:OK
+#614/50  verifier_ctx/syscall: helper unaligned write ctx with variable offset:OK
+#614/51  verifier_ctx/syscall: reject helper read ctx past U16_MAX with fixed offset:OK
+#614/52  verifier_ctx/syscall: reject helper write ctx past U16_MAX with fixed offset:OK
+#614/53  verifier_ctx/syscall: reject helper read ctx past U16_MAX with variable offset:OK
+#614/54  verifier_ctx/syscall: reject helper write ctx past U16_MAX with variable offset:OK
+#614/55  verifier_ctx/syscall: helper read zero-sized ctx access:OK
+#614/56  verifier_ctx/syscall: helper write zero-sized ctx access:OK
+#614/57  verifier_ctx/syscall: kfunc access ctx with fixed offset:OK
+#614/58  verifier_ctx/syscall: kfunc access ctx with variable offset:OK
+#614/59  verifier_ctx/syscall: kfunc unaligned access ctx with fixed offset:OK
+#614/60  verifier_ctx/syscall: kfunc unaligned access ctx with variable offset:OK
+#614/61  verifier_ctx/syscall: reject kfunc ctx access past U16_MAX with fixed offset:OK
+#614/62  verifier_ctx/syscall: reject kfunc ctx access past U16_MAX with variable offset:OK
+#614/63  verifier_ctx/syscall: kfunc access zero-sized ctx:OK
+#614/64  verifier_ctx/kprobe: read ctx at fixed offset:OK
+#614/65  verifier_ctx/kprobe: reject variable offset ctx access:OK
+#614/66  verifier_ctx/kprobe: reject negative offset ctx access:OK
+#614/67  verifier_ctx/kprobe: reject helper read ctx at fixed offset:OK
+#614/68  verifier_ctx/kprobe: reject helper write ctx at fixed offset:OK
+#614/69  verifier_ctx/kprobe: reject helper read ctx with variable offset:OK
+#614/70  verifier_ctx/kprobe: reject helper write ctx with variable offset:OK
+#614/71  verifier_ctx/kprobe: reject helper read zero-sized ctx access:OK
+#614/72  verifier_ctx/kprobe: reject helper write zero-sized ctx access:OK
+#614/73  verifier_ctx/kprobe: reject kfunc ctx at fixed offset:OK
+#614/74  verifier_ctx/kprobe: reject kfunc ctx with variable offset:OK
+#614/75  verifier_ctx/kprobe: reject kfunc zero-sized ctx access:OK
+#614/76  verifier_ctx/tracepoint: read ctx at fixed offset:OK
+#614/77  verifier_ctx/tracepoint: reject variable offset ctx access:OK
+#614/78  verifier_ctx/tracepoint: reject negative offset ctx access:OK
+#614/79  verifier_ctx/tracepoint: reject helper read ctx at fixed offset:OK
+#614/80  verifier_ctx/tracepoint: reject helper write ctx at fixed offset:OK
+#614/81  verifier_ctx/tracepoint: reject helper read ctx with variable offset:OK
+#614/82  verifier_ctx/tracepoint: reject helper write ctx with variable offset:OK
+#614/83  verifier_ctx/tracepoint: reject helper read zero-sized ctx access:OK
+#614/84  verifier_ctx/tracepoint: reject helper write zero-sized ctx access:OK
+#614/85  verifier_ctx/tracepoint: reject kfunc ctx at fixed offset:OK
+#614/86  verifier_ctx/tracepoint: reject kfunc ctx with variable offset:OK
+#614/87  verifier_ctx/tracepoint: reject kfunc zero-sized ctx access:OK
+#614/88  verifier_ctx/raw_tp: read ctx at fixed offset:OK
+#614/89  verifier_ctx/raw_tp: reject variable offset ctx access:OK
+#614/90  verifier_ctx/raw_tp: reject negative offset ctx access:OK
+#614/91  verifier_ctx/raw_tp: reject helper read ctx at fixed offset:OK
+#614/92  verifier_ctx/raw_tp: reject helper write ctx at fixed offset:OK
+#614/93  verifier_ctx/raw_tp: reject helper read ctx with variable offset:OK
+#614/94  verifier_ctx/raw_tp: reject helper write ctx with variable offset:OK
+#614/95  verifier_ctx/raw_tp: reject helper read zero-sized ctx access:OK
+#614/96  verifier_ctx/raw_tp: reject helper write zero-sized ctx access:OK
+#614/97  verifier_ctx/raw_tp: reject kfunc ctx at fixed offset:OK
+#614/98  verifier_ctx/raw_tp: reject kfunc ctx with variable offset:OK
+#614/99  verifier_ctx/raw_tp: reject kfunc zero-sized ctx access:OK
+#614/100 verifier_ctx/raw_tracepoint.w: read ctx at fixed offset:OK
+#614/101 verifier_ctx/raw_tracepoint.w: reject variable offset ctx access:OK
+#614/102 verifier_ctx/raw_tracepoint.w: reject negative offset ctx access:OK
+#614/103 verifier_ctx/raw_tracepoint.w: reject helper read ctx at fixed offset:OK
+#614/104 verifier_ctx/raw_tracepoint.w: reject helper write ctx at fixed offset:OK
+#614/105 verifier_ctx/raw_tracepoint.w: reject helper read ctx with variable offset:OK
+#614/106 verifier_ctx/raw_tracepoint.w: reject helper write ctx with variable offset:OK
+#614/107 verifier_ctx/raw_tracepoint.w: reject helper read zero-sized ctx access:OK
+#614/108 verifier_ctx/raw_tracepoint.w: reject helper write zero-sized ctx access:OK
+#614/109 verifier_ctx/raw_tracepoint.w: reject kfunc ctx at fixed offset:OK
+#614/110 verifier_ctx/raw_tracepoint.w: reject kfunc ctx with variable offset:OK
+#614/111 verifier_ctx/raw_tracepoint.w: reject kfunc zero-sized ctx access:OK
+#614/112 verifier_ctx/fentry/bpf_modify_return_test: read ctx at fixed offset:OK
+#614/113 verifier_ctx/fentry/bpf_modify_return_test: reject variable offset ctx access:OK
+#614/114 verifier_ctx/fentry/bpf_modify_return_test: reject negative offset ctx access:OK
+#614/115 verifier_ctx/fentry/bpf_modify_return_test: reject helper read ctx at fixed offset:OK
+#614/116 verifier_ctx/fentry/bpf_modify_return_test: reject helper write ctx at fixed offset:OK
+#614/117 verifier_ctx/fentry/bpf_modify_return_test: reject helper read ctx with variable offset:OK
+#614/118 verifier_ctx/fentry/bpf_modify_return_test: reject helper write ctx with variable offset:OK
+#614/119 verifier_ctx/fentry/bpf_modify_return_test: reject helper read zero-sized ctx access:OK
+#614/120 verifier_ctx/fentry/bpf_modify_return_test: reject helper write zero-sized ctx access:OK
+#614/121 verifier_ctx/fentry/bpf_modify_return_test: reject kfunc ctx at fixed offset:OK
+#614/122 verifier_ctx/fentry/bpf_modify_return_test: reject kfunc ctx with variable offset:OK
+#614/123 verifier_ctx/fentry/bpf_modify_return_test: reject kfunc zero-sized ctx access:OK
+#614/124 verifier_ctx/cgroup/dev: read ctx at fixed offset:OK
+#614/125 verifier_ctx/cgroup/dev: reject variable offset ctx access:OK
+#614/126 verifier_ctx/cgroup/dev: reject negative offset ctx access:OK
+#614/127 verifier_ctx/cgroup/dev: reject helper read ctx at fixed offset:OK
+#614/128 verifier_ctx/cgroup/dev: reject helper write ctx at fixed offset:OK
+#614/129 verifier_ctx/cgroup/dev: reject helper read ctx with variable offset:OK
+#614/130 verifier_ctx/cgroup/dev: reject helper write ctx with variable offset:OK
+#614/131 verifier_ctx/cgroup/dev: reject helper read zero-sized ctx access:OK
+#614/132 verifier_ctx/cgroup/dev: reject helper write zero-sized ctx access:OK
+#614/133 verifier_ctx/cgroup/dev: reject kfunc ctx at fixed offset:OK
+#614/134 verifier_ctx/cgroup/dev: reject kfunc ctx with variable offset:OK
+#614/135 verifier_ctx/cgroup/dev: reject kfunc zero-sized ctx access:OK
+#614/136 verifier_ctx/netfilter: read ctx at fixed offset:OK
+#614/137 verifier_ctx/netfilter: reject variable offset ctx access:OK
+#614/138 verifier_ctx/netfilter: reject negative offset ctx access:OK
+#614/139 verifier_ctx/netfilter: reject helper read ctx at fixed offset:OK
+#614/140 verifier_ctx/netfilter: reject helper write ctx at fixed offset:OK
+#614/141 verifier_ctx/netfilter: reject helper read ctx with variable offset:OK
+#614/142 verifier_ctx/netfilter: reject helper write ctx with variable offset:OK
+#614/143 verifier_ctx/netfilter: reject helper read zero-sized ctx access:OK
+#614/144 verifier_ctx/netfilter: reject helper write zero-sized ctx access:OK
+#614/145 verifier_ctx/netfilter: reject kfunc ctx at fixed offset:OK
+#614/146 verifier_ctx/netfilter: reject kfunc ctx with variable offset:OK
+#614/147 verifier_ctx/netfilter: reject kfunc zero-sized ctx access:OK
+#614     verifier_ctx:OK
+#615/1   verifier_ctx_ptr_param/fentry/void**: void ** inferred as scalar:OK
+#615/2   verifier_ctx_ptr_param/fentry/void***: void *** inferred as scalar:OK
+#615/3   verifier_ctx_ptr_param/fentry/struct file**: struct file ** inferred as scalar:OK
+#615/4   verifier_ctx_ptr_param/fexit/return struct file**: returned struct file ** inferred as scalar:OK
+#615     verifier_ctx_ptr_param:OK
+#616/1   verifier_ctx_sk_msg/valid access family in SK_MSG:OK
+#616/2   verifier_ctx_sk_msg/valid access remote_ip4 in SK_MSG:OK
+#616/3   verifier_ctx_sk_msg/valid access local_ip4 in SK_MSG:OK
+#616/4   verifier_ctx_sk_msg/valid access remote_port in SK_MSG:OK
+#616/5   verifier_ctx_sk_msg/valid access local_port in SK_MSG:OK
+#616/6   verifier_ctx_sk_msg/valid access size in SK_MSG:OK
+#616/7   verifier_ctx_sk_msg/invalid 64B read of size in SK_MSG:OK
+#616/8   verifier_ctx_sk_msg/invalid read past end of SK_MSG:OK
+#616/9   verifier_ctx_sk_msg/invalid read offset in SK_MSG:OK
+#616/10  verifier_ctx_sk_msg/direct packet read for SK_MSG:OK
+#616/11  verifier_ctx_sk_msg/direct packet write for SK_MSG:OK
+#616/12  verifier_ctx_sk_msg/overlapping checks for direct packet access SK_MSG:OK
+#616/13  verifier_ctx_sk_msg/valid access remote_ip6 in SK_MSG:OK
+#616/14  verifier_ctx_sk_msg/valid access local_ip6 in SK_MSG:OK
+#616     verifier_ctx_sk_msg:OK
+#617/1   verifier_d_path/d_path accept:OK
+#617/2   verifier_d_path/d_path reject:OK
+#617     verifier_d_path:OK
+#618/1   verifier_default_trusted_ptr/test_default_trusted_ptr:OK
+#618     verifier_default_trusted_ptr:OK
+#619/1   verifier_direct_packet_access/pkt_end - pkt_start is allowed:OK
+#619/2   verifier_direct_packet_access/direct packet access: test1:OK
+#619/3   verifier_direct_packet_access/direct packet access: test2:OK
+#619/4   verifier_direct_packet_access/direct packet access: test4 (write):OK
+#619/5   verifier_direct_packet_access/direct packet access: test5 (pkt_end >= reg, good access):OK
+#619/6   verifier_direct_packet_access/direct packet access: test6 (pkt_end >= reg, bad access):OK
+#619/7   verifier_direct_packet_access/direct packet access: test7 (pkt_end >= reg, both accesses):OK
+#619/8   verifier_direct_packet_access/direct packet access: test8 (double test, variant 1):OK
+#619/9   verifier_direct_packet_access/direct packet access: test9 (double test, variant 2):OK
+#619/10  verifier_direct_packet_access/direct packet access: test10 (write invalid):OK
+#619/11  verifier_direct_packet_access/direct packet access: test11 (shift, good access):OK
+#619/12  verifier_direct_packet_access/direct packet access: test12 (and, good access):OK
+#619/13  verifier_direct_packet_access/direct packet access: test13 (branches, good access):OK
+#619/14  verifier_direct_packet_access/direct packet access: test14 (pkt_ptr += 0, CONST_IMM, good access):OK
+#619/15  verifier_direct_packet_access/direct packet access: test15 (spill with xadd):OK
+#619/16  verifier_direct_packet_access/direct packet access: test16 (arith on data_end):OK
+#619/17  verifier_direct_packet_access/direct packet access: test17 (pruning, alignment):OK
+#619/18  verifier_direct_packet_access/direct packet access: test18 (imm += pkt_ptr, 1):OK
+#619/19  verifier_direct_packet_access/direct packet access: test19 (imm += pkt_ptr, 2):OK
+#619/20  verifier_direct_packet_access/direct packet access: test20 (x += pkt_ptr, 1):OK
+#619/21  verifier_direct_packet_access/direct packet access: test21 (x += pkt_ptr, 2):OK
+#619/22  verifier_direct_packet_access/direct packet access: test22 (x += pkt_ptr, 3):OK
+#619/23  verifier_direct_packet_access/direct packet access: test23 (x += pkt_ptr, 4):OK
+#619/24  verifier_direct_packet_access/direct packet access: test24 (x += pkt_ptr, 5):OK
+#619/25  verifier_direct_packet_access/direct packet access: test25 (marking on <, good access):OK
+#619/26  verifier_direct_packet_access/direct packet access: test26 (marking on <, bad access):OK
+#619/27  verifier_direct_packet_access/direct packet access: test27 (marking on <=, good access):OK
+#619/28  verifier_direct_packet_access/direct packet access: test28 (marking on <=, bad access):OK
+#619/29  verifier_direct_packet_access/direct packet access: test29 (reg > pkt_end in subprog):OK
+#619/30  verifier_direct_packet_access/direct packet access: test30 (check_id() in regsafe(), bad access):OK
+#619/31  verifier_direct_packet_access/direct packet access: test31 (non-linear, tc, too short eth):OK
+#619/32  verifier_direct_packet_access/direct packet access: test32 (non-linear, tc, too short 1):OK
+#619/33  verifier_direct_packet_access/direct packet access: test33 (non-linear, tc, long enough):OK
+#619/34  verifier_direct_packet_access/direct packet access: test37 (non-linear, linearized):OK
+#619/35  verifier_direct_packet_access/direct packet access: pkt_range cleared after sub with known scalar:OK
+#619/36  verifier_direct_packet_access/direct packet access: pkt_range cleared after add with known scalar:OK
+#619/37  verifier_direct_packet_access/direct packet access: test3:OK
+#619/38  verifier_direct_packet_access/direct packet access: test3 @unpriv:OK
+#619/39  verifier_direct_packet_access/direct packet access: test34 (non-linear, cgroup_skb/ingress, too short eth):OK
+#619/40  verifier_direct_packet_access/direct packet access: test35 (non-linear, cgroup_skb/ingress, too short 1):OK
+#619/41  verifier_direct_packet_access/direct packet access: test36 (non-linear, cgroup_skb/ingress, long enough):OK
+#619     verifier_direct_packet_access:OK
+#620/1   verifier_direct_stack_access_wraparound/direct stack access with 32-bit wraparound. test1:OK
+#620/2   verifier_direct_stack_access_wraparound/direct stack access with 32-bit wraparound. test1 @unpriv:OK
+#620/3   verifier_direct_stack_access_wraparound/direct stack access with 32-bit wraparound. test2:OK
+#620/4   verifier_direct_stack_access_wraparound/direct stack access with 32-bit wraparound. test2 @unpriv:OK
+#620/5   verifier_direct_stack_access_wraparound/direct stack access with 32-bit wraparound. test3:OK
+#620/6   verifier_direct_stack_access_wraparound/direct stack access with 32-bit wraparound. test3 @unpriv:OK
+#620     verifier_direct_stack_access_wraparound:OK
+#621/1   verifier_div0/DIV32 by 0, zero check 1:OK
+#621/2   verifier_div0/DIV32 by 0, zero check 1 @unpriv:OK
+#621/3   verifier_div0/DIV32 by 0, zero check 2:OK
+#621/4   verifier_div0/DIV32 by 0, zero check 2 @unpriv:OK
+#621/5   verifier_div0/DIV64 by 0, zero check:OK
+#621/6   verifier_div0/DIV64 by 0, zero check @unpriv:OK
+#621/7   verifier_div0/MOD32 by 0, zero check 1:OK
+#621/8   verifier_div0/MOD32 by 0, zero check 1 @unpriv:OK
+#621/9   verifier_div0/MOD32 by 0, zero check 2:OK
+#621/10  verifier_div0/MOD32 by 0, zero check 2 @unpriv:OK
+#621/11  verifier_div0/MOD64 by 0, zero check:OK
+#621/12  verifier_div0/MOD64 by 0, zero check @unpriv:OK
+#621/13  verifier_div0/DIV32 by 0, zero check ok, cls:OK
+#621/14  verifier_div0/DIV32 by 0, zero check 1, cls:OK
+#621/15  verifier_div0/DIV32 by 0, zero check 2, cls:OK
+#621/16  verifier_div0/DIV64 by 0, zero check, cls:OK
+#621/17  verifier_div0/MOD32 by 0, zero check ok, cls:OK
+#621/18  verifier_div0/MOD32 by 0, zero check 1, cls:OK
+#621/19  verifier_div0/MOD32 by 0, zero check 2, cls:OK
+#621/20  verifier_div0/MOD64 by 0, zero check 1, cls:OK
+#621/21  verifier_div0/MOD64 by 0, zero check 2, cls:OK
+#621     verifier_div0:OK
+#622/1   verifier_div_mod_bounds/UDIV32, positive divisor:OK
+#622/2   verifier_div_mod_bounds/UDIV32, zero divisor:OK
+#622/3   verifier_div_mod_bounds/UDIV64, positive divisor:OK
+#622/4   verifier_div_mod_bounds/UDIV64, zero divisor:OK
+#622/5   verifier_div_mod_bounds/SDIV32, positive divisor, positive dividend:OK
+#622/6   verifier_div_mod_bounds/SDIV32, positive divisor, negative dividend:OK
+#622/7   verifier_div_mod_bounds/SDIV32, positive divisor, mixed sign dividend:OK
+#622/8   verifier_div_mod_bounds/SDIV32, negative divisor, positive dividend:OK
+#622/9   verifier_div_mod_bounds/SDIV32, negative divisor, positive dividend:OK
+#622/10  verifier_div_mod_bounds/SDIV32, negative divisor, mixed sign dividend:OK
+#622/11  verifier_div_mod_bounds/SDIV32, zero divisor:OK
+#622/12  verifier_div_mod_bounds/SDIV32, overflow (S32_MIN/-1):OK
+#622/13  verifier_div_mod_bounds/SDIV32, overflow (S32_MIN/-1), constant dividend:OK
+#622/14  verifier_div_mod_bounds/SDIV64, positive divisor, positive dividend:OK
+#622/15  verifier_div_mod_bounds/SDIV64, positive divisor, negative dividend:OK
+#622/16  verifier_div_mod_bounds/SDIV64, positive divisor, mixed sign dividend:OK
+#622/17  verifier_div_mod_bounds/SDIV64, negative divisor, positive dividend:OK
+#622/18  verifier_div_mod_bounds/SDIV64, negative divisor, positive dividend:OK
+#622/19  verifier_div_mod_bounds/SDIV64, negative divisor, mixed sign dividend:OK
+#622/20  verifier_div_mod_bounds/SDIV64, zero divisor:OK
+#622/21  verifier_div_mod_bounds/SDIV64, overflow (S64_MIN/-1):OK
+#622/22  verifier_div_mod_bounds/SDIV64, overflow (S64_MIN/-1), constant dividend:OK
+#622/23  verifier_div_mod_bounds/UMOD32, positive divisor:OK
+#622/24  verifier_div_mod_bounds/UMOD32, positive divisor, small dividend:OK
+#622/25  verifier_div_mod_bounds/UMOD32, zero divisor:OK
+#622/26  verifier_div_mod_bounds/UMOD64, positive divisor:OK
+#622/27  verifier_div_mod_bounds/UMOD64, positive divisor, small dividend:OK
+#622/28  verifier_div_mod_bounds/UMOD64, zero divisor:OK
+#622/29  verifier_div_mod_bounds/SMOD32, positive divisor, positive dividend:OK
+#622/30  verifier_div_mod_bounds/SMOD32, positive divisor, negative dividend:OK
+#622/31  verifier_div_mod_bounds/SMOD32, positive divisor, mixed sign dividend:OK
+#622/32  verifier_div_mod_bounds/SMOD32, positive divisor, small dividend:OK
+#622/33  verifier_div_mod_bounds/SMOD32, negative divisor, positive dividend:OK
+#622/34  verifier_div_mod_bounds/SMOD32, negative divisor, negative dividend:OK
+#622/35  verifier_div_mod_bounds/SMOD32, negative divisor, mixed sign dividend:OK
+#622/36  verifier_div_mod_bounds/SMOD32, negative divisor, small dividend:OK
+#622/37  verifier_div_mod_bounds/SMOD32, zero divisor:OK
+#622/38  verifier_div_mod_bounds/SMOD32, overflow (S32_MIN%-1):OK
+#622/39  verifier_div_mod_bounds/SMOD32, overflow (S32_MIN%-1), constant dividend:OK
+#622/40  verifier_div_mod_bounds/SMOD64, positive divisor, positive dividend:OK
+#622/41  verifier_div_mod_bounds/SMOD64, positive divisor, negative dividend:OK
+#622/42  verifier_div_mod_bounds/SMOD64, positive divisor, mixed sign dividend:OK
+#622/43  verifier_div_mod_bounds/SMOD64, positive divisor, small dividend:OK
+#622/44  verifier_div_mod_bounds/SMOD64, negative divisor, positive dividend:OK
+#622/45  verifier_div_mod_bounds/SMOD64, negative divisor, negative dividend:OK
+#622/46  verifier_div_mod_bounds/SMOD64, negative divisor, mixed sign dividend:OK
+#622/47  verifier_div_mod_bounds/SMOD64, negative divisor, small dividend:OK
+#622/48  verifier_div_mod_bounds/SMOD64, zero divisor:OK
+#622/49  verifier_div_mod_bounds/SMOD64, overflow (S64_MIN%-1):OK
+#622/50  verifier_div_mod_bounds/SMOD64, overflow (S64_MIN%-1), constant dividend:OK
+#622     verifier_div_mod_bounds:OK
+#623/1   verifier_div_overflow/DIV32 overflow, check 1:OK
+#623/2   verifier_div_overflow/DIV32 overflow, check 2:OK
+#623/3   verifier_div_overflow/DIV64 overflow, check 1:OK
+#623/4   verifier_div_overflow/DIV64 overflow, check 2:OK
+#623/5   verifier_div_overflow/MOD32 overflow, check 1:OK
+#623/6   verifier_div_overflow/MOD32 overflow, check 2:OK
+#623/7   verifier_div_overflow/MOD64 overflow, check 1:OK
+#623/8   verifier_div_overflow/MOD64 overflow, check 2:OK
+#623     verifier_div_overflow:OK
+#624/1   verifier_flow_keys/flow_keys: in-bounds constant pointer arithmetic accepted:OK
+#624/2   verifier_flow_keys/flow_keys: OOB via constant pointer arithmetic rejected:OK
+#624/3   verifier_flow_keys/flow_keys: OOB write via constant pointer arithmetic rejected:OK
+#624/4   verifier_flow_keys/flow_keys: OOB via insn->off rejected:OK
+#624/5   verifier_flow_keys/flow_keys: variable pointer arithmetic rejected:OK
+#624     verifier_flow_keys:OK
+#625/1   verifier_global_ptr_args/trusted_task_arg_nullable:OK
+#625/2   verifier_global_ptr_args/trusted_task_arg_nonnull_fail2:OK
+#625/3   verifier_global_ptr_args/trusted_destroy_fail:OK
+#625/4   verifier_global_ptr_args/trusted_acq_rel:OK
+#625/5   verifier_global_ptr_args/trusted_btf_field_to_writable_mem:OK
+#625/6   verifier_global_ptr_args/trusted_task_arg_nonnull_fail1:OK
+#625/7   verifier_global_ptr_args/trusted_task_arg_nonnull:OK
+#625/8   verifier_global_ptr_args/flavor_ptr_nullable:OK
+#625/9   verifier_global_ptr_args/flavor_ptr_nonnull:OK
+#625/10  verifier_global_ptr_args/untrusted_bad_tags:OK
+#625/11  verifier_global_ptr_args/untrusted_bad_type:OK
+#625/12  verifier_global_ptr_args/trusted_to_untrusted:OK
+#625/13  verifier_global_ptr_args/anything_to_untrusted:OK
+#625/14  verifier_global_ptr_args/untrusted_to_trusted:OK
+#625/15  verifier_global_ptr_args/trusted_to_untrusted_mem:OK
+#625/16  verifier_global_ptr_args/anything_to_untrusted_mem:OK
+#625     verifier_global_ptr_args:OK
+#626/1   verifier_global_subprogs/chained_global_func_calls_success:OK
+#626/2   verifier_global_subprogs/chained_global_func_calls_bad:OK
+#626/3   verifier_global_subprogs/guarded_unsupp_global_called:OK
+#626/4   verifier_global_subprogs/unguarded_unsupp_global_called:OK
+#626/5   verifier_global_subprogs/arg_tag_nullable_ptr_fail:OK
+#626/6   verifier_global_subprogs/arg_tag_nonnull_ptr_good:OK
+#626/7   verifier_global_subprogs/arg_tag_ctx_raw_tp:OK
+#626/8   verifier_global_subprogs/anon_user_mem_invalid:OK
+#626/9   verifier_global_subprogs/anon_user_mem_valid:OK
+#626/10  verifier_global_subprogs/anon_user_mem_huge_size_invalid:OK
+#626/11  verifier_global_subprogs/arg_tag_ctx_raw_tp_writable:OK
+#626/12  verifier_global_subprogs/arg_tag_ctx_raw_tp_btf:OK
+#626/13  verifier_global_subprogs/arg_tag_ctx_tp:OK
+#626/14  verifier_global_subprogs/arg_tag_ctx_kprobe:OK
+#626/15  verifier_global_subprogs/arg_tag_ctx_perf:OK
+#626/16  verifier_global_subprogs/arg_tag_ctx_iter_task:OK
+#626/17  verifier_global_subprogs/arg_tag_ctx_fentry:OK
+#626/18  verifier_global_subprogs/arg_tag_ctx_fexit:OK
+#626/19  verifier_global_subprogs/arg_tag_ctx_fmod_ret:OK
+#626/20  verifier_global_subprogs/arg_tag_ctx_lsm:OK
+#626/21  verifier_global_subprogs/arg_tag_ctx_struct_ops:OK
+#626/22  verifier_global_subprogs/arg_tag_ctx_syscall:OK
+#626/23  verifier_global_subprogs/arg_tag_ctx_syscall_bpf_for:OK
+#626/24  verifier_global_subprogs/arg_tag_ctx_syscall_tailcall:OK
+#626/25  verifier_global_subprogs/arg_tag_ctx_syscall_tailcall_fixed_off_bad:OK
+#626/26  verifier_global_subprogs/arg_tag_ctx_syscall_tailcall_var_off_bad:OK
+#626/27  verifier_global_subprogs/arg_tag_ctx_syscall_fixed_off_bad:OK
+#626/28  verifier_global_subprogs/arg_tag_ctx_syscall_var_off_bad:OK
+#626/29  verifier_global_subprogs/arg_tag_dynptr:OK
+#626/30  verifier_global_subprogs/return_from_void_global:OK
+#626     verifier_global_subprogs:OK
+#627/1   verifier_gotol/gotol, small_imm:OK
+#627/2   verifier_gotol/gotol, small_imm @unpriv:OK
+#627/3   verifier_gotol/gotol, large_imm:OK
+#627/4   verifier_gotol/gotol, large_imm @unpriv:OK
+#627     verifier_gotol:OK
+#628/1   verifier_gotox/jump_table_ok:OK
+#628/2   verifier_gotox/jump_table_reserved_field_src_reg:OK
+#628/3   verifier_gotox/jump_table_reserved_field_non_zero_off:OK
+#628/4   verifier_gotox/jump_table_reserved_field_non_zero_imm:OK
+#628/5   verifier_gotox/jump_table_no_jump_table:OK
+#628/6   verifier_gotox/jump_table_incorrect_dst_reg_type:OK
+#628/7   verifier_gotox/jump_table_invalid_read_size_u32:OK
+#628/8   verifier_gotox/jump_table_invalid_read_size_u16:OK
+#628/9   verifier_gotox/jump_table_invalid_read_size_u8:OK
+#628/10  verifier_gotox/jump_table_misaligned_access:OK
+#628/11  verifier_gotox/jump_table_invalid_mem_acceess_pos:OK
+#628/12  verifier_gotox/jump_table_invalid_mem_acceess_neg:OK
+#628/13  verifier_gotox/jump_table_add_sub_ok:OK
+#628/14  verifier_gotox/jump_table_no_writes:OK
+#628/15  verifier_gotox/jump_table_use_reg_r0:OK
+#628/16  verifier_gotox/jump_table_use_reg_r1:OK
+#628/17  verifier_gotox/jump_table_use_reg_r2:OK
+#628/18  verifier_gotox/jump_table_use_reg_r3:OK
+#628/19  verifier_gotox/jump_table_use_reg_r4:OK
+#628/20  verifier_gotox/jump_table_use_reg_r5:OK
+#628/21  verifier_gotox/jump_table_use_reg_r6:OK
+#628/22  verifier_gotox/jump_table_use_reg_r7:OK
+#628/23  verifier_gotox/jump_table_use_reg_r8:OK
+#628/24  verifier_gotox/jump_table_use_reg_r9:OK
+#628/25  verifier_gotox/jump_table_outside_subprog:OK
+#628/26  verifier_gotox/jump_table_contains_non_unique_values:OK
+#628/27  verifier_gotox/spill_fill_ptr_to_insn:OK
+#628     verifier_gotox:OK
+#629/1   verifier_helper_access_var_len/helper access to variable memory: stack, bitwise AND + JMP, correct bounds:OK
+#629/2   verifier_helper_access_var_len/helper access to variable memory: stack, bitwise AND + JMP, wrong max:OK
+#629/3   verifier_helper_access_var_len/helper access to variable memory: stack, JMP, correct bounds:OK
+#629/4   verifier_helper_access_var_len/helper access to variable memory: stack, JMP (signed), correct bounds:OK
+#629/5   verifier_helper_access_var_len/helper access to variable memory: stack, JMP, bounds + offset:OK
+#629/6   verifier_helper_access_var_len/helper access to variable memory: stack, JMP, wrong max:OK
+#629/7   verifier_helper_access_var_len/helper access to variable memory: stack, JMP, no max check:OK
+#629/8   verifier_helper_access_var_len/helper access to variable memory: stack, JMP (signed), no min check:OK
+#629/9   verifier_helper_access_var_len/helper access to variable memory: map, JMP, correct bounds:OK
+#629/10  verifier_helper_access_var_len/helper access to variable memory: map, JMP, wrong max:OK
+#629/11  verifier_helper_access_var_len/helper access to variable memory: map adjusted, JMP, correct bounds:OK
+#629/12  verifier_helper_access_var_len/helper access to variable memory: map adjusted, JMP, wrong max:OK
+#629/13  verifier_helper_access_var_len/helper access to variable memory: size = 0 not allowed on NULL (!ARG_PTR_TO_MEM_OR_NULL):OK
+#629/14  verifier_helper_access_var_len/helper access to variable memory: size > 0 not allowed on NULL (!ARG_PTR_TO_MEM_OR_NULL):OK
+#629/15  verifier_helper_access_var_len/helper access to variable memory: size = 0 allowed on != NULL stack pointer (!ARG_PTR_TO_MEM_OR_NULL):OK
+#629/16  verifier_helper_access_var_len/helper access to variable memory: size = 0 allowed on != NULL map pointer (!ARG_PTR_TO_MEM_OR_NULL):OK
+#629/17  verifier_helper_access_var_len/helper access to variable memory: size possible = 0 allowed on != NULL stack pointer (!ARG_PTR_TO_MEM_OR_NULL):OK
+#629/18  verifier_helper_access_var_len/helper access to variable memory: size possible = 0 allowed on != NULL map pointer (!ARG_PTR_TO_MEM_OR_NULL):OK
+#629/19  verifier_helper_access_var_len/helper access to variable memory: 8 bytes no leak (init memory):OK
+#629/20  verifier_helper_access_var_len/helper access to variable memory: stack, bitwise AND, zero included:OK
+#629/21  verifier_helper_access_var_len/helper access to variable memory: stack, bitwise AND, zero included @unpriv:OK
+#629/22  verifier_helper_access_var_len/helper access to variable memory: stack, JMP, no min check:OK
+#629/23  verifier_helper_access_var_len/helper access to variable memory: stack, JMP, no min check @unpriv:OK
+#629/24  verifier_helper_access_var_len/helper access to variable memory: 8 bytes leak:OK
+#629/25  verifier_helper_access_var_len/helper access to variable memory: 8 bytes leak @unpriv:OK
+#629/26  verifier_helper_access_var_len/helper access to variable memory: size = 0 allowed on NULL (ARG_PTR_TO_MEM_OR_NULL):OK
+#629/27  verifier_helper_access_var_len/helper access to variable memory: size > 0 not allowed on NULL (ARG_PTR_TO_MEM_OR_NULL):OK
+#629/28  verifier_helper_access_var_len/helper access to variable memory: size = 0 allowed on != NULL stack pointer (ARG_PTR_TO_MEM_OR_NULL):OK
+#629/29  verifier_helper_access_var_len/helper access to variable memory: size = 0 allowed on != NULL map pointer (ARG_PTR_TO_MEM_OR_NULL):OK
+#629/30  verifier_helper_access_var_len/helper access to variable memory: size possible = 0 allowed on != NULL stack pointer (ARG_PTR_TO_MEM_OR_NULL):OK
+#629/31  verifier_helper_access_var_len/helper access to variable memory: size possible = 0 allowed on != NULL map pointer (ARG_PTR_TO_MEM_OR_NULL):OK
+#629/32  verifier_helper_access_var_len/helper access to variable memory: size possible = 0 allowed on != NULL packet pointer (ARG_PTR_TO_MEM_OR_NULL):OK
+#629     verifier_helper_access_var_len:OK
+#630/1   verifier_helper_packet_access/helper access to packet: test1, valid packet_ptr range:OK
+#630/2   verifier_helper_packet_access/helper access to packet: test2, unchecked packet_ptr:OK
+#630/3   verifier_helper_packet_access/helper access to packet: test3, variable add:OK
+#630/4   verifier_helper_packet_access/helper access to packet: test4, packet_ptr with bad range:OK
+#630/5   verifier_helper_packet_access/helper access to packet: test5, packet_ptr with too short range:OK
+#630/6   verifier_helper_packet_access/helper access to packet: test6, cls valid packet_ptr range:OK
+#630/7   verifier_helper_packet_access/helper access to packet: test7, cls unchecked packet_ptr:OK
+#630/8   verifier_helper_packet_access/helper access to packet: test8, cls variable add:OK
+#630/9   verifier_helper_packet_access/helper access to packet: test9, cls packet_ptr with bad range:OK
+#630/10  verifier_helper_packet_access/helper access to packet: test10, cls packet_ptr with too short range:OK
+#630/11  verifier_helper_packet_access/helper access to packet: test11, cls unsuitable helper 1:OK
+#630/12  verifier_helper_packet_access/helper access to packet: test12, cls unsuitable helper 2:OK
+#630/13  verifier_helper_packet_access/helper access to packet: test13, cls helper ok:OK
+#630/14  verifier_helper_packet_access/helper access to packet: test14, cls helper ok sub:OK
+#630/15  verifier_helper_packet_access/helper access to packet: test15, cls helper fail sub:OK
+#630/16  verifier_helper_packet_access/helper access to packet: test16, cls helper fail range 1:OK
+#630/17  verifier_helper_packet_access/helper access to packet: test17, cls helper fail range 2:OK
+#630/18  verifier_helper_packet_access/helper access to packet: test18, cls helper fail range 3:OK
+#630/19  verifier_helper_packet_access/helper access to packet: test19, cls helper range zero:OK
+#630/20  verifier_helper_packet_access/helper access to packet: test20, pkt end as input:OK
+#630/21  verifier_helper_packet_access/helper access to packet: test21, wrong reg:OK
+#630     verifier_helper_packet_access:OK
+#631/1   verifier_helper_restricted/bpf_ktime_get_coarse_ns is forbidden in BPF_PROG_TYPE_KPROBE:OK
+#631/2   verifier_helper_restricted/bpf_spin_lock is forbidden in BPF_PROG_TYPE_KPROBE:OK
+#631/3   verifier_helper_restricted/bpf_ktime_get_coarse_ns is forbidden in BPF_PROG_TYPE_TRACEPOINT:OK
+#631/4   verifier_helper_restricted/bpf_spin_lock is forbidden in BPF_PROG_TYPE_TRACEPOINT:OK
+#631/5   verifier_helper_restricted/bpf_ktime_get_coarse_ns is forbidden in BPF_PROG_TYPE_PERF_EVENT:OK
+#631/6   verifier_helper_restricted/bpf_spin_lock is forbidden in BPF_PROG_TYPE_PERF_EVENT:OK
+#631/7   verifier_helper_restricted/bpf_ktime_get_coarse_ns is forbidden in BPF_PROG_TYPE_RAW_TRACEPOINT:OK
+#631/8   verifier_helper_restricted/bpf_spin_lock is forbidden in BPF_PROG_TYPE_RAW_TRACEPOINT:OK
+#631     verifier_helper_restricted:OK
+#632/1   verifier_helper_value_access/helper access to map: full range:OK
+#632/2   verifier_helper_value_access/helper access to map: partial range:OK
+#632/3   verifier_helper_value_access/helper access to map: empty range:OK
+#632/4   verifier_helper_value_access/helper access to map: possibly-empty ange:OK
+#632/5   verifier_helper_value_access/helper access to map: out-of-bound range:OK
+#632/6   verifier_helper_value_access/helper access to map: negative range:OK
+#632/7   verifier_helper_value_access/helper access to adjusted map (via const imm): full range:OK
+#632/8   verifier_helper_value_access/helper access to adjusted map (via const imm): partial range:OK
+#632/9   verifier_helper_value_access/helper access to adjusted map (via const imm): empty range:OK
+#632/10  verifier_helper_value_access/helper access to adjusted map (via const imm): out-of-bound range:OK
+#632/11  verifier_helper_value_access/helper access to adjusted map (via const imm): negative range (> adjustment):OK
+#632/12  verifier_helper_value_access/helper access to adjusted map (via const imm): negative range (< adjustment):OK
+#632/13  verifier_helper_value_access/helper access to adjusted map (via const reg): full range:OK
+#632/14  verifier_helper_value_access/helper access to adjusted map (via const reg): partial range:OK
+#632/15  verifier_helper_value_access/helper access to adjusted map (via const reg): empty range:OK
+#632/16  verifier_helper_value_access/helper access to adjusted map (via const reg): out-of-bound range:OK
+#632/17  verifier_helper_value_access/helper access to adjusted map (via const reg): negative range (> adjustment):OK
+#632/18  verifier_helper_value_access/helper access to adjusted map (via const reg): negative range (< adjustment):OK
+#632/19  verifier_helper_value_access/helper access to adjusted map (via variable): full range:OK
+#632/20  verifier_helper_value_access/helper access to adjusted map (via variable): partial range:OK
+#632/21  verifier_helper_value_access/helper access to adjusted map (via variable): empty range:OK
+#632/22  verifier_helper_value_access/helper access to adjusted map (via variable): no max check:OK
+#632/23  verifier_helper_value_access/helper access to adjusted map (via variable): wrong max check:OK
+#632/24  verifier_helper_value_access/helper access to map: bounds check using <, good access:OK
+#632/25  verifier_helper_value_access/helper access to map: bounds check using <, bad access:OK
+#632/26  verifier_helper_value_access/helper access to map: bounds check using <=, good access:OK
+#632/27  verifier_helper_value_access/helper access to map: bounds check using <=, bad access:OK
+#632/28  verifier_helper_value_access/helper access to map: bounds check using s<, good access:OK
+#632/29  verifier_helper_value_access/helper access to map: bounds check using s<, good access 2:OK
+#632/30  verifier_helper_value_access/helper access to map: bounds check using s<, bad access:OK
+#632/31  verifier_helper_value_access/helper access to map: bounds check using s<=, good access:OK
+#632/32  verifier_helper_value_access/helper access to map: bounds check using s<=, good access 2:OK
+#632/33  verifier_helper_value_access/helper access to map: bounds check using s<=, bad access:OK
+#632/34  verifier_helper_value_access/map lookup helper access to map:OK
+#632/35  verifier_helper_value_access/map update helper access to map:OK
+#632/36  verifier_helper_value_access/map update helper access to map: wrong size:OK
+#632/37  verifier_helper_value_access/map helper access to adjusted map (via const imm):OK
+#632/38  verifier_helper_value_access/map helper access to adjusted map (via const imm): out-of-bound 1:OK
+#632/39  verifier_helper_value_access/map helper access to adjusted map (via const imm): out-of-bound 2:OK
+#632/40  verifier_helper_value_access/map helper access to adjusted map (via const reg):OK
+#632/41  verifier_helper_value_access/map helper access to adjusted map (via const reg): out-of-bound 1:OK
+#632/42  verifier_helper_value_access/map helper access to adjusted map (via const reg): out-of-bound 2:OK
+#632/43  verifier_helper_value_access/map helper access to adjusted map (via variable):OK
+#632/44  verifier_helper_value_access/map helper access to adjusted map (via variable): no max check:OK
+#632/45  verifier_helper_value_access/map helper access to adjusted map (via variable): wrong max check:OK
+#632     verifier_helper_value_access:OK
+#633/1   verifier_int_ptr/arg pointer to long uninitialized:OK
+#633/2   verifier_int_ptr/arg pointer to long half-uninitialized:OK
+#633/3   verifier_int_ptr/arg pointer to long misaligned:OK
+#633/4   verifier_int_ptr/arg pointer to long size < sizeof(long):OK
+#633/5   verifier_int_ptr/arg pointer to long initialized:OK
+#633     verifier_int_ptr:OK
+#634/1   verifier_iterating_callbacks/unsafe_on_2nd_iter:OK
+#634/2   verifier_iterating_callbacks/unsafe_on_zero_iter:OK
+#634/3   verifier_iterating_callbacks/widening:OK
+#634/4   verifier_iterating_callbacks/loop_detection:OK
+#634/5   verifier_iterating_callbacks/unsafe_for_each_map_elem:OK
+#634/6   verifier_iterating_callbacks/unsafe_ringbuf_drain:OK
+#634/7   verifier_iterating_callbacks/unsafe_find_vma:OK
+#634/8   verifier_iterating_callbacks/bpf_loop_iter_limit_ok:OK
+#634/9   verifier_iterating_callbacks/bpf_loop_iter_limit_overflow:OK
+#634/10  verifier_iterating_callbacks/bpf_loop_iter_limit_nested:OK
+#634/11  verifier_iterating_callbacks/jgt_imm64_and_may_goto:OK
+#634/12  verifier_iterating_callbacks/may_goto_self:OK
+#634/13  verifier_iterating_callbacks/may_goto_neg_off:OK
+#634/14  verifier_iterating_callbacks/ja_and_may_goto:OK
+#634/15  verifier_iterating_callbacks/ja_and_may_goto2:OK
+#634/16  verifier_iterating_callbacks/jlt_and_may_goto:OK
+#634/17  verifier_iterating_callbacks/gotol_and_may_goto:OK
+#634/18  verifier_iterating_callbacks/ja_and_may_goto_subprog:OK
+#634/19  verifier_iterating_callbacks/cond_break1:OK
+#634/20  verifier_iterating_callbacks/cond_break2:OK
+#634/21  verifier_iterating_callbacks/cond_break3:OK
+#634/22  verifier_iterating_callbacks/cond_break4:OK
+#634/23  verifier_iterating_callbacks/cond_break5:OK
+#634/24  verifier_iterating_callbacks/loop_inside_iter:OK
+#634/25  verifier_iterating_callbacks/loop_inside_iter_signed:OK
+#634/26  verifier_iterating_callbacks/loop_inside_iter_volatile_limit:OK
+#634/27  verifier_iterating_callbacks/test1:OK
+#634/28  verifier_iterating_callbacks/test2:OK
+#634/29  verifier_iterating_callbacks/test3:OK
+#634/30  verifier_iterating_callbacks/test4:OK
+#634/31  verifier_iterating_callbacks/check add const:OK
+#634/32  verifier_iterating_callbacks/check_add_const_3regs:OK
+#634/33  verifier_iterating_callbacks/check_add_const_3regs_2if:OK
+#634/34  verifier_iterating_callbacks/check_add_const_regsafe_off:OK
+#634/35  verifier_iterating_callbacks/iter_limit_bug:OK
+#634     verifier_iterating_callbacks:OK
+#635/1   verifier_jeq_infer_not_null/jne/jeq infer not null, PTR_TO_SOCKET_OR_NULL -> PTR_TO_SOCKET for JNE false branch:OK
+#635/2   verifier_jeq_infer_not_null/jne/jeq infer not null, PTR_TO_SOCKET_OR_NULL -> PTR_TO_SOCKET for JNE false branch @unpriv:OK
+#635/3   verifier_jeq_infer_not_null/jne/jeq infer not null, PTR_TO_SOCKET_OR_NULL unchanged for JNE true branch:OK
+#635/4   verifier_jeq_infer_not_null/jne/jeq infer not null, PTR_TO_SOCKET_OR_NULL unchanged for JNE true branch @unpriv:OK
+#635/5   verifier_jeq_infer_not_null/jne/jeq infer not null, PTR_TO_SOCKET_OR_NULL -> PTR_TO_SOCKET for JEQ true branch:OK
+#635/6   verifier_jeq_infer_not_null/jne/jeq infer not null, PTR_TO_SOCKET_OR_NULL -> PTR_TO_SOCKET for JEQ true branch @unpriv:OK
+#635/7   verifier_jeq_infer_not_null/jne/jeq infer not null, PTR_TO_SOCKET_OR_NULL unchanged for JEQ false branch:OK
+#635/8   verifier_jeq_infer_not_null/jne/jeq infer not null, PTR_TO_SOCKET_OR_NULL unchanged for JEQ false branch @unpriv:OK
+#635/9   verifier_jeq_infer_not_null/jne/jeq infer not null, PTR_TO_MAP_VALUE_OR_NULL -> PTR_TO_MAP_VALUE:OK
+#635/10  verifier_jeq_infer_not_null/jeq_reg_reg_null_check:OK
+#635/11  verifier_jeq_infer_not_null/jne_reg_reg_null_check:OK
+#635     verifier_jeq_infer_not_null:OK
+#636/1   verifier_jit_convergence/bpf_jit_convergence je <-> jmp:SKIP
+#636     verifier_jit_convergence:SKIP
+#637/1   verifier_jit_inline/inline_bpf_get_current_task:SKIP
+#637/2   verifier_jit_inline/inline_bpf_get_smp_processor_id:SKIP
+#637     verifier_jit_inline:SKIP
+#638/1   verifier_kfunc_prog_types/task_kfunc_raw_tp:OK
+#638/2   verifier_kfunc_prog_types/cgrp_kfunc_raw_tp:OK
+#638/3   verifier_kfunc_prog_types/cpumask_kfunc_raw_tp:OK
+#638/4   verifier_kfunc_prog_types/task_kfunc_syscall:OK
+#638/5   verifier_kfunc_prog_types/cgrp_kfunc_syscall:OK
+#638/6   verifier_kfunc_prog_types/cpumask_kfunc_syscall:OK
+#638/7   verifier_kfunc_prog_types/task_kfunc_tracepoint:OK
+#638/8   verifier_kfunc_prog_types/cgrp_kfunc_tracepoint:OK
+#638/9   verifier_kfunc_prog_types/cpumask_kfunc_tracepoint:OK
+#638/10  verifier_kfunc_prog_types/task_kfunc_perf_event:OK
+#638/11  verifier_kfunc_prog_types/cgrp_kfunc_perf_event:OK
+#638/12  verifier_kfunc_prog_types/cpumask_kfunc_perf_event:OK
+#638     verifier_kfunc_prog_types:OK
+#639/1   verifier_ld_ind/ld_ind: check calling conv, r1:OK
+#639/2   verifier_ld_ind/ld_ind: check calling conv, r1 @unpriv:OK
+#639/3   verifier_ld_ind/ld_ind: check calling conv, r2:OK
+#639/4   verifier_ld_ind/ld_ind: check calling conv, r2 @unpriv:OK
+#639/5   verifier_ld_ind/ld_ind: check calling conv, r3:OK
+#639/6   verifier_ld_ind/ld_ind: check calling conv, r3 @unpriv:OK
+#639/7   verifier_ld_ind/ld_ind: check calling conv, r4:OK
+#639/8   verifier_ld_ind/ld_ind: check calling conv, r4 @unpriv:OK
+#639/9   verifier_ld_ind/ld_ind: check calling conv, r5:OK
+#639/10  verifier_ld_ind/ld_ind: check calling conv, r5 @unpriv:OK
+#639/11  verifier_ld_ind/ld_ind: check calling conv, r7:OK
+#639/12  verifier_ld_ind/ld_ind: check calling conv, r7 @unpriv:OK
+#639/13  verifier_ld_ind/ld_abs: subprog early exit on ld_abs failure:OK
+#639/14  verifier_ld_ind/ld_ind: subprog early exit on ld_ind failure:OK
+#639/15  verifier_ld_ind/ld_abs: subprog with both paths safe:OK
+#639/16  verifier_ld_ind/ld_ind: subprog with both paths safe:OK
+#639/17  verifier_ld_ind/ld_abs: reject void return subprog:OK
+#639/18  verifier_ld_ind/ld_ind: reject void return subprog:OK
+#639     verifier_ld_ind:OK
+#640/1   verifier_ldsx/LDSX, S8:OK
+#640/2   verifier_ldsx/LDSX, S8 @unpriv:OK
+#640/3   verifier_ldsx/LDSX, S16:OK
+#640/4   verifier_ldsx/LDSX, S16 @unpriv:OK
+#640/5   verifier_ldsx/LDSX, S32:OK
+#640/6   verifier_ldsx/LDSX, S32 @unpriv:OK
+#640/7   verifier_ldsx/LDSX, S8 range checking, privileged:OK
+#640/8   verifier_ldsx/LDSX, S16 range checking:OK
+#640/9   verifier_ldsx/LDSX, S16 range checking @unpriv:OK
+#640/10  verifier_ldsx/LDSX, S32 range checking:OK
+#640/11  verifier_ldsx/LDSX, S32 range checking @unpriv:OK
+#640/12  verifier_ldsx/LDSX, xdp s32 xdp_md->data:OK
+#640/13  verifier_ldsx/LDSX, xdp s32 xdp_md->data_end:OK
+#640/14  verifier_ldsx/LDSX, xdp s32 xdp_md->data_meta:OK
+#640/15  verifier_ldsx/LDSX, tcx s32 __sk_buff->data:OK
+#640/16  verifier_ldsx/LDSX, tcx s32 __sk_buff->data_end:OK
+#640/17  verifier_ldsx/LDSX, tcx s32 __sk_buff->data_meta:OK
+#640/18  verifier_ldsx/LDSX, flow_dissector s32 __sk_buff->data:OK
+#640/19  verifier_ldsx/LDSX, flow_dissector s32 __sk_buff->data_end:OK
+#640/20  verifier_ldsx/Arena LDSX Disasm:SKIP
+#640/21  verifier_ldsx/Arena LDSX Exception:OK
+#640/22  verifier_ldsx/Arena LDSX, S8:OK
+#640/23  verifier_ldsx/Arena LDSX, S16:OK
+#640/24  verifier_ldsx/Arena LDSX, S32:OK
+#640     verifier_ldsx:OK (SKIP: 1/24)
+#641/1   verifier_leak_ptr/leak pointer into ctx 1:OK
+#641/2   verifier_leak_ptr/leak pointer into ctx 1 @unpriv:OK
+#641/3   verifier_leak_ptr/leak pointer into ctx 2:OK
+#641/4   verifier_leak_ptr/leak pointer into ctx 2 @unpriv:OK
+#641/5   verifier_leak_ptr/leak pointer into ctx 3:OK
+#641/6   verifier_leak_ptr/leak pointer into ctx 3 @unpriv:OK
+#641/7   verifier_leak_ptr/leak pointer into map val:OK
+#641/8   verifier_leak_ptr/leak pointer into map val @unpriv:OK
+#641     verifier_leak_ptr:OK
+#642/1   verifier_linked_scalars/scalars: find linked scalars:OK
+#642/2   verifier_linked_scalars/sync_linked_regs_preserves_id:OK
+#642/3   verifier_linked_scalars/scalars_neg:OK
+#642/4   verifier_linked_scalars/scalars_neg_sub:OK
+#642/5   verifier_linked_scalars/scalars_neg_alu32_add:OK
+#642/6   verifier_linked_scalars/scalars_neg_alu32_sub:OK
+#642/7   verifier_linked_scalars/scalars_pos:OK
+#642/8   verifier_linked_scalars/scalars_sub_neg_imm:OK
+#642/9   verifier_linked_scalars/scalars_double_add:OK
+#642/10  verifier_linked_scalars/scalars_sync_delta_overflow:OK
+#642/11  verifier_linked_scalars/scalars_sync_delta_overflow_large_range:OK
+#642/12  verifier_linked_scalars/scalars_alu32_big_offset:OK
+#642/13  verifier_linked_scalars/scalars_alu32_basic:OK
+#642/14  verifier_linked_scalars/scalars_alu32_wrap:OK
+#642/15  verifier_linked_scalars/scalars_alu32_zext_linked_reg:OK
+#642/16  verifier_linked_scalars/scalars_alu32_alu64_cross_type:OK
+#642/17  verifier_linked_scalars/scalars_alu32_alu64_regsafe_pruning:OK
+#642/18  verifier_linked_scalars/alu32_negative_offset:OK
+#642/19  verifier_linked_scalars/spurious_precision_marks:OK
+#642/20  verifier_linked_scalars/scalars_self_add_clears_id:OK
+#642/21  verifier_linked_scalars/scalars_self_add_alu32_clears_id:OK
+#642/22  verifier_linked_scalars/scalars_stale_delta_from_cleared_id:OK
+#642/23  verifier_linked_scalars/scalars_stale_delta_from_cleared_id_alu32:OK
+#642/24  verifier_linked_scalars/linked scalars: add_const base_id must be consistent for pruning:OK
+#642     verifier_linked_scalars:OK
+#643/1   verifier_live_stack/simple_read_simple_write:OK
+#643/2   verifier_live_stack/read_write_join:OK
+#643/3   verifier_live_stack/must_write_not_same_slot:OK
+#643/4   verifier_live_stack/must_write_not_same_type:OK
+#643/5   verifier_live_stack/caller_stack_write:OK
+#643/6   verifier_live_stack/caller_stack_read:OK
+#643/7   verifier_live_stack/arg_track_join_convergence:OK
+#643/8   verifier_live_stack/caller_stack_pruning:OK
+#643/9   verifier_live_stack/caller_stack_pruning_callback:OK
+#643/10  verifier_live_stack/syzbot_postorder_bug1:OK
+#643/11  verifier_live_stack/caller_stack_write_tail_call:OK
+#643/12  verifier_live_stack/subprog_precise_stack_access:OK
+#643/13  verifier_live_stack/subprog_multilevel_conservative:OK
+#643/14  verifier_live_stack/callee_consumed_caller_stack:OK
+#643/15  verifier_live_stack/stack_zero_to_misc_unsound_array_lookup:OK
+#643/16  verifier_live_stack/subprog_stack_zero_to_misc_unsound:OK
+#643/17  verifier_live_stack/spill_reload_inflates_stack_liveness:OK
+#643/18  verifier_live_stack/kfunc_iter_stack_liveness:OK
+#643/19  verifier_live_stack/spill_ptr_liveness_type_confusion:OK
+#643/20  verifier_live_stack/four_byte_write_kills_slot:OK
+#643/21  verifier_live_stack/dead_half_spi_write:OK
+#643/22  verifier_live_stack/four_byte_read_upper_half:OK
+#643/23  verifier_live_stack/two_byte_write_no_kill:OK
+#643/24  verifier_live_stack/one_byte_write_no_kill:OK
+#643/25  verifier_live_stack/high_stack_second_bitmask_word:OK
+#643/26  verifier_live_stack/two_four_byte_writes_kill_full_spi:OK
+#643/27  verifier_live_stack/both_branches_kill_slot:OK
+#643/28  verifier_live_stack/half_spi_clean_preserves_stack_zero:OK
+#643/29  verifier_live_stack/dead_spill_at_merge_enables_pruning:OK
+#643/30  verifier_live_stack/fp_add_loses_precision_kills_liveness:OK
+#643/31  verifier_live_stack/fp_spill_loses_precision_kills_liveness:OK
+#643/32  verifier_live_stack/conditional_stx_in_subprog:OK
+#643/33  verifier_live_stack/multiple_callsites_different_offsets:OK
+#643/34  verifier_live_stack/nested_fp_passthrough:OK
+#643/35  verifier_live_stack/callee_must_write_before_read:OK
+#643/36  verifier_live_stack/return_site_liveness_bleeding:OK
+#643/37  verifier_live_stack/callback_conditional_read_beyond_ctx:OK
+#643/38  verifier_live_stack/callback_write_before_read_kills:OK
+#643/39  verifier_live_stack/callback_conditional_write_preserves:OK
+#643/40  verifier_live_stack/callback_two_calls_different_ctx:OK
+#643/41  verifier_live_stack/transitive_parent_stack_read_unsound:OK
+#643/42  verifier_live_stack/two_fp_clear_stack_threshold:OK
+#643/43  verifier_live_stack/one_fp_clear_stack_threshold:OK
+#643/44  verifier_live_stack/helper_parent_stack_read_unsound:OK
+#643/45  verifier_live_stack/helper_arg_fallback_keeps_scanning:OK
+#643/46  verifier_live_stack/propagate_callee_ancestor_chain:OK
+#643/47  verifier_live_stack/spilled_fp_cross_frame_deref:OK
+#643/48  verifier_live_stack/test_merge_nonlocal_live:OK
+#643/49  verifier_live_stack/bpf_loop_two_callbacks:OK
+#643/50  verifier_live_stack/stack_or_non_stack_write:OK
+#643/51  verifier_live_stack/shared_instance_must_write_overwrite:OK
+#643/52  verifier_live_stack/stale_must_write_cross_callsite:OK
+#643/53  verifier_live_stack/load_acquire_dont_clear_dst:OK
+#643/54  verifier_live_stack/imprecise_fill_loses_cross_frame:OK
+#643/55  verifier_live_stack/spill_join_with_multi_off:OK
+#643/56  verifier_live_stack/spill_join_with_imprecise_off:OK
+#643/57  verifier_live_stack/st_imm_join_with_multi_off:OK
+#643/58  verifier_live_stack/st_imm_join_with_single_off:OK
+#643/59  verifier_live_stack/st_imm_join_with_imprecise_off:OK
+#643/60  verifier_live_stack/imprecise_dst_spill_join:OK
+#643     verifier_live_stack:OK
+#644/1   verifier_liveness_exp/liveness_exponential_complexity:OK
+#644     verifier_liveness_exp:OK
+#645/1   verifier_load_acquire/load-acquire, 8-bit:OK
+#645/2   verifier_load_acquire/load-acquire, 8-bit @unpriv:OK
+#645/3   verifier_load_acquire/load-acquire, 16-bit:OK
+#645/4   verifier_load_acquire/load-acquire, 16-bit @unpriv:OK
+#645/5   verifier_load_acquire/load-acquire, 32-bit:OK
+#645/6   verifier_load_acquire/load-acquire, 32-bit @unpriv:OK
+#645/7   verifier_load_acquire/load-acquire, 64-bit:OK
+#645/8   verifier_load_acquire/load-acquire, 64-bit @unpriv:OK
+#645/9   verifier_load_acquire/load-acquire with uninitialized src_reg:OK
+#645/10  verifier_load_acquire/load-acquire with uninitialized src_reg @unpriv:OK
+#645/11  verifier_load_acquire/load-acquire with non-pointer src_reg:OK
+#645/12  verifier_load_acquire/load-acquire with non-pointer src_reg @unpriv:OK
+#645/13  verifier_load_acquire/misaligned load-acquire:OK
+#645/14  verifier_load_acquire/misaligned load-acquire @unpriv:OK
+#645/15  verifier_load_acquire/load-acquire from ctx pointer:OK
+#645/16  verifier_load_acquire/load-acquire from ctx pointer @unpriv:OK
+#645/17  verifier_load_acquire/load-acquire with invalid register R15:OK
+#645/18  verifier_load_acquire/load-acquire with invalid register R15 @unpriv:OK
+#645/19  verifier_load_acquire/load-acquire from pkt pointer:OK
+#645/20  verifier_load_acquire/load-acquire from flow_keys pointer:OK
+#645/21  verifier_load_acquire/load-acquire from sock pointer:OK
+#645     verifier_load_acquire:OK
+#646/1   verifier_log/good_prog-level1:OK
+#646/2   verifier_log/good_prog-level2:OK
+#646/3   verifier_log/bad_prog-level1:OK
+#646/4   verifier_log/bad_prog-level2:OK
+#646/5   verifier_log/bad_btf:OK
+#646/6   verifier_log/good_btf:OK
+#646     verifier_log:OK
+#647/1   verifier_loops1/bounded loop, count to 4:OK
+#647/2   verifier_loops1/bounded loop containing a forward jump:OK
+#647/3   verifier_loops1/not-taken loop with back jump to 1st insn:OK
+#647/4   verifier_loops1/taken loop with back jump to 1st insn:OK
+#647/5   verifier_loops1/taken loop with back jump to 1st insn, 2:OK
+#647/6   verifier_loops1/not_an_inifinite_loop:OK
+#647/7   verifier_loops1/bounded loop, count to 20:OK
+#647/8   verifier_loops1/bounded loop, count from positive unknown to 4:OK
+#647/9   verifier_loops1/bounded loop, count from totally unknown to 4:OK
+#647/10  verifier_loops1/bounded loop, count to 4 with equality:OK
+#647/11  verifier_loops1/bounded loop that jumps out rather than in:OK
+#647/12  verifier_loops1/infinite loop after a conditional jump:OK
+#647/13  verifier_loops1/bounded recursion:OK
+#647/14  verifier_loops1/infinite loop in two jumps:OK
+#647/15  verifier_loops1/infinite loop: three-jump trick:OK
+#647/16  verifier_loops1/bounded loop, start in the middle:OK
+#647/17  verifier_loops1/bounded loop, start in the middle @unpriv:OK
+#647/18  verifier_loops1/maybe_exit_scc_bug1 @unpriv:OK
+#647     verifier_loops1:OK
+#648/1   verifier_lsm/lsm bpf prog with -4095~0 retval. test 1:OK
+#648/2   verifier_lsm/lsm bpf prog with -4095~0 retval. test 2:OK
+#648/3   verifier_lsm/lsm bpf prog with -4095~0 retval. test 4:OK
+#648/4   verifier_lsm/lsm bpf prog with -4095~0 retval. test 5:OK
+#648/5   verifier_lsm/lsm bpf prog with -4095~0 retval. test 6:OK
+#648/6   verifier_lsm/lsm retval load must reset stale register bounds:OK
+#648/7   verifier_lsm/lsm bpf prog with bool retval. test 1:OK
+#648/8   verifier_lsm/lsm bpf prog with bool retval. test 2:OK
+#648/9   verifier_lsm/lsm bpf prog with bool retval. test 3:OK
+#648/10  verifier_lsm/lsm bpf prog with bool retval. test 4:OK
+#648/11  verifier_lsm/lsm bpf prog with void retval. test 1:OK
+#648/12  verifier_lsm/lsm bpf prog with void retval. test 2:OK
+#648/13  verifier_lsm/lsm disabled hook: getprocattr:OK
+#648/14  verifier_lsm/lsm disabled hook: setprocattr:OK
+#648/15  verifier_lsm/lsm disabled hook: ismaclabel:OK
+#648/16  verifier_lsm/not null checking nullable pointer in bpf_lsm_mmap_file:OK
+#648/17  verifier_lsm/null checking nullable pointer in bpf_lsm_mmap_file:OK
+#648/18  verifier_lsm/sleepable lsm_cgroup program is rejected:OK
+#648     verifier_lsm:OK
+#649/1   verifier_lwt/invalid direct packet write for LWT_IN:OK
+#649/2   verifier_lwt/direct packet read for LWT_IN:OK
+#649/3   verifier_lwt/check skb->tc_classid half load not permitted for lwt prog:OK
+#649/4   verifier_lwt/invalid direct packet write for LWT_OUT:OK
+#649/5   verifier_lwt/direct packet read for LWT_OUT:OK
+#649/6   verifier_lwt/direct packet write for LWT_XMIT:OK
+#649/7   verifier_lwt/direct packet read for LWT_XMIT:OK
+#649/8   verifier_lwt/overlapping checks for direct packet access:OK
+#649/9   verifier_lwt/make headroom for LWT_XMIT:OK
+#649/10  verifier_lwt/invalid access of tc_classid for LWT_IN:OK
+#649/11  verifier_lwt/invalid access of tc_classid for LWT_IN @unpriv:OK
+#649/12  verifier_lwt/invalid access of tc_classid for LWT_OUT:OK
+#649/13  verifier_lwt/invalid access of tc_classid for LWT_OUT @unpriv:OK
+#649/14  verifier_lwt/invalid access of tc_classid for LWT_XMIT:OK
+#649/15  verifier_lwt/invalid access of tc_classid for LWT_XMIT @unpriv:OK
+#649     verifier_lwt:OK
+#650/1   verifier_map_in_map/map in map access:OK
+#650/2   verifier_map_in_map/map in map access @unpriv:OK
+#650/3   verifier_map_in_map/map in map dynamic inner array lookup is nullable:OK
+#650/4   verifier_map_in_map/invalid inner map pointer:OK
+#650/5   verifier_map_in_map/invalid inner map pointer @unpriv:OK
+#650/6   verifier_map_in_map/forgot null checking on the inner map pointer:OK
+#650/7   verifier_map_in_map/forgot null checking on the inner map pointer @unpriv:OK
+#650/8   verifier_map_in_map/map_ptr is never null:OK
+#650/9   verifier_map_in_map/map_ptr is never null inner:OK
+#650/10  verifier_map_in_map/map_ptr is never null inner spill fill:OK
+#650/11  verifier_map_in_map/map_ptr_is_never_null_rb:OK
+#650/12  verifier_map_in_map/map in map state pruning:OK
+#650     verifier_map_in_map:OK
+#651/1   verifier_map_ptr/bpf_map_ptr: read with negative offset rejected:OK
+#651/2   verifier_map_ptr/bpf_map_ptr: read with negative offset rejected @unpriv:OK
+#651/3   verifier_map_ptr/bpf_map_ptr: write rejected:OK
+#651/4   verifier_map_ptr/bpf_map_ptr: write rejected @unpriv:OK
+#651/5   verifier_map_ptr/bpf_map_ptr: read non-existent field rejected:OK
+#651/6   verifier_map_ptr/bpf_map_ptr: read non-existent field rejected @unpriv:OK
+#651/7   verifier_map_ptr/bpf_map_ptr: read beyond sha field rejected:OK
+#651/8   verifier_map_ptr/bpf_map_ptr: read beyond sha field rejected @unpriv:OK
+#651/9   verifier_map_ptr/bpf_map_ptr: read ops field accepted:OK
+#651/10  verifier_map_ptr/bpf_map_ptr: read ops field accepted @unpriv:OK
+#651/11  verifier_map_ptr/bpf_map_ptr: r = 0, map_ptr = map_ptr + r:OK
+#651/12  verifier_map_ptr/bpf_map_ptr: r = 0, map_ptr = map_ptr + r @unpriv:OK
+#651/13  verifier_map_ptr/bpf_map_ptr: r = 0, r = r + map_ptr:OK
+#651/14  verifier_map_ptr/bpf_map_ptr: r = 0, r = r + map_ptr @unpriv:OK
+#651     verifier_map_ptr:OK
+#652/1   verifier_map_ptr_mixing/cond: two branches returning different map pointers for lookup (tail, tail):OK
+#652/2   verifier_map_ptr_mixing/cond: two branches returning different map pointers for lookup (tail, tail) @unpriv:OK
+#652/3   verifier_map_ptr_mixing/cond: two branches returning same map pointers for lookup (tail, tail):OK
+#652/4   verifier_map_ptr_mixing/cond: two branches returning same map pointers for lookup (tail, tail) @unpriv:OK
+#652/5   verifier_map_ptr_mixing/calls: two calls returning different map pointers for lookup (hash, array):OK
+#652/6   verifier_map_ptr_mixing/calls: two calls returning different map pointers for lookup (hash, map in map):OK
+#652     verifier_map_ptr_mixing:OK
+#653/1   verifier_map_ret_val/invalid map_fd for function call:OK
+#653/2   verifier_map_ret_val/invalid map_fd for function call @unpriv:OK
+#653/3   verifier_map_ret_val/don't check return value before access:OK
+#653/4   verifier_map_ret_val/don't check return value before access @unpriv:OK
+#653/5   verifier_map_ret_val/access memory with incorrect alignment:OK
+#653/6   verifier_map_ret_val/access memory with incorrect alignment @unpriv:OK
+#653/7   verifier_map_ret_val/sometimes access memory with incorrect alignment:OK
+#653/8   verifier_map_ret_val/sometimes access memory with incorrect alignment @unpriv:OK
+#653     verifier_map_ret_val:OK
+#654/1   verifier_masking/masking, test out of bounds 1:OK
+#654/2   verifier_masking/masking, test out of bounds 1 @unpriv:OK
+#654/3   verifier_masking/masking, test out of bounds 2:OK
+#654/4   verifier_masking/masking, test out of bounds 2 @unpriv:OK
+#654/5   verifier_masking/masking, test out of bounds 3:OK
+#654/6   verifier_masking/masking, test out of bounds 3 @unpriv:OK
+#654/7   verifier_masking/masking, test out of bounds 4:OK
+#654/8   verifier_masking/masking, test out of bounds 4 @unpriv:OK
+#654/9   verifier_masking/masking, test out of bounds 5:OK
+#654/10  verifier_masking/masking, test out of bounds 5 @unpriv:OK
+#654/11  verifier_masking/masking, test out of bounds 6:OK
+#654/12  verifier_masking/masking, test out of bounds 6 @unpriv:OK
+#654/13  verifier_masking/masking, test out of bounds 7:OK
+#654/14  verifier_masking/masking, test out of bounds 7 @unpriv:OK
+#654/15  verifier_masking/masking, test out of bounds 8:OK
+#654/16  verifier_masking/masking, test out of bounds 8 @unpriv:OK
+#654/17  verifier_masking/masking, test out of bounds 9:OK
+#654/18  verifier_masking/masking, test out of bounds 9 @unpriv:OK
+#654/19  verifier_masking/masking, test out of bounds 10:OK
+#654/20  verifier_masking/masking, test out of bounds 10 @unpriv:OK
+#654/21  verifier_masking/masking, test out of bounds 11:OK
+#654/22  verifier_masking/masking, test out of bounds 11 @unpriv:OK
+#654/23  verifier_masking/masking, test out of bounds 12:OK
+#654/24  verifier_masking/masking, test out of bounds 12 @unpriv:OK
+#654/25  verifier_masking/masking, test in bounds 1:OK
+#654/26  verifier_masking/masking, test in bounds 1 @unpriv:OK
+#654/27  verifier_masking/masking, test in bounds 2:OK
+#654/28  verifier_masking/masking, test in bounds 2 @unpriv:OK
+#654/29  verifier_masking/masking, test in bounds 3:OK
+#654/30  verifier_masking/masking, test in bounds 3 @unpriv:OK
+#654/31  verifier_masking/masking, test in bounds 4:OK
+#654/32  verifier_masking/masking, test in bounds 4 @unpriv:OK
+#654/33  verifier_masking/masking, test in bounds 5:OK
+#654/34  verifier_masking/masking, test in bounds 5 @unpriv:OK
+#654/35  verifier_masking/masking, test in bounds 6:OK
+#654/36  verifier_masking/masking, test in bounds 6 @unpriv:OK
+#654/37  verifier_masking/masking, test in bounds 7:OK
+#654/38  verifier_masking/masking, test in bounds 7 @unpriv:OK
+#654/39  verifier_masking/masking, test in bounds 8:OK
+#654/40  verifier_masking/masking, test in bounds 8 @unpriv:OK
+#654     verifier_masking:OK
+#655/1   verifier_may_goto_1/may_goto 0:OK
+#655/2   verifier_may_goto_1/batch 2 of may_goto 0:OK
+#655/3   verifier_may_goto_1/may_goto batch with offsets 2/1/0:OK
+#655/4   verifier_may_goto_1/may_goto batch with offsets 2/0:OK
+#655     verifier_may_goto_1:OK
+#656/1   verifier_may_goto_2/C code with may_goto 0:OK
+#656     verifier_may_goto_2:OK
+#657/1   verifier_meta_access/meta access, test1:OK
+#657/2   verifier_meta_access/meta access, test2:OK
+#657/3   verifier_meta_access/meta access, test3:OK
+#657/4   verifier_meta_access/meta access, test4:OK
+#657/5   verifier_meta_access/meta access, test5:OK
+#657/6   verifier_meta_access/meta access, test6:OK
+#657/7   verifier_meta_access/meta access, test7:OK
+#657/8   verifier_meta_access/meta access, test8:OK
+#657/9   verifier_meta_access/meta access, test9:OK
+#657/10  verifier_meta_access/meta access, test10:OK
+#657/11  verifier_meta_access/meta access, test11:OK
+#657/12  verifier_meta_access/meta access, test12:OK
+#657     verifier_meta_access:OK
+#658/1   verifier_movsx/MOV32SX, S8:OK
+#658/2   verifier_movsx/MOV32SX, S8 @unpriv:OK
+#658/3   verifier_movsx/MOV32SX, S16:OK
+#658/4   verifier_movsx/MOV32SX, S16 @unpriv:OK
+#658/5   verifier_movsx/MOV64SX, S8:OK
+#658/6   verifier_movsx/MOV64SX, S8 @unpriv:OK
+#658/7   verifier_movsx/MOV64SX, S16:OK
+#658/8   verifier_movsx/MOV64SX, S16 @unpriv:OK
+#658/9   verifier_movsx/MOV64SX, S32:OK
+#658/10  verifier_movsx/MOV64SX, S32 @unpriv:OK
+#658/11  verifier_movsx/MOV32SX, S8, range_check:OK
+#658/12  verifier_movsx/MOV32SX, S8, range_check @unpriv:OK
+#658/13  verifier_movsx/MOV32SX, S16, range_check:OK
+#658/14  verifier_movsx/MOV32SX, S16, range_check @unpriv:OK
+#658/15  verifier_movsx/MOV32SX, S16, range_check 2:OK
+#658/16  verifier_movsx/MOV32SX, S16, range_check 2 @unpriv:OK
+#658/17  verifier_movsx/MOV64SX, S8, range_check:OK
+#658/18  verifier_movsx/MOV64SX, S8, range_check @unpriv:OK
+#658/19  verifier_movsx/MOV64SX, S16, range_check:OK
+#658/20  verifier_movsx/MOV64SX, S16, range_check @unpriv:OK
+#658/21  verifier_movsx/MOV64SX, S32, range_check:OK
+#658/22  verifier_movsx/MOV64SX, S32, range_check @unpriv:OK
+#658/23  verifier_movsx/MOV64SX, S16, R10 Sign Extension:OK
+#658/24  verifier_movsx/MOV64SX, S16, R10 Sign Extension @unpriv:OK
+#658/25  verifier_movsx/MOV32SX, S8, var_off u32_max:OK
+#658/26  verifier_movsx/MOV32SX, S8, var_off u32_max @unpriv:OK
+#658/27  verifier_movsx/MOV32SX, S8, var_off not u32_max, positive after s8 extension:OK
+#658/28  verifier_movsx/MOV32SX, S8, var_off not u32_max, positive after s8 extension @unpriv:OK
+#658/29  verifier_movsx/MOV32SX, S8, var_off not u32_max, negative after s8 extension:OK
+#658/30  verifier_movsx/MOV32SX, S8, var_off not u32_max, negative after s8 extension @unpriv:OK
+#658/31  verifier_movsx/MOV64SX, S8, unsigned range_check:OK
+#658/32  verifier_movsx/MOV32SX, S8, unsigned range_check:OK
+#658     verifier_movsx:OK
+#659/1   verifier_mtu/uninit/mtu: write rejected:OK
+#659/2   verifier_mtu/uninit/mtu: write rejected @unpriv:OK
+#659     verifier_mtu:OK
+#660/1   verifier_mul/mul_precise:OK
+#660     verifier_mul:OK
+#661/1   verifier_netfilter_ctx/netfilter invalid context access, size too short:OK
+#661/2   verifier_netfilter_ctx/netfilter invalid context access, size too short:OK
+#661/3   verifier_netfilter_ctx/netfilter invalid context access, past end of ctx:OK
+#661/4   verifier_netfilter_ctx/netfilter invalid context, write:OK
+#661/5   verifier_netfilter_ctx/netfilter valid context read and invalid write:OK
+#661/6   verifier_netfilter_ctx/netfilter test prog with skb and state read access:OK
+#661/7   verifier_netfilter_ctx/netfilter test prog with skb and state read access @unpriv:OK
+#661     verifier_netfilter_ctx:OK
+#662/1   verifier_netfilter_retcode/bpf_exit with invalid return code. test1:OK
+#662/2   verifier_netfilter_retcode/bpf_exit with valid return code. test2:OK
+#662/3   verifier_netfilter_retcode/bpf_exit with valid return code. test3:OK
+#662/4   verifier_netfilter_retcode/bpf_exit with invalid return code. test4:OK
+#662     verifier_netfilter_retcode:OK
+#663/1   verifier_or_jmp32_k/or_jmp32_k: bit ops + branch on unknown value:OK
+#663     verifier_or_jmp32_k:OK
+#664/1   verifier_precision/bpf_neg:OK
+#664/2   verifier_precision/bpf_end_to_le:OK
+#664/3   verifier_precision/bpf_end_to_be:OK
+#664/4   verifier_precision/bpf_end_bswap:OK
+#664/5   verifier_precision/bpf_load_acquire:OK
+#664/6   verifier_precision/bpf_store_release:OK
+#664/7   verifier_precision/state_loop_first_last_equal:OK
+#664/8   verifier_precision/bpf_cond_op_r10:OK
+#664/9   verifier_precision/bpf_cond_op_not_r10:OK
+#664/10  verifier_precision/bpf_atomic_fetch_add_precision:OK
+#664/11  verifier_precision/bpf_atomic_xchg_precision:OK
+#664/12  verifier_precision/bpf_atomic_fetch_or_precision:OK
+#664/13  verifier_precision/bpf_atomic_fetch_and_precision:OK
+#664/14  verifier_precision/bpf_atomic_fetch_xor_precision:OK
+#664/15  verifier_precision/bpf_atomic_cmpxchg_precision:OK
+#664/16  verifier_precision/bpf_atomic_fetch_add_dual_precision:OK
+#664/17  verifier_precision/bpf_atomic_cmpxchg_dual_precision:OK
+#664/18  verifier_precision/bpf_atomic_fetch_add_map_precision:OK
+#664/19  verifier_precision/bpf_atomic_cmpxchg_map_precision:OK
+#664/20  verifier_precision/bpf_atomic_fetch_add_32bit_precision:OK
+#664/21  verifier_precision/bpf_atomic_cmpxchg_32bit_precision:OK
+#664/22  verifier_precision/bpf_neg_2:OK
+#664/23  verifier_precision/bpf_neg_3:OK
+#664/24  verifier_precision/bpf_neg_4:OK
+#664/25  verifier_precision/bpf_neg_5:OK
+#664     verifier_precision:OK
+#665/1   verifier_prevent_map_lookup/prevent map lookup in stack trace:OK
+#665/2   verifier_prevent_map_lookup/prevent map lookup in prog array:OK
+#665/3   verifier_prevent_map_lookup/prevent map lookup in prog array @unpriv:OK
+#665     verifier_prevent_map_lookup:OK
+#666/1   verifier_private_stack/Private stack, single prog:SKIP
+#666/2   verifier_private_stack/Private stack, subtree > MAX_BPF_STACK:SKIP
+#666/3   verifier_private_stack/No private stack:SKIP
+#666/4   verifier_private_stack/Private stack, callback:SKIP
+#666/5   verifier_private_stack/Private stack, exception in main prog:SKIP
+#666/6   verifier_private_stack/Private stack, exception in subprog:SKIP
+#666/7   verifier_private_stack/Private stack, async callback, not nested:SKIP
+#666/8   verifier_private_stack/Private stack, async callback, potential nesting:SKIP
+#666/9   verifier_private_stack/private stack, max stack depth is private stack:OK
+#666     verifier_private_stack:OK (SKIP: 8/9)
+#667/1   verifier_raw_stack/raw_stack: no skb_load_bytes:OK
+#667/2   verifier_raw_stack/raw_stack: no skb_load_bytes @unpriv:OK
+#667/3   verifier_raw_stack/raw_stack: skb_load_bytes, negative len:OK
+#667/4   verifier_raw_stack/raw_stack: skb_load_bytes, negative len 2:OK
+#667/5   verifier_raw_stack/raw_stack: skb_load_bytes, zero len:OK
+#667/6   verifier_raw_stack/raw_stack: skb_load_bytes, no init:OK
+#667/7   verifier_raw_stack/raw_stack: skb_load_bytes, init:OK
+#667/8   verifier_raw_stack/raw_stack: skb_load_bytes, spilled regs around bounds:OK
+#667/9   verifier_raw_stack/raw_stack: skb_load_bytes, spilled regs corruption:OK
+#667/10  verifier_raw_stack/raw_stack: skb_load_bytes, spilled regs corruption 2:OK
+#667/11  verifier_raw_stack/raw_stack: skb_load_bytes, spilled regs + data:OK
+#667/12  verifier_raw_stack/raw_stack: skb_load_bytes, invalid access 1:OK
+#667/13  verifier_raw_stack/raw_stack: skb_load_bytes, invalid access 2:OK
+#667/14  verifier_raw_stack/raw_stack: skb_load_bytes, invalid access 3:OK
+#667/15  verifier_raw_stack/raw_stack: skb_load_bytes, invalid access 4:OK
+#667/16  verifier_raw_stack/raw_stack: skb_load_bytes, invalid access 5:OK
+#667/17  verifier_raw_stack/raw_stack: skb_load_bytes, invalid access 6:OK
+#667/18  verifier_raw_stack/raw_stack: skb_load_bytes, large access:OK
+#667     verifier_raw_stack:OK
+#668/1   verifier_raw_tp_writable/raw_tracepoint_writable: reject variable offset:OK
+#668     verifier_raw_tp_writable:OK
+#669/1   verifier_ref_tracking/reference tracking: leak potential reference:OK
+#669/2   verifier_ref_tracking/reference tracking: leak potential reference to sock_common:OK
+#669/3   verifier_ref_tracking/reference tracking: leak potential reference on stack:OK
+#669/4   verifier_ref_tracking/reference tracking: leak potential reference on stack 2:OK
+#669/5   verifier_ref_tracking/reference tracking: zero potential reference:OK
+#669/6   verifier_ref_tracking/reference tracking: zero potential reference to sock_common:OK
+#669/7   verifier_ref_tracking/reference tracking: copy and zero potential references:OK
+#669/8   verifier_ref_tracking/reference tracking: release reference without check:OK
+#669/9   verifier_ref_tracking/reference tracking: release reference to sock_common without check:OK
+#669/10  verifier_ref_tracking/reference tracking: release reference:OK
+#669/11  verifier_ref_tracking/reference tracking: release reference to sock_common:OK
+#669/12  verifier_ref_tracking/reference tracking: release reference 2:OK
+#669/13  verifier_ref_tracking/reference tracking: release reference twice:OK
+#669/14  verifier_ref_tracking/reference tracking: release reference twice inside branch:OK
+#669/15  verifier_ref_tracking/reference tracking: alloc, check, free in one subbranch:OK
+#669/16  verifier_ref_tracking/reference tracking: alloc, check, free in both subbranches:OK
+#669/17  verifier_ref_tracking/reference tracking in call: free reference in subprog:OK
+#669/18  verifier_ref_tracking/reference tracking in call: free reference in subprog and outside:OK
+#669/19  verifier_ref_tracking/reference tracking in call: alloc & leak reference in subprog:OK
+#669/20  verifier_ref_tracking/reference tracking in call: alloc in subprog, release outside:OK
+#669/21  verifier_ref_tracking/reference tracking in call: sk_ptr leak into caller stack:OK
+#669/22  verifier_ref_tracking/reference tracking in call: sk_ptr spill into caller stack:OK
+#669/23  verifier_ref_tracking/reference tracking: allow LD_ABS:OK
+#669/24  verifier_ref_tracking/reference tracking: forbid LD_ABS while holding reference:OK
+#669/25  verifier_ref_tracking/reference tracking: allow LD_IND:OK
+#669/26  verifier_ref_tracking/reference tracking: forbid LD_IND while holding reference:OK
+#669/27  verifier_ref_tracking/reference tracking: check reference or tail call:OK
+#669/28  verifier_ref_tracking/reference tracking: release reference then tail call:OK
+#669/29  verifier_ref_tracking/reference tracking: leak possible reference over tail call:OK
+#669/30  verifier_ref_tracking/reference tracking: leak checked reference over tail call:OK
+#669/31  verifier_ref_tracking/reference tracking: mangle and release sock_or_null:OK
+#669/32  verifier_ref_tracking/reference tracking: mangle and release sock:OK
+#669/33  verifier_ref_tracking/reference tracking: access member:OK
+#669/34  verifier_ref_tracking/reference tracking: write to member:OK
+#669/35  verifier_ref_tracking/reference tracking: invalid 64-bit access of member:OK
+#669/36  verifier_ref_tracking/reference tracking: access after release:OK
+#669/37  verifier_ref_tracking/reference tracking: direct access for lookup:OK
+#669/38  verifier_ref_tracking/reference tracking: use ptr from bpf_tcp_sock() after release:OK
+#669/39  verifier_ref_tracking/reference tracking: use ptr from bpf_sk_fullsock() after release:OK
+#669/40  verifier_ref_tracking/reference tracking: use ptr from bpf_sk_fullsock(tp) after release:OK
+#669/41  verifier_ref_tracking/reference tracking: use sk after bpf_sk_release(tp):OK
+#669/42  verifier_ref_tracking/reference tracking: use ptr from bpf_get_listener_sock() after bpf_sk_release(sk):OK
+#669/43  verifier_ref_tracking/reference tracking: bpf_sk_release(listen_sk):OK
+#669/44  verifier_ref_tracking/reference tracking: tp->snd_cwnd after bpf_sk_fullsock(sk) and bpf_tcp_sock(sk):OK
+#669/45  verifier_ref_tracking/reference tracking: branch tracking valid pointer null comparison:OK
+#669/46  verifier_ref_tracking/reference tracking: branch tracking valid pointer value comparison:OK
+#669/47  verifier_ref_tracking/reference tracking: bpf_sk_release(btf_tcp_sock):OK
+#669/48  verifier_ref_tracking/reference tracking: use ptr from bpf_skc_to_tcp_sock() after release:OK
+#669/49  verifier_ref_tracking/reference tracking: acquire/release user key reference:OK
+#669/50  verifier_ref_tracking/reference tracking: acquire/release system key reference:OK
+#669/51  verifier_ref_tracking/reference tracking: release user key reference without check:OK
+#669/52  verifier_ref_tracking/reference tracking: release system key reference without check:OK
+#669/53  verifier_ref_tracking/reference tracking: release with NULL key pointer:OK
+#669/54  verifier_ref_tracking/reference tracking: leak potential reference to user key:OK
+#669/55  verifier_ref_tracking/reference tracking: leak potential reference to system key:OK
+#669/56  verifier_ref_tracking/reference tracking: try to leak released ptr reg:OK
+#669/57  verifier_ref_tracking/reference tracking: try to leak released ptr reg @unpriv:OK
+#669     verifier_ref_tracking:OK
+#670/1   verifier_reg_equal/check w reg equal if r reg upper32 bits 0:OK
+#670/2   verifier_reg_equal/check w reg not equal if r reg upper32 bits not 0:OK
+#670     verifier_reg_equal:OK
+#671/1   verifier_regalloc/regalloc basic:OK
+#671/2   verifier_regalloc/regalloc negative:OK
+#671/3   verifier_regalloc/regalloc src_reg mark:OK
+#671/4   verifier_regalloc/regalloc src_reg negative:OK
+#671/5   verifier_regalloc/regalloc and spill:OK
+#671/6   verifier_regalloc/regalloc and spill negative:OK
+#671/7   verifier_regalloc/regalloc three regs:OK
+#671/8   verifier_regalloc/regalloc after call:OK
+#671/9   verifier_regalloc/regalloc in callee:OK
+#671/10  verifier_regalloc/regalloc, spill, JEQ:OK
+#671     verifier_regalloc:OK
+#672/1   verifier_ringbuf/ringbuf: invalid reservation offset 1:OK
+#672/2   verifier_ringbuf/ringbuf: invalid reservation offset 1 @unpriv:OK
+#672/3   verifier_ringbuf/ringbuf: invalid reservation offset 2:OK
+#672/4   verifier_ringbuf/ringbuf: invalid reservation offset 2 @unpriv:OK
+#672/5   verifier_ringbuf/ringbuf: check passing rb mem to helpers:OK
+#672     verifier_ringbuf:OK
+#673/1   verifier_runtime_jit/runtime/jit: tail_call within bounds, prog once:OK
+#673/2   verifier_runtime_jit/runtime/jit: tail_call within bounds, prog once @unpriv:OK
+#673/3   verifier_runtime_jit/runtime/jit: tail_call within bounds, prog loop:OK
+#673/4   verifier_runtime_jit/runtime/jit: tail_call within bounds, prog loop @unpriv:OK
+#673/5   verifier_runtime_jit/runtime/jit: tail_call within bounds, no prog:OK
+#673/6   verifier_runtime_jit/runtime/jit: tail_call within bounds, no prog @unpriv:OK
+#673/7   verifier_runtime_jit/runtime/jit: tail_call within bounds, key 2:OK
+#673/8   verifier_runtime_jit/runtime/jit: tail_call within bounds, key 2 @unpriv:OK
+#673/9   verifier_runtime_jit/runtime/jit: tail_call within bounds, key 2 / key 2, first branch:OK
+#673/10  verifier_runtime_jit/runtime/jit: tail_call within bounds, key 2 / key 2, first branch @unpriv:OK
+#673/11  verifier_runtime_jit/runtime/jit: tail_call within bounds, key 2 / key 2, second branch:OK
+#673/12  verifier_runtime_jit/runtime/jit: tail_call within bounds, key 2 / key 2, second branch @unpriv:OK
+#673/13  verifier_runtime_jit/runtime/jit: tail_call within bounds, key 0 / key 2, first branch:OK
+#673/14  verifier_runtime_jit/runtime/jit: tail_call within bounds, key 0 / key 2, first branch @unpriv:OK
+#673/15  verifier_runtime_jit/runtime/jit: tail_call within bounds, key 0 / key 2, second branch:OK
+#673/16  verifier_runtime_jit/runtime/jit: tail_call within bounds, key 0 / key 2, second branch @unpriv:OK
+#673/17  verifier_runtime_jit/runtime/jit: tail_call within bounds, different maps, first branch:OK
+#673/18  verifier_runtime_jit/runtime/jit: tail_call within bounds, different maps, first branch @unpriv:OK
+#673/19  verifier_runtime_jit/runtime/jit: tail_call within bounds, different maps, second branch:OK
+#673/20  verifier_runtime_jit/runtime/jit: tail_call within bounds, different maps, second branch @unpriv:OK
+#673/21  verifier_runtime_jit/runtime/jit: tail_call out of bounds:OK
+#673/22  verifier_runtime_jit/runtime/jit: tail_call out of bounds @unpriv:OK
+#673/23  verifier_runtime_jit/runtime/jit: pass negative index to tail_call:OK
+#673/24  verifier_runtime_jit/runtime/jit: pass negative index to tail_call @unpriv:OK
+#673/25  verifier_runtime_jit/runtime/jit: pass > 32bit index to tail_call:OK
+#673/26  verifier_runtime_jit/runtime/jit: pass > 32bit index to tail_call @unpriv:OK
+#673     verifier_runtime_jit:OK
+#674/1   verifier_scalar_ids/linked_regs_bpf_k:OK
+#674/2   verifier_scalar_ids/linked_regs_bpf_x_src:OK
+#674/3   verifier_scalar_ids/linked_regs_bpf_x_dst:OK
+#674/4   verifier_scalar_ids/linked_regs_broken_link:OK
+#674/5   verifier_scalar_ids/precision_many_frames:OK
+#674/6   verifier_scalar_ids/precision_stack:OK
+#674/7   verifier_scalar_ids/precision_two_ids:OK
+#674/8   verifier_scalar_ids/linked_regs_too_many_regs:OK
+#674/9   verifier_scalar_ids/linked_regs_broken_link_2:OK
+#674/10  verifier_scalar_ids/cjmp_no_linked_regs_trigger:OK
+#674/11  verifier_scalar_ids/check_ids_in_regsafe:OK
+#674/12  verifier_scalar_ids/check_ids_in_regsafe_2:OK
+#674/13  verifier_scalar_ids/no_scalar_id_for_const:OK
+#674/14  verifier_scalar_ids/no_scalar_id_for_const32:OK
+#674/15  verifier_scalar_ids/ignore_unique_scalar_ids_cur:OK
+#674/16  verifier_scalar_ids/ignore_unique_scalar_ids_old:OK
+#674/17  verifier_scalar_ids/two_nil_old_ids_one_cur_id:OK
+#674/18  verifier_scalar_ids/two_old_ids_one_cur_id:OK
+#674/19  verifier_scalar_ids/linked_regs_and_subreg_def:OK
+#674/20  verifier_scalar_ids/ldsx_fill_scalar_id_not_shared:OK
+#674     verifier_scalar_ids:OK
+#675/1   verifier_sdiv/SDIV32, non-zero imm divisor, check 1:OK
+#675/2   verifier_sdiv/SDIV32, non-zero imm divisor, check 1 @unpriv:OK
+#675/3   verifier_sdiv/SDIV32, non-zero imm divisor, check 2:OK
+#675/4   verifier_sdiv/SDIV32, non-zero imm divisor, check 2 @unpriv:OK
+#675/5   verifier_sdiv/SDIV32, non-zero imm divisor, check 3:OK
+#675/6   verifier_sdiv/SDIV32, non-zero imm divisor, check 3 @unpriv:OK
+#675/7   verifier_sdiv/SDIV32, non-zero imm divisor, check 4:OK
+#675/8   verifier_sdiv/SDIV32, non-zero imm divisor, check 4 @unpriv:OK
+#675/9   verifier_sdiv/SDIV32, non-zero imm divisor, check 5:OK
+#675/10  verifier_sdiv/SDIV32, non-zero imm divisor, check 5 @unpriv:OK
+#675/11  verifier_sdiv/SDIV32, non-zero imm divisor, check 6:OK
+#675/12  verifier_sdiv/SDIV32, non-zero imm divisor, check 6 @unpriv:OK
+#675/13  verifier_sdiv/SDIV32, non-zero imm divisor, check 7:OK
+#675/14  verifier_sdiv/SDIV32, non-zero imm divisor, check 7 @unpriv:OK
+#675/15  verifier_sdiv/SDIV32, non-zero imm divisor, check 8:OK
+#675/16  verifier_sdiv/SDIV32, non-zero imm divisor, check 8 @unpriv:OK
+#675/17  verifier_sdiv/SDIV32, non-zero reg divisor, check 1:OK
+#675/18  verifier_sdiv/SDIV32, non-zero reg divisor, check 1 @unpriv:OK
+#675/19  verifier_sdiv/SDIV32, non-zero reg divisor, check 2:OK
+#675/20  verifier_sdiv/SDIV32, non-zero reg divisor, check 2 @unpriv:OK
+#675/21  verifier_sdiv/SDIV32, non-zero reg divisor, check 3:OK
+#675/22  verifier_sdiv/SDIV32, non-zero reg divisor, check 3 @unpriv:OK
+#675/23  verifier_sdiv/SDIV32, non-zero reg divisor, check 4:OK
+#675/24  verifier_sdiv/SDIV32, non-zero reg divisor, check 4 @unpriv:OK
+#675/25  verifier_sdiv/SDIV32, non-zero reg divisor, check 5:OK
+#675/26  verifier_sdiv/SDIV32, non-zero reg divisor, check 5 @unpriv:OK
+#675/27  verifier_sdiv/SDIV32, non-zero reg divisor, check 6:OK
+#675/28  verifier_sdiv/SDIV32, non-zero reg divisor, check 6 @unpriv:OK
+#675/29  verifier_sdiv/SDIV32, non-zero reg divisor, check 7:OK
+#675/30  verifier_sdiv/SDIV32, non-zero reg divisor, check 7 @unpriv:OK
+#675/31  verifier_sdiv/SDIV32, non-zero reg divisor, check 8:OK
+#675/32  verifier_sdiv/SDIV32, non-zero reg divisor, check 8 @unpriv:OK
+#675/33  verifier_sdiv/SDIV64, non-zero imm divisor, check 1:OK
+#675/34  verifier_sdiv/SDIV64, non-zero imm divisor, check 1 @unpriv:OK
+#675/35  verifier_sdiv/SDIV64, non-zero imm divisor, check 2:OK
+#675/36  verifier_sdiv/SDIV64, non-zero imm divisor, check 2 @unpriv:OK
+#675/37  verifier_sdiv/SDIV64, non-zero imm divisor, check 3:OK
+#675/38  verifier_sdiv/SDIV64, non-zero imm divisor, check 3 @unpriv:OK
+#675/39  verifier_sdiv/SDIV64, non-zero imm divisor, check 4:OK
+#675/40  verifier_sdiv/SDIV64, non-zero imm divisor, check 4 @unpriv:OK
+#675/41  verifier_sdiv/SDIV64, non-zero imm divisor, check 5:OK
+#675/42  verifier_sdiv/SDIV64, non-zero imm divisor, check 5 @unpriv:OK
+#675/43  verifier_sdiv/SDIV64, non-zero imm divisor, check 6:OK
+#675/44  verifier_sdiv/SDIV64, non-zero imm divisor, check 6 @unpriv:OK
+#675/45  verifier_sdiv/SDIV64, non-zero reg divisor, check 1:OK
+#675/46  verifier_sdiv/SDIV64, non-zero reg divisor, check 1 @unpriv:OK
+#675/47  verifier_sdiv/SDIV64, non-zero reg divisor, check 2:OK
+#675/48  verifier_sdiv/SDIV64, non-zero reg divisor, check 2 @unpriv:OK
+#675/49  verifier_sdiv/SDIV64, non-zero reg divisor, check 3:OK
+#675/50  verifier_sdiv/SDIV64, non-zero reg divisor, check 3 @unpriv:OK
+#675/51  verifier_sdiv/SDIV64, non-zero reg divisor, check 4:OK
+#675/52  verifier_sdiv/SDIV64, non-zero reg divisor, check 4 @unpriv:OK
+#675/53  verifier_sdiv/SDIV64, non-zero reg divisor, check 5:OK
+#675/54  verifier_sdiv/SDIV64, non-zero reg divisor, check 5 @unpriv:OK
+#675/55  verifier_sdiv/SDIV64, non-zero reg divisor, check 6:OK
+#675/56  verifier_sdiv/SDIV64, non-zero reg divisor, check 6 @unpriv:OK
+#675/57  verifier_sdiv/SMOD32, non-zero imm divisor, check 1:OK
+#675/58  verifier_sdiv/SMOD32, non-zero imm divisor, check 1 @unpriv:OK
+#675/59  verifier_sdiv/SMOD32, non-zero imm divisor, check 2:OK
+#675/60  verifier_sdiv/SMOD32, non-zero imm divisor, check 2 @unpriv:OK
+#675/61  verifier_sdiv/SMOD32, non-zero imm divisor, check 3:OK
+#675/62  verifier_sdiv/SMOD32, non-zero imm divisor, check 3 @unpriv:OK
+#675/63  verifier_sdiv/SMOD32, non-zero imm divisor, check 4:OK
+#675/64  verifier_sdiv/SMOD32, non-zero imm divisor, check 4 @unpriv:OK
+#675/65  verifier_sdiv/SMOD32, non-zero imm divisor, check 5:OK
+#675/66  verifier_sdiv/SMOD32, non-zero imm divisor, check 5 @unpriv:OK
+#675/67  verifier_sdiv/SMOD32, non-zero imm divisor, check 6:OK
+#675/68  verifier_sdiv/SMOD32, non-zero imm divisor, check 6 @unpriv:OK
+#675/69  verifier_sdiv/SMOD32, non-zero reg divisor, check 1:OK
+#675/70  verifier_sdiv/SMOD32, non-zero reg divisor, check 1 @unpriv:OK
+#675/71  verifier_sdiv/SMOD32, non-zero reg divisor, check 2:OK
+#675/72  verifier_sdiv/SMOD32, non-zero reg divisor, check 2 @unpriv:OK
+#675/73  verifier_sdiv/SMOD32, non-zero reg divisor, check 3:OK
+#675/74  verifier_sdiv/SMOD32, non-zero reg divisor, check 3 @unpriv:OK
+#675/75  verifier_sdiv/SMOD32, non-zero reg divisor, check 4:OK
+#675/76  verifier_sdiv/SMOD32, non-zero reg divisor, check 4 @unpriv:OK
+#675/77  verifier_sdiv/SMOD32, non-zero reg divisor, check 5:OK
+#675/78  verifier_sdiv/SMOD32, non-zero reg divisor, check 5 @unpriv:OK
+#675/79  verifier_sdiv/SMOD32, non-zero reg divisor, check 6:OK
+#675/80  verifier_sdiv/SMOD32, non-zero reg divisor, check 6 @unpriv:OK
+#675/81  verifier_sdiv/SMOD64, non-zero imm divisor, check 1:OK
+#675/82  verifier_sdiv/SMOD64, non-zero imm divisor, check 1 @unpriv:OK
+#675/83  verifier_sdiv/SMOD64, non-zero imm divisor, check 2:OK
+#675/84  verifier_sdiv/SMOD64, non-zero imm divisor, check 2 @unpriv:OK
+#675/85  verifier_sdiv/SMOD64, non-zero imm divisor, check 3:OK
+#675/86  verifier_sdiv/SMOD64, non-zero imm divisor, check 3 @unpriv:OK
+#675/87  verifier_sdiv/SMOD64, non-zero imm divisor, check 4:OK
+#675/88  verifier_sdiv/SMOD64, non-zero imm divisor, check 4 @unpriv:OK
+#675/89  verifier_sdiv/SMOD64, non-zero imm divisor, check 5:OK
+#675/90  verifier_sdiv/SMOD64, non-zero imm divisor, check 5 @unpriv:OK
+#675/91  verifier_sdiv/SMOD64, non-zero imm divisor, check 6:OK
+#675/92  verifier_sdiv/SMOD64, non-zero imm divisor, check 6 @unpriv:OK
+#675/93  verifier_sdiv/SMOD64, non-zero imm divisor, check 7:OK
+#675/94  verifier_sdiv/SMOD64, non-zero imm divisor, check 7 @unpriv:OK
+#675/95  verifier_sdiv/SMOD64, non-zero imm divisor, check 8:OK
+#675/96  verifier_sdiv/SMOD64, non-zero imm divisor, check 8 @unpriv:OK
+#675/97  verifier_sdiv/SMOD64, non-zero reg divisor, check 1:OK
+#675/98  verifier_sdiv/SMOD64, non-zero reg divisor, check 1 @unpriv:OK
+#675/99  verifier_sdiv/SMOD64, non-zero reg divisor, check 2:OK
+#675/100 verifier_sdiv/SMOD64, non-zero reg divisor, check 2 @unpriv:OK
+#675/101 verifier_sdiv/SMOD64, non-zero reg divisor, check 3:OK
+#675/102 verifier_sdiv/SMOD64, non-zero reg divisor, check 3 @unpriv:OK
+#675/103 verifier_sdiv/SMOD64, non-zero reg divisor, check 4:OK
+#675/104 verifier_sdiv/SMOD64, non-zero reg divisor, check 4 @unpriv:OK
+#675/105 verifier_sdiv/SMOD64, non-zero reg divisor, check 5:OK
+#675/106 verifier_sdiv/SMOD64, non-zero reg divisor, check 5 @unpriv:OK
+#675/107 verifier_sdiv/SMOD64, non-zero reg divisor, check 6:OK
+#675/108 verifier_sdiv/SMOD64, non-zero reg divisor, check 6 @unpriv:OK
+#675/109 verifier_sdiv/SMOD64, non-zero reg divisor, check 7:OK
+#675/110 verifier_sdiv/SMOD64, non-zero reg divisor, check 7 @unpriv:OK
+#675/111 verifier_sdiv/SMOD64, non-zero reg divisor, check 8:OK
+#675/112 verifier_sdiv/SMOD64, non-zero reg divisor, check 8 @unpriv:OK
+#675/113 verifier_sdiv/SDIV32, zero divisor:OK
+#675/114 verifier_sdiv/SDIV32, zero divisor @unpriv:OK
+#675/115 verifier_sdiv/SDIV64, zero divisor:OK
+#675/116 verifier_sdiv/SDIV64, zero divisor @unpriv:OK
+#675/117 verifier_sdiv/SMOD32, zero divisor:OK
+#675/118 verifier_sdiv/SMOD32, zero divisor @unpriv:OK
+#675/119 verifier_sdiv/SMOD64, zero divisor:OK
+#675/120 verifier_sdiv/SMOD64, zero divisor @unpriv:OK
+#675/121 verifier_sdiv/SDIV64, overflow r/r, LLONG_MIN/-1:OK
+#675/122 verifier_sdiv/SDIV64, r/r, small_val/-1:OK
+#675/123 verifier_sdiv/SDIV64, overflow r/i, LLONG_MIN/-1:OK
+#675/124 verifier_sdiv/SDIV64, r/i, small_val/-1:OK
+#675/125 verifier_sdiv/SDIV32, overflow r/r, INT_MIN/-1:OK
+#675/126 verifier_sdiv/SDIV32, r/r, small_val/-1:OK
+#675/127 verifier_sdiv/SDIV32, overflow r/i, INT_MIN/-1:OK
+#675/128 verifier_sdiv/SDIV32, r/i, small_val/-1:OK
+#675/129 verifier_sdiv/SMOD64, overflow r/r, LLONG_MIN/-1:OK
+#675/130 verifier_sdiv/SMOD64, r/r, small_val/-1:OK
+#675/131 verifier_sdiv/SMOD64, overflow r/i, LLONG_MIN/-1:OK
+#675/132 verifier_sdiv/SMOD64, r/i, small_val/-1:OK
+#675/133 verifier_sdiv/SMOD32, overflow r/r, INT_MIN/-1:OK
+#675/134 verifier_sdiv/SMOD32, r/r, small_val/-1:OK
+#675/135 verifier_sdiv/SMOD32, overflow r/i, INT_MIN/-1:OK
+#675/136 verifier_sdiv/SMOD32, r/i, small_val/-1:OK
+#675/137 verifier_sdiv/SDIV32, INT_MIN divided by 2, imm:OK
+#675/138 verifier_sdiv/SDIV32, INT_MIN divided by 2, imm @unpriv:OK
+#675/139 verifier_sdiv/SDIV32, INT_MIN divided by 2, reg:OK
+#675/140 verifier_sdiv/SDIV32, INT_MIN divided by 2, reg @unpriv:OK
+#675/141 verifier_sdiv/SMOD32, INT_MIN modulo 2, imm:OK
+#675/142 verifier_sdiv/SMOD32, INT_MIN modulo 2, imm @unpriv:OK
+#675/143 verifier_sdiv/SMOD32, INT_MIN modulo -2, imm:OK
+#675/144 verifier_sdiv/SMOD32, INT_MIN modulo -2, imm @unpriv:OK
+#675     verifier_sdiv:OK
+#676/1   verifier_search_pruning/pointer/scalar confusion in state equality check (way 1):OK
+#676/2   verifier_search_pruning/pointer/scalar confusion in state equality check (way 1) @unpriv:OK
+#676/3   verifier_search_pruning/pointer/scalar confusion in state equality check (way 2):OK
+#676/4   verifier_search_pruning/pointer/scalar confusion in state equality check (way 2) @unpriv:OK
+#676/5   verifier_search_pruning/varlen_map_value_access pruning:OK
+#676/6   verifier_search_pruning/varlen_map_value_access pruning @unpriv:OK
+#676/7   verifier_search_pruning/search pruning: all branches should be verified (invalid stack access):OK
+#676/8   verifier_search_pruning/search pruning: all branches should be verified (invalid stack access) @unpriv:OK
+#676/9   verifier_search_pruning/allocated_stack:OK
+#676/10  verifier_search_pruning/allocated_stack @unpriv:OK
+#676/11  verifier_search_pruning/write tracking and register parent chain bug:OK
+#676/12  verifier_search_pruning/write tracking and register parent chain bug @unpriv:OK
+#676/13  verifier_search_pruning/liveness pruning and write screening:OK
+#676/14  verifier_search_pruning/search pruning: all branches should be verified (nop operation):OK
+#676/15  verifier_search_pruning/precision tracking for u32 spill/fill:OK
+#676/16  verifier_search_pruning/precision tracking for u32 spills, u64 fill:OK
+#676/17  verifier_search_pruning/short_loop1:OK
+#676     verifier_search_pruning:OK
+#677/1   verifier_set_retval/lsm_cgroup bpf_set_retval success:OK
+#677/2   verifier_set_retval/lsm_cgroup bpf_set_retval valid errno:OK
+#677/3   verifier_set_retval/lsm_cgroup bpf_set_retval invalid negative value:OK
+#677/4   verifier_set_retval/lsm_cgroup bpf_set_retval invalid positive value:OK
+#677/5   verifier_set_retval/cgroup_device bpf_set_retval success:OK
+#677/6   verifier_set_retval/cgroup_device bpf_set_retval valid errno:OK
+#677/7   verifier_set_retval/cgroup_device bpf_set_retval invalid positive value:OK
+#677/8   verifier_set_retval/cgroup_device bpf_set_retval invalid negative value:OK
+#677/9   verifier_set_retval/bpf_set_retval bounds check survives state pruning:OK
+#677     verifier_set_retval:OK
+#678/1   verifier_sock/skb->sk: no NULL check:OK
+#678/2   verifier_sock/skb->sk: no NULL check @unpriv:OK
+#678/3   verifier_sock/skb->sk: sk->family [non fullsock field]:OK
+#678/4   verifier_sock/skb->sk: sk->family [non fullsock field] @unpriv:OK
+#678/5   verifier_sock/skb->sk: sk->type [fullsock field]:OK
+#678/6   verifier_sock/skb->sk: sk->type [fullsock field] @unpriv:OK
+#678/7   verifier_sock/bpf_sk_fullsock(skb->sk): no !skb->sk check:OK
+#678/8   verifier_sock/bpf_sk_fullsock(skb->sk): no !skb->sk check @unpriv:OK
+#678/9   verifier_sock/sk_fullsock(skb->sk): no NULL check on ret:OK
+#678/10  verifier_sock/sk_fullsock(skb->sk): no NULL check on ret @unpriv:OK
+#678/11  verifier_sock/sk_fullsock(skb->sk): sk->type [fullsock field]:OK
+#678/12  verifier_sock/sk_fullsock(skb->sk): sk->type [fullsock field] @unpriv:OK
+#678/13  verifier_sock/sk_fullsock(skb->sk): sk->family [non fullsock field]:OK
+#678/14  verifier_sock/sk_fullsock(skb->sk): sk->family [non fullsock field] @unpriv:OK
+#678/15  verifier_sock/sk_fullsock(skb->sk): sk->state [narrow load]:OK
+#678/16  verifier_sock/sk_fullsock(skb->sk): sk->state [narrow load] @unpriv:OK
+#678/17  verifier_sock/sk_fullsock(skb->sk): sk->dst_port [word load] (backward compatibility):OK
+#678/18  verifier_sock/sk_fullsock(skb->sk): sk->dst_port [word load] (backward compatibility) @unpriv:OK
+#678/19  verifier_sock/sk_fullsock(skb->sk): sk->dst_port [half load]:OK
+#678/20  verifier_sock/sk_fullsock(skb->sk): sk->dst_port [half load] @unpriv:OK
+#678/21  verifier_sock/sk_fullsock(skb->sk): sk->dst_port [half load] (invalid):OK
+#678/22  verifier_sock/sk_fullsock(skb->sk): sk->dst_port [half load] (invalid) @unpriv:OK
+#678/23  verifier_sock/sk_fullsock(skb->sk): sk->dst_port [byte load]:OK
+#678/24  verifier_sock/sk_fullsock(skb->sk): sk->dst_port [byte load] @unpriv:OK
+#678/25  verifier_sock/sk_fullsock(skb->sk): sk->dst_port [byte load] (invalid):OK
+#678/26  verifier_sock/sk_fullsock(skb->sk): sk->dst_port [byte load] (invalid) @unpriv:OK
+#678/27  verifier_sock/sk_fullsock(skb->sk): past sk->dst_port [half load] (invalid):OK
+#678/28  verifier_sock/sk_fullsock(skb->sk): past sk->dst_port [half load] (invalid) @unpriv:OK
+#678/29  verifier_sock/sk_fullsock(skb->sk): sk->dst_ip6 [load 2nd byte]:OK
+#678/30  verifier_sock/sk_fullsock(skb->sk): sk->dst_ip6 [load 2nd byte] @unpriv:OK
+#678/31  verifier_sock/sk_fullsock(skb->sk): sk->type [narrow load]:OK
+#678/32  verifier_sock/sk_fullsock(skb->sk): sk->type [narrow load] @unpriv:OK
+#678/33  verifier_sock/sk_fullsock(skb->sk): sk->protocol [narrow load]:OK
+#678/34  verifier_sock/sk_fullsock(skb->sk): sk->protocol [narrow load] @unpriv:OK
+#678/35  verifier_sock/sk_fullsock(skb->sk): beyond last field:OK
+#678/36  verifier_sock/sk_fullsock(skb->sk): beyond last field @unpriv:OK
+#678/37  verifier_sock/bpf_tcp_sock(skb->sk): no !skb->sk check:OK
+#678/38  verifier_sock/bpf_tcp_sock(skb->sk): no !skb->sk check @unpriv:OK
+#678/39  verifier_sock/bpf_tcp_sock(skb->sk): no NULL check on ret:OK
+#678/40  verifier_sock/bpf_tcp_sock(skb->sk): no NULL check on ret @unpriv:OK
+#678/41  verifier_sock/bpf_tcp_sock(skb->sk): tp->snd_cwnd:OK
+#678/42  verifier_sock/bpf_tcp_sock(skb->sk): tp->snd_cwnd @unpriv:OK
+#678/43  verifier_sock/bpf_tcp_sock(skb->sk): tp->bytes_acked:OK
+#678/44  verifier_sock/bpf_tcp_sock(skb->sk): tp->bytes_acked @unpriv:OK
+#678/45  verifier_sock/bpf_tcp_sock(skb->sk): beyond last field:OK
+#678/46  verifier_sock/bpf_tcp_sock(skb->sk): beyond last field @unpriv:OK
+#678/47  verifier_sock/bpf_tcp_sock(bpf_sk_fullsock(skb->sk)): tp->snd_cwnd:OK
+#678/48  verifier_sock/bpf_tcp_sock(bpf_sk_fullsock(skb->sk)): tp->snd_cwnd @unpriv:OK
+#678/49  verifier_sock/bpf_sk_release(skb->sk):OK
+#678/50  verifier_sock/bpf_sk_release(bpf_sk_fullsock(skb->sk)):OK
+#678/51  verifier_sock/bpf_sk_release(bpf_tcp_sock(skb->sk)):OK
+#678/52  verifier_sock/sk_storage_get(map, skb->sk, NULL, 0): value == NULL:OK
+#678/53  verifier_sock/sk_storage_get(map, skb->sk, 1, 1): value == 1:OK
+#678/54  verifier_sock/sk_storage_get(map, skb->sk, &stack_value, 1): stack_value:OK
+#678/55  verifier_sock/bpf_map_lookup_elem(smap, &key):OK
+#678/56  verifier_sock/mark null check on return value of bpf_skc_to helpers:OK
+#678/57  verifier_sock/invalidate_pkt_pointers_from_global_func:OK
+#678/58  verifier_sock/invalidate_pkt_pointers_by_global_tail_call:OK
+#678/59  verifier_sock/invalidate_pkt_pointers_by_static_tail_call:OK
+#678/60  verifier_sock/invalidate_pkt_pointers_by_tail_call:OK
+#678/61  verifier_sock/bpf_map_lookup_elem(xskmap, &key); xs->queue_id:OK
+#678/62  verifier_sock/invalidate_xdp_pkt_pointers_from_global_func:OK
+#678/63  verifier_sock/invalidate_xdp_pkt_pointers:OK
+#678/64  verifier_sock/bpf_map_lookup_elem(sockmap, &key):OK
+#678/65  verifier_sock/bpf_map_lookup_elem(sockhash, &key):OK
+#678/66  verifier_sock/bpf_map_lookup_elem(sockmap, &key); sk->type [fullsock field]; bpf_sk_release(sk):OK
+#678/67  verifier_sock/bpf_map_lookup_elem(sockhash, &key); sk->type [fullsock field]; bpf_sk_release(sk):OK
+#678/68  verifier_sock/bpf_sk_select_reuseport(ctx, reuseport_array, &key, flags):OK
+#678/69  verifier_sock/bpf_sk_select_reuseport(ctx, sockmap, &key, flags):OK
+#678/70  verifier_sock/bpf_sk_select_reuseport(ctx, sockhash, &key, flags):OK
+#678/71  verifier_sock/sk->src_ip6[0] [load 1st byte]:OK
+#678/72  verifier_sock/sk->mark [load mark]:OK
+#678/73  verifier_sock/sk->src_ip4 [load src_ip4]:OK
+#678/74  verifier_sock/sk->src_port [word load]:OK
+#678     verifier_sock:OK
+#679/1   verifier_sock_addr/recvmsg4_good_return_code:OK
+#679/2   verifier_sock_addr/recvmsg4_bad_return_code:OK
+#679/3   verifier_sock_addr/recvmsg6_good_return_code:OK
+#679/4   verifier_sock_addr/recvmsg6_bad_return_code:OK
+#679/5   verifier_sock_addr/recvmsg_unix_good_return_code:OK
+#679/6   verifier_sock_addr/recvmsg_unix_bad_return_code:OK
+#679/7   verifier_sock_addr/sendmsg4_good_return_code_0:OK
+#679/8   verifier_sock_addr/sendmsg4_good_return_code_1:OK
+#679/9   verifier_sock_addr/sendmsg4_bad_return_code:OK
+#679/10  verifier_sock_addr/sendmsg6_good_return_code_0:OK
+#679/11  verifier_sock_addr/sendmsg6_good_return_code_1:OK
+#679/12  verifier_sock_addr/sendmsg6_bad_return_code:OK
+#679/13  verifier_sock_addr/sendmsg_unix_good_return_code_0:OK
+#679/14  verifier_sock_addr/sendmsg_unix_good_return_code_1:OK
+#679/15  verifier_sock_addr/sendmsg_unix_bad_return_code:OK
+#679/16  verifier_sock_addr/getpeername4_good_return_code:OK
+#679/17  verifier_sock_addr/getpeername4_bad_return_code:OK
+#679/18  verifier_sock_addr/getpeername6_good_return_code:OK
+#679/19  verifier_sock_addr/getpeername6_bad_return_code:OK
+#679/20  verifier_sock_addr/getpeername_unix_good_return_code:OK
+#679/21  verifier_sock_addr/getpeername_unix_bad_return_code:OK
+#679/22  verifier_sock_addr/getsockname4_good_return_code:OK
+#679/23  verifier_sock_addr/getsockname4_bad_return_code:OK
+#679/24  verifier_sock_addr/getsockname6_good_return_code:OK
+#679/25  verifier_sock_addr/getsockname6_bad_return_code:OK
+#679/26  verifier_sock_addr/getsockname_unix_good_return_code:OK
+#679/27  verifier_sock_addr/getsockname_unix_unix_bad_return_code:OK
+#679/28  verifier_sock_addr/bind4_good_return_code_0:OK
+#679/29  verifier_sock_addr/bind4_good_return_code_1:OK
+#679/30  verifier_sock_addr/bind4_good_return_code_2:OK
+#679/31  verifier_sock_addr/bind4_good_return_code_3:OK
+#679/32  verifier_sock_addr/bind4_bad_return_code:OK
+#679/33  verifier_sock_addr/bind6_good_return_code_0:OK
+#679/34  verifier_sock_addr/bind6_good_return_code_1:OK
+#679/35  verifier_sock_addr/bind6_good_return_code_2:OK
+#679/36  verifier_sock_addr/bind6_good_return_code_3:OK
+#679/37  verifier_sock_addr/bind6_bad_return_code:OK
+#679/38  verifier_sock_addr/connect4_good_return_code_0:OK
+#679/39  verifier_sock_addr/connect4_good_return_code_1:OK
+#679/40  verifier_sock_addr/connect4_bad_return_code:OK
+#679/41  verifier_sock_addr/connect6_good_return_code_0:OK
+#679/42  verifier_sock_addr/connect6_good_return_code_1:OK
+#679/43  verifier_sock_addr/connect6_bad_return_code:OK
+#679/44  verifier_sock_addr/connect_unix_good_return_code_0:OK
+#679/45  verifier_sock_addr/connect_unix_good_return_code_1:OK
+#679/46  verifier_sock_addr/connect_unix_bad_return_code:OK
+#679     verifier_sock_addr:OK
+#680/1   verifier_sockmap_mutate/test_sched_act:OK
+#680/2   verifier_sockmap_mutate/test_sched_cls:OK
+#680/3   verifier_sockmap_mutate/test_flow_dissector_delete:OK
+#680/4   verifier_sockmap_mutate/test_flow_dissector_update:OK
+#680/5   verifier_sockmap_mutate/test_trace_iter:OK
+#680/6   verifier_sockmap_mutate/test_raw_tp_delete:OK
+#680/7   verifier_sockmap_mutate/test_raw_tp_update:OK
+#680/8   verifier_sockmap_mutate/test_sk_lookup:OK
+#680/9   verifier_sockmap_mutate/test_sk_reuseport:OK
+#680/10  verifier_sockmap_mutate/test_socket_filter:OK
+#680/11  verifier_sockmap_mutate/test_sockops_delete:OK
+#680/12  verifier_sockmap_mutate/test_sockops_update:OK
+#680/13  verifier_sockmap_mutate/test_sockops_update_dedicated:OK
+#680/14  verifier_sockmap_mutate/test_xdp:OK
+#680     verifier_sockmap_mutate:OK
+#681/1   verifier_spill_fill/check valid spill/fill:OK
+#681/2   verifier_spill_fill/check valid spill/fill @unpriv:OK
+#681/3   verifier_spill_fill/check valid spill/fill, skb mark:OK
+#681/4   verifier_spill_fill/check valid spill/fill, skb mark @unpriv:OK
+#681/5   verifier_spill_fill/check valid spill/fill, ptr to mem:OK
+#681/6   verifier_spill_fill/check valid spill/fill, ptr to mem @unpriv:OK
+#681/7   verifier_spill_fill/check with invalid reg offset 0:OK
+#681/8   verifier_spill_fill/check with invalid reg offset 0 @unpriv:OK
+#681/9   verifier_spill_fill/check corrupted spill/fill:OK
+#681/10  verifier_spill_fill/check corrupted spill/fill @unpriv:OK
+#681/11  verifier_spill_fill/check corrupted spill/fill, LSB:OK
+#681/12  verifier_spill_fill/check corrupted spill/fill, LSB @unpriv:OK
+#681/13  verifier_spill_fill/check corrupted spill/fill, MSB:OK
+#681/14  verifier_spill_fill/check corrupted spill/fill, MSB @unpriv:OK
+#681/15  verifier_spill_fill/Spill a u32 const, refill from another half of the uninit u32 from the stack:OK
+#681/16  verifier_spill_fill/Spill a u32 const, refill from another half of the uninit u32 from the stack @unpriv:OK
+#681/17  verifier_spill_fill/old_imprecise_scalar_vs_cur_stack_misc:OK
+#681/18  verifier_spill_fill/old_imprecise_scalar_vs_cur_stack_misc @unpriv:OK
+#681/19  verifier_spill_fill/old_precise_scalar_vs_cur_stack_misc:OK
+#681/20  verifier_spill_fill/old_stack_misc_vs_cur_scalar:OK
+#681/21  verifier_spill_fill/old_stack_misc_vs_cur_ctx_ptr:OK
+#681/22  verifier_spill_fill/stack_noperfmon: reject read of invalid slots:OK
+#681/23  verifier_spill_fill/stack_noperfmon: reject read of invalid slots @unpriv:OK
+#681/24  verifier_spill_fill/stack_noperfmon: narrow spill onto 64-bit scalar spilled slots:OK
+#681/25  verifier_spill_fill/stack_noperfmon: narrow spill onto 64-bit scalar spilled slots @unpriv:OK
+#681/26  verifier_spill_fill/old_imprecise_scalar32_vs_cur_stack_misc:OK
+#681/27  verifier_spill_fill/partial fill from cleaned pointer spill:OK
+#681/28  verifier_spill_fill/spill_fill_const_ptr_to_dynptr:OK
+#681/29  verifier_spill_fill/Spill and refill a u32 const scalar.  Offset to skb->data:OK
+#681/30  verifier_spill_fill/Spill a u32 const scalar.  Refill as u16.  Offset to skb->data:OK
+#681/31  verifier_spill_fill/Spill u32 const scalars.  Refill as u64.  Offset to skb->data:OK
+#681/32  verifier_spill_fill/Spill a u32 const scalar.  Refill as u16 from MSB.  Offset to skb->data:OK
+#681/33  verifier_spill_fill/Spill and refill a u32 const scalar at non 8byte aligned stack addr.  Offset to skb->data:OK
+#681/34  verifier_spill_fill/Spill and refill a umax=40 bounded scalar.  Offset to skb->data:OK
+#681/35  verifier_spill_fill/Spill a u32 scalar at fp-4 and then at fp-8:OK
+#681/36  verifier_spill_fill/32-bit spill of 64-bit reg should clear ID:OK
+#681/37  verifier_spill_fill/16-bit spill of 32-bit reg should clear ID:OK
+#681/38  verifier_spill_fill/32-bit spilled reg range should be tracked:OK
+#681/39  verifier_spill_fill/64-bit spill of 64-bit reg should assign ID:OK
+#681/40  verifier_spill_fill/32-bit spill of 32-bit reg should assign ID:OK
+#681/41  verifier_spill_fill/16-bit spill of 16-bit reg should assign ID:OK
+#681/42  verifier_spill_fill/8-bit spill of 8-bit reg should assign ID:OK
+#681/43  verifier_spill_fill/spill unbounded reg, then range check src:OK
+#681/44  verifier_spill_fill/32-bit fill after 64-bit spill:OK
+#681/45  verifier_spill_fill/32-bit fill after 64-bit spill of 32-bit value should preserve ID:OK
+#681/46  verifier_spill_fill/32-bit fill after 64-bit spill should clear ID:OK
+#681/47  verifier_spill_fill/spill_subregs_preserve_stack_zero:OK
+#681/48  verifier_spill_fill/partial_stack_load_preserves_zeros:OK
+#681/49  verifier_spill_fill/partial_stack_load_preserves_partial_zeros:OK
+#681/50  verifier_spill_fill/stack_load_preserves_mixed_zero_and_zero_spill:OK
+#681/51  verifier_spill_fill/stack_load_preserves_const_precision:OK
+#681/52  verifier_spill_fill/stack_load_preserves_const_precision_subreg:OK
+#681/53  verifier_spill_fill/var_off_write_over_scalar_spill:OK
+#681/54  verifier_spill_fill/spill_fill_ptr_to_tp_buffer:OK
+#681     verifier_spill_fill:OK
+#682/1   verifier_spin_lock/spin_lock: test1 success:OK
+#682/2   verifier_spin_lock/spin_lock: test1 success @unpriv:OK
+#682/3   verifier_spin_lock/spin_lock: test2 direct ld/st:OK
+#682/4   verifier_spin_lock/spin_lock: test2 direct ld/st @unpriv:OK
+#682/5   verifier_spin_lock/spin_lock: test3 direct ld/st:OK
+#682/6   verifier_spin_lock/spin_lock: test3 direct ld/st @unpriv:OK
+#682/7   verifier_spin_lock/spin_lock: test4 direct ld/st:OK
+#682/8   verifier_spin_lock/spin_lock: test4 direct ld/st @unpriv:OK
+#682/9   verifier_spin_lock/spin_lock: test5 call within a locked region:OK
+#682/10  verifier_spin_lock/spin_lock: test5 call within a locked region @unpriv:OK
+#682/11  verifier_spin_lock/spin_lock: test6 missing unlock:OK
+#682/12  verifier_spin_lock/spin_lock: test6 missing unlock @unpriv:OK
+#682/13  verifier_spin_lock/spin_lock: test7 unlock without lock:OK
+#682/14  verifier_spin_lock/spin_lock: test7 unlock without lock @unpriv:OK
+#682/15  verifier_spin_lock/spin_lock: test8 double lock:OK
+#682/16  verifier_spin_lock/spin_lock: test8 double lock @unpriv:OK
+#682/17  verifier_spin_lock/spin_lock: test9 different lock:OK
+#682/18  verifier_spin_lock/spin_lock: test9 different lock @unpriv:OK
+#682/19  verifier_spin_lock/spin_lock: test10 lock in subprog without unlock:OK
+#682/20  verifier_spin_lock/spin_lock: test10 lock in subprog without unlock @unpriv:OK
+#682/21  verifier_spin_lock/spin_lock: regsafe() check_ids() similar id mappings:OK
+#682/22  verifier_spin_lock/spin_lock: regsafe() check_ids() similar id mappings @unpriv:OK
+#682/23  verifier_spin_lock/spin_lock: test11 ld_abs under lock:OK
+#682/24  verifier_spin_lock/spin_lock: regsafe compare reg->id for map value:OK
+#682/25  verifier_spin_lock/spin_lock: loop within a locked region:OK
+#682/26  verifier_spin_lock/spin_lock: loop within a locked region @unpriv:OK
+#682     verifier_spin_lock:OK
+#683/1   verifier_stack_arg/stack_arg is not supported by compiler or jit, use a dummy test:OK
+#683     verifier_stack_arg:OK
+#684/1   verifier_stack_arg_order/stack_arg order is not supported by compiler or jit, use a dummy test:OK
+#684     verifier_stack_arg_order:OK
+#685/1   verifier_stack_ptr/PTR_TO_STACK store/load:OK
+#685/2   verifier_stack_ptr/PTR_TO_STACK store/load @unpriv:OK
+#685/3   verifier_stack_ptr/PTR_TO_STACK store/load - bad alignment on off:OK
+#685/4   verifier_stack_ptr/PTR_TO_STACK store/load - bad alignment on off @unpriv:OK
+#685/5   verifier_stack_ptr/PTR_TO_STACK store/load - bad alignment on reg:OK
+#685/6   verifier_stack_ptr/PTR_TO_STACK store/load - bad alignment on reg @unpriv:OK
+#685/7   verifier_stack_ptr/PTR_TO_STACK store/load - out of bounds low:OK
+#685/8   verifier_stack_ptr/PTR_TO_STACK store/load - out of bounds low @unpriv:OK
+#685/9   verifier_stack_ptr/PTR_TO_STACK store/load - out of bounds high:OK
+#685/10  verifier_stack_ptr/PTR_TO_STACK store/load - out of bounds high @unpriv:OK
+#685/11  verifier_stack_ptr/PTR_TO_STACK check high 1:OK
+#685/12  verifier_stack_ptr/PTR_TO_STACK check high 1 @unpriv:OK
+#685/13  verifier_stack_ptr/PTR_TO_STACK check high 2:OK
+#685/14  verifier_stack_ptr/PTR_TO_STACK check high 2 @unpriv:OK
+#685/15  verifier_stack_ptr/PTR_TO_STACK check high 3:OK
+#685/16  verifier_stack_ptr/PTR_TO_STACK check high 3 @unpriv:OK
+#685/17  verifier_stack_ptr/PTR_TO_STACK check high 4:OK
+#685/18  verifier_stack_ptr/PTR_TO_STACK check high 4 @unpriv:OK
+#685/19  verifier_stack_ptr/PTR_TO_STACK check high 5:OK
+#685/20  verifier_stack_ptr/PTR_TO_STACK check high 5 @unpriv:OK
+#685/21  verifier_stack_ptr/PTR_TO_STACK check high 6:OK
+#685/22  verifier_stack_ptr/PTR_TO_STACK check high 6 @unpriv:OK
+#685/23  verifier_stack_ptr/PTR_TO_STACK check high 7:OK
+#685/24  verifier_stack_ptr/PTR_TO_STACK check high 7 @unpriv:OK
+#685/25  verifier_stack_ptr/PTR_TO_STACK check low 1:OK
+#685/26  verifier_stack_ptr/PTR_TO_STACK check low 1 @unpriv:OK
+#685/27  verifier_stack_ptr/PTR_TO_STACK check low 2:OK
+#685/28  verifier_stack_ptr/PTR_TO_STACK check low 2 @unpriv:OK
+#685/29  verifier_stack_ptr/PTR_TO_STACK check low 3:OK
+#685/30  verifier_stack_ptr/PTR_TO_STACK check low 3 @unpriv:OK
+#685/31  verifier_stack_ptr/PTR_TO_STACK check low 4:OK
+#685/32  verifier_stack_ptr/PTR_TO_STACK check low 4 @unpriv:OK
+#685/33  verifier_stack_ptr/PTR_TO_STACK check low 5:OK
+#685/34  verifier_stack_ptr/PTR_TO_STACK check low 5 @unpriv:OK
+#685/35  verifier_stack_ptr/PTR_TO_STACK check low 6:OK
+#685/36  verifier_stack_ptr/PTR_TO_STACK check low 6 @unpriv:OK
+#685/37  verifier_stack_ptr/PTR_TO_STACK check low 7:OK
+#685/38  verifier_stack_ptr/PTR_TO_STACK check low 7 @unpriv:OK
+#685/39  verifier_stack_ptr/PTR_TO_STACK mixed reg/k, 1:OK
+#685/40  verifier_stack_ptr/PTR_TO_STACK mixed reg/k, 1 @unpriv:OK
+#685/41  verifier_stack_ptr/PTR_TO_STACK mixed reg/k, 2:OK
+#685/42  verifier_stack_ptr/PTR_TO_STACK mixed reg/k, 2 @unpriv:OK
+#685/43  verifier_stack_ptr/PTR_TO_STACK mixed reg/k, 3:OK
+#685/44  verifier_stack_ptr/PTR_TO_STACK mixed reg/k, 3 @unpriv:OK
+#685/45  verifier_stack_ptr/PTR_TO_STACK reg:OK
+#685/46  verifier_stack_ptr/PTR_TO_STACK reg @unpriv:OK
+#685/47  verifier_stack_ptr/stack pointer arithmetic:OK
+#685/48  verifier_stack_ptr/stack pointer arithmetic @unpriv:OK
+#685/49  verifier_stack_ptr/PTR_TO_STACK stack size > 512:OK
+#685/50  verifier_stack_ptr/PTR_TO_STACK stack size 512 with may_goto with jit:OK
+#685/51  verifier_stack_ptr/PTR_TO_STACK stack size 512 with may_goto without jit:SKIP
+#685/52  verifier_stack_ptr/store PTR_TO_STACK in R10 to array map using BPF_B:OK
+#685     verifier_stack_ptr:OK (SKIP: 1/52)
+#686/1   verifier_store_release/store-release, 8-bit:OK
+#686/2   verifier_store_release/store-release, 8-bit @unpriv:OK
+#686/3   verifier_store_release/store-release, 16-bit:OK
+#686/4   verifier_store_release/store-release, 16-bit @unpriv:OK
+#686/5   verifier_store_release/store-release, 32-bit:OK
+#686/6   verifier_store_release/store-release, 32-bit @unpriv:OK
+#686/7   verifier_store_release/store-release, 64-bit:OK
+#686/8   verifier_store_release/store-release, 64-bit @unpriv:OK
+#686/9   verifier_store_release/store-release with uninitialized src_reg:OK
+#686/10  verifier_store_release/store-release with uninitialized src_reg @unpriv:OK
+#686/11  verifier_store_release/store-release with uninitialized dst_reg:OK
+#686/12  verifier_store_release/store-release with uninitialized dst_reg @unpriv:OK
+#686/13  verifier_store_release/store-release with non-pointer dst_reg:OK
+#686/14  verifier_store_release/store-release with non-pointer dst_reg @unpriv:OK
+#686/15  verifier_store_release/misaligned store-release:OK
+#686/16  verifier_store_release/misaligned store-release @unpriv:OK
+#686/17  verifier_store_release/store-release to ctx pointer:OK
+#686/18  verifier_store_release/store-release to ctx pointer @unpriv:OK
+#686/19  verifier_store_release/store-release, leak pointer to stack:OK
+#686/20  verifier_store_release/store-release, leak pointer to stack @unpriv:OK
+#686/21  verifier_store_release/store-release, leak pointer to map:OK
+#686/22  verifier_store_release/store-release, leak pointer to map @unpriv:OK
+#686/23  verifier_store_release/store-release with invalid register R15:OK
+#686/24  verifier_store_release/store-release with invalid register R15 @unpriv:OK
+#686/25  verifier_store_release/store-release to pkt pointer:OK
+#686/26  verifier_store_release/store-release to flow_keys pointer:OK
+#686/27  verifier_store_release/store-release to sock pointer:OK
+#686     verifier_store_release:OK
+#687/1   verifier_subprog_precision/subprog_result_precise:OK
+#687/2   verifier_subprog_precision/fp_precise_subprog_result:OK
+#687/3   verifier_subprog_precision/sneaky_fp_precise_subprog_result:OK
+#687/4   verifier_subprog_precision/global_subprog_result_precise:OK
+#687/5   verifier_subprog_precision/callback_precise_return_fail:OK
+#687/6   verifier_subprog_precision/callback_result_precise:OK
+#687/7   verifier_subprog_precision/parent_callee_saved_reg_precise:OK
+#687/8   verifier_subprog_precision/parent_callee_saved_reg_precise_global:OK
+#687/9   verifier_subprog_precision/parent_callee_saved_reg_precise_with_callback:OK
+#687/10  verifier_subprog_precision/parent_stack_slot_precise:OK
+#687/11  verifier_subprog_precision/parent_stack_slot_precise_global:OK
+#687/12  verifier_subprog_precision/parent_stack_slot_precise_with_callback:OK
+#687/13  verifier_subprog_precision/subprog_arg_precise:OK
+#687/14  verifier_subprog_precision/subprog_spill_into_parent_stack_slot_precise:OK
+#687/15  verifier_subprog_precision/stack_slot_aliases_precision:OK
+#687/16  verifier_subprog_precision/subprog_result_tail_call:OK
+#687     verifier_subprog_precision:OK
+#688/1   verifier_subprog_topo/topo_linear:OK
+#688/2   verifier_subprog_topo/topo_diamond:OK
+#688/3   verifier_subprog_topo/topo_mixed:OK
+#688/4   verifier_subprog_topo/topo_shared:OK
+#688/5   verifier_subprog_topo/topo_dup_calls:OK
+#688/6   verifier_subprog_topo/topo_loop_cb:OK
+#688/7   verifier_subprog_topo/topo_loop_cb_chain:OK
+#688/8   verifier_subprog_topo/topo_no_calls:OK
+#688     verifier_subprog_topo:OK
+#689/1   verifier_subreg/add32 reg zero extend check:OK
+#689/2   verifier_subreg/add32 reg zero extend check @unpriv:OK
+#689/3   verifier_subreg/add32 imm zero extend check:OK
+#689/4   verifier_subreg/add32 imm zero extend check @unpriv:OK
+#689/5   verifier_subreg/sub32 reg zero extend check:OK
+#689/6   verifier_subreg/sub32 reg zero extend check @unpriv:OK
+#689/7   verifier_subreg/sub32 imm zero extend check:OK
+#689/8   verifier_subreg/sub32 imm zero extend check @unpriv:OK
+#689/9   verifier_subreg/mul32 reg zero extend check:OK
+#689/10  verifier_subreg/mul32 reg zero extend check @unpriv:OK
+#689/11  verifier_subreg/mul32 imm zero extend check:OK
+#689/12  verifier_subreg/mul32 imm zero extend check @unpriv:OK
+#689/13  verifier_subreg/div32 reg zero extend check:OK
+#689/14  verifier_subreg/div32 reg zero extend check @unpriv:OK
+#689/15  verifier_subreg/div32 imm zero extend check:OK
+#689/16  verifier_subreg/div32 imm zero extend check @unpriv:OK
+#689/17  verifier_subreg/or32 reg zero extend check:OK
+#689/18  verifier_subreg/or32 reg zero extend check @unpriv:OK
+#689/19  verifier_subreg/or32 imm zero extend check:OK
+#689/20  verifier_subreg/or32 imm zero extend check @unpriv:OK
+#689/21  verifier_subreg/and32 reg zero extend check:OK
+#689/22  verifier_subreg/and32 reg zero extend check @unpriv:OK
+#689/23  verifier_subreg/and32 imm zero extend check:OK
+#689/24  verifier_subreg/and32 imm zero extend check @unpriv:OK
+#689/25  verifier_subreg/lsh32 reg zero extend check:OK
+#689/26  verifier_subreg/lsh32 reg zero extend check @unpriv:OK
+#689/27  verifier_subreg/lsh32 imm zero extend check:OK
+#689/28  verifier_subreg/lsh32 imm zero extend check @unpriv:OK
+#689/29  verifier_subreg/rsh32 reg zero extend check:OK
+#689/30  verifier_subreg/rsh32 reg zero extend check @unpriv:OK
+#689/31  verifier_subreg/rsh32 imm zero extend check:OK
+#689/32  verifier_subreg/rsh32 imm zero extend check @unpriv:OK
+#689/33  verifier_subreg/neg32 reg zero extend check:OK
+#689/34  verifier_subreg/neg32 reg zero extend check @unpriv:OK
+#689/35  verifier_subreg/mod32 reg zero extend check:OK
+#689/36  verifier_subreg/mod32 reg zero extend check @unpriv:OK
+#689/37  verifier_subreg/mod32 imm zero extend check:OK
+#689/38  verifier_subreg/mod32 imm zero extend check @unpriv:OK
+#689/39  verifier_subreg/xor32 reg zero extend check:OK
+#689/40  verifier_subreg/xor32 reg zero extend check @unpriv:OK
+#689/41  verifier_subreg/xor32 imm zero extend check:OK
+#689/42  verifier_subreg/xor32 imm zero extend check @unpriv:OK
+#689/43  verifier_subreg/mov32 reg zero extend check:OK
+#689/44  verifier_subreg/mov32 reg zero extend check @unpriv:OK
+#689/45  verifier_subreg/mov32 imm zero extend check:OK
+#689/46  verifier_subreg/mov32 imm zero extend check @unpriv:OK
+#689/47  verifier_subreg/arsh32 reg zero extend check:OK
+#689/48  verifier_subreg/arsh32 reg zero extend check @unpriv:OK
+#689/49  verifier_subreg/arsh32 imm zero extend check:OK
+#689/50  verifier_subreg/arsh32 imm zero extend check @unpriv:OK
+#689/51  verifier_subreg/arsh32 imm sign positive extend check:OK
+#689/52  verifier_subreg/arsh32 imm sign negative extend check:OK
+#689/53  verifier_subreg/arsh32 imm sign extend check:OK
+#689/54  verifier_subreg/end16 (to_le) reg zero extend check:OK
+#689/55  verifier_subreg/end16 (to_le) reg zero extend check @unpriv:OK
+#689/56  verifier_subreg/end32 (to_le) reg zero extend check:OK
+#689/57  verifier_subreg/end32 (to_le) reg zero extend check @unpriv:OK
+#689/58  verifier_subreg/end16 (to_be) reg zero extend check:OK
+#689/59  verifier_subreg/end16 (to_be) reg zero extend check @unpriv:OK
+#689/60  verifier_subreg/end32 (to_be) reg zero extend check:OK
+#689/61  verifier_subreg/end32 (to_be) reg zero extend check @unpriv:OK
+#689/62  verifier_subreg/ldx_b zero extend check:OK
+#689/63  verifier_subreg/ldx_b zero extend check @unpriv:OK
+#689/64  verifier_subreg/ldx_h zero extend check:OK
+#689/65  verifier_subreg/ldx_h zero extend check @unpriv:OK
+#689/66  verifier_subreg/ldx_w zero extend check:OK
+#689/67  verifier_subreg/ldx_w zero extend check @unpriv:OK
+#689/68  verifier_subreg/arsh_31_and:OK
+#689/69  verifier_subreg/arsh_31_and @unpriv:OK
+#689/70  verifier_subreg/arsh_63_and:OK
+#689/71  verifier_subreg/arsh_63_and @unpriv:OK
+#689/72  verifier_subreg/arsh_31_or:OK
+#689/73  verifier_subreg/arsh_31_or @unpriv:OK
+#689/74  verifier_subreg/arsh_63_or:OK
+#689/75  verifier_subreg/arsh_63_or @unpriv:OK
+#689/76  verifier_subreg/arsh32_imm1_value:OK
+#689/77  verifier_subreg/lsh32_reg0_zero_extend_check:OK
+#689/78  verifier_subreg/rsh32_reg0_zero_extend_check:OK
+#689/79  verifier_subreg/arsh32_reg0_zero_extend_check:OK
+#689/80  verifier_subreg/lsh32_imm31_value:OK
+#689/81  verifier_subreg/rsh32_imm31_value:OK
+#689/82  verifier_subreg/arsh32_imm31_value:OK
+#689/83  verifier_subreg/lsh32_unknown_precise_bounds:OK
+#689/84  verifier_subreg/rsh32_unknown_bounds:OK
+#689     verifier_subreg:OK
+#690/1   verifier_tailcall/invalid map type for tail call:OK
+#690/2   verifier_tailcall/invalid map type for tail call @unpriv:OK
+#690     verifier_tailcall:OK
+#691/1   verifier_tailcall_jit/main:SKIP
+#691     verifier_tailcall_jit:SKIP
+#692/1   verifier_typedef/typedef: resolve:OK
+#692     verifier_typedef:OK
+#693/1   verifier_uninit/read uninitialized register:OK
+#693/2   verifier_uninit/read uninitialized register @unpriv:OK
+#693/3   verifier_uninit/read invalid register:OK
+#693/4   verifier_uninit/read invalid register @unpriv:OK
+#693/5   verifier_uninit/program doesn't init R0 before exit:OK
+#693/6   verifier_uninit/program doesn't init R0 before exit @unpriv:OK
+#693/7   verifier_uninit/program doesn't init R0 before exit in all branches:OK
+#693/8   verifier_uninit/program doesn't init R0 before exit in all branches @unpriv:OK
+#693     verifier_uninit:OK
+#694/1   verifier_unpriv/unpriv: pseudo btf id log masks address @unpriv:OK
+#694/2   verifier_unpriv/unpriv: return pointer:OK
+#694/3   verifier_unpriv/unpriv: return pointer @unpriv:OK
+#694/4   verifier_unpriv/unpriv: add const to pointer:OK
+#694/5   verifier_unpriv/unpriv: add const to pointer @unpriv:OK
+#694/6   verifier_unpriv/unpriv: add pointer to pointer:OK
+#694/7   verifier_unpriv/unpriv: add pointer to pointer @unpriv:OK
+#694/8   verifier_unpriv/unpriv: neg pointer:OK
+#694/9   verifier_unpriv/unpriv: neg pointer @unpriv:OK
+#694/10  verifier_unpriv/unpriv: cmp pointer with const:OK
+#694/11  verifier_unpriv/unpriv: cmp pointer with const @unpriv:OK
+#694/12  verifier_unpriv/unpriv: cmp pointer with pointer:OK
+#694/13  verifier_unpriv/unpriv: cmp pointer with pointer @unpriv:OK
+#694/14  verifier_unpriv/unpriv: pass pointer to helper function:OK
+#694/15  verifier_unpriv/unpriv: pass pointer to helper function @unpriv:OK
+#694/16  verifier_unpriv/unpriv: indirectly pass pointer on stack to helper function:OK
+#694/17  verifier_unpriv/unpriv: indirectly pass pointer on stack to helper function @unpriv:OK
+#694/18  verifier_unpriv/unpriv: mangle pointer on stack 1:OK
+#694/19  verifier_unpriv/unpriv: mangle pointer on stack 1 @unpriv:OK
+#694/20  verifier_unpriv/unpriv: mangle pointer on stack 2:OK
+#694/21  verifier_unpriv/unpriv: mangle pointer on stack 2 @unpriv:OK
+#694/22  verifier_unpriv/unpriv: read pointer from stack in small chunks:OK
+#694/23  verifier_unpriv/unpriv: read pointer from stack in small chunks @unpriv:OK
+#694/24  verifier_unpriv/unpriv: write pointer into ctx:OK
+#694/25  verifier_unpriv/unpriv: write pointer into ctx @unpriv:OK
+#694/26  verifier_unpriv/unpriv: spill/fill of ctx:OK
+#694/27  verifier_unpriv/unpriv: spill/fill of ctx @unpriv:OK
+#694/28  verifier_unpriv/unpriv: write pointer into map elem value:OK
+#694/29  verifier_unpriv/unpriv: write pointer into map elem value @unpriv:OK
+#694/30  verifier_unpriv/alu32: mov u32 const:OK
+#694/31  verifier_unpriv/alu32: mov u32 const @unpriv:OK
+#694/32  verifier_unpriv/unpriv: partial copy of pointer:OK
+#694/33  verifier_unpriv/unpriv: partial copy of pointer @unpriv:OK
+#694/34  verifier_unpriv/unpriv: pass pointer to tail_call:OK
+#694/35  verifier_unpriv/unpriv: pass pointer to tail_call @unpriv:OK
+#694/36  verifier_unpriv/unpriv: cmp map pointer with zero:OK
+#694/37  verifier_unpriv/unpriv: cmp map pointer with zero @unpriv:OK
+#694/38  verifier_unpriv/unpriv: cmp map pointer with const:OK
+#694/39  verifier_unpriv/unpriv: cmp map pointer with const @unpriv:OK
+#694/40  verifier_unpriv/unpriv: write into frame pointer:OK
+#694/41  verifier_unpriv/unpriv: write into frame pointer @unpriv:OK
+#694/42  verifier_unpriv/unpriv: spill/fill frame pointer:OK
+#694/43  verifier_unpriv/unpriv: spill/fill frame pointer @unpriv:OK
+#694/44  verifier_unpriv/unpriv: cmp of frame pointer:OK
+#694/45  verifier_unpriv/unpriv: cmp of frame pointer @unpriv:OK
+#694/46  verifier_unpriv/unpriv: adding of fp, reg:OK
+#694/47  verifier_unpriv/unpriv: adding of fp, reg @unpriv:OK
+#694/48  verifier_unpriv/unpriv: adding of fp, imm:OK
+#694/49  verifier_unpriv/unpriv: adding of fp, imm @unpriv:OK
+#694/50  verifier_unpriv/unpriv: cmp of stack pointer:OK
+#694/51  verifier_unpriv/unpriv: cmp of stack pointer @unpriv:OK
+#694/52  verifier_unpriv/unpriv: Spectre v1 path-based type confusion of scalar as stack-ptr:OK
+#694/53  verifier_unpriv/unpriv: Spectre v1 path-based type confusion of scalar as stack-ptr @unpriv:OK
+#694/54  verifier_unpriv/unpriv: ldimm64 before Spectre v4 barrier:OK
+#694/55  verifier_unpriv/unpriv: ldimm64 before Spectre v4 barrier @unpriv:OK
+#694/56  verifier_unpriv/unpriv: Spectre v1 and v4 barrier:OK
+#694/57  verifier_unpriv/unpriv: Spectre v1 and v4 barrier @unpriv:OK
+#694/58  verifier_unpriv/unpriv: Spectre v1 and v4 barrier (simple):OK
+#694/59  verifier_unpriv/unpriv: Spectre v1 and v4 barrier (simple) @unpriv:OK
+#694/60  verifier_unpriv/unpriv: ldimm64 before Spectre v1 and v4 barrier (simple):OK
+#694/61  verifier_unpriv/unpriv: ldimm64 before Spectre v1 and v4 barrier (simple) @unpriv:OK
+#694/62  verifier_unpriv/unpriv: nospec after dead stack write in helper:OK
+#694/63  verifier_unpriv/unpriv: nospec after dead stack write in helper @unpriv:OK
+#694/64  verifier_unpriv/unpriv: Spectre v4 stack write slot index:OK
+#694/65  verifier_unpriv/unpriv: Spectre v4 stack write slot index @unpriv:OK
+#694/66  verifier_unpriv/unpriv: check that printk is disallowed:OK
+#694/67  verifier_unpriv/unpriv: spill/fill of ctx 2:OK
+#694/68  verifier_unpriv/unpriv: spill/fill of ctx 3:OK
+#694/69  verifier_unpriv/unpriv: spill/fill of ctx 4:OK
+#694/70  verifier_unpriv/unpriv: spill/fill of different pointers stx:OK
+#694/71  verifier_unpriv/unpriv: spill/fill of different pointers st:OK
+#694/72  verifier_unpriv/unpriv: spill/fill of different pointers stx - ctx and sock:OK
+#694/73  verifier_unpriv/unpriv: spill/fill of different pointers stx - leak sock:OK
+#694/74  verifier_unpriv/unpriv: spill/fill of different pointers stx - sock and ctx (read):OK
+#694/75  verifier_unpriv/unpriv: spill/fill of different pointers stx - sock and ctx (write):OK
+#694     verifier_unpriv:OK
+#695/1   verifier_unpriv_perf/unpriv: spill/fill of different pointers ldx:OK
+#695     verifier_unpriv_perf:OK
+#696/1   verifier_value/map element value store of cleared call register:OK
+#696/2   verifier_value/map element value store of cleared call register @unpriv:OK
+#696/3   verifier_value/map element value with unaligned store:OK
+#696/4   verifier_value/map element value with unaligned store @unpriv:OK
+#696/5   verifier_value/map element value with unaligned load:OK
+#696/6   verifier_value/map element value with unaligned load @unpriv:OK
+#696/7   verifier_value/map element value is preserved across register spilling:OK
+#696/8   verifier_value/map element value is preserved across register spilling @unpriv:OK
+#696     verifier_value:OK
+#697/1   verifier_value_adj_spill/map element value is preserved across register spilling:OK
+#697/2   verifier_value_adj_spill/map element value is preserved across register spilling @unpriv:OK
+#697/3   verifier_value_adj_spill/map element value or null is marked on register spilling:OK
+#697/4   verifier_value_adj_spill/map element value or null is marked on register spilling @unpriv:OK
+#697     verifier_value_adj_spill:OK
+#698/1   verifier_value_illegal_alu/map element value illegal alu op, 1:OK
+#698/2   verifier_value_illegal_alu/map element value illegal alu op, 1 @unpriv:OK
+#698/3   verifier_value_illegal_alu/map element value illegal alu op, 2:OK
+#698/4   verifier_value_illegal_alu/map element value illegal alu op, 2 @unpriv:OK
+#698/5   verifier_value_illegal_alu/map element value illegal alu op, 3:OK
+#698/6   verifier_value_illegal_alu/map element value illegal alu op, 3 @unpriv:OK
+#698/7   verifier_value_illegal_alu/map element value illegal alu op, 4:OK
+#698/8   verifier_value_illegal_alu/map element value illegal alu op, 4 @unpriv:OK
+#698/9   verifier_value_illegal_alu/map element value illegal alu op, 5:OK
+#698/10  verifier_value_illegal_alu/map element value illegal alu op, 5 @unpriv:OK
+#698/11  verifier_value_illegal_alu/map_ptr illegal alu op, map_ptr = -map_ptr:OK
+#698/12  verifier_value_illegal_alu/map_ptr illegal alu op, map_ptr = -map_ptr @unpriv:OK
+#698/13  verifier_value_illegal_alu/bad_offset_divx:OK
+#698/14  verifier_value_illegal_alu/bad_offset_modk:OK
+#698/15  verifier_value_illegal_alu/bad_offset_addx:OK
+#698/16  verifier_value_illegal_alu/bad_offset_divx2:OK
+#698/17  verifier_value_illegal_alu/bad_offset_modk2:OK
+#698/18  verifier_value_illegal_alu/bad_offset_addx2:OK
+#698/19  verifier_value_illegal_alu/flow_keys illegal alu op with variable offset:OK
+#698     verifier_value_illegal_alu:OK
+#699/1   verifier_value_or_null/multiple registers share map_lookup_elem result:OK
+#699/2   verifier_value_or_null/alu ops on ptr_to_map_value_or_null, 1:OK
+#699/3   verifier_value_or_null/alu ops on ptr_to_map_value_or_null, 2:OK
+#699/4   verifier_value_or_null/alu ops on ptr_to_map_value_or_null, 3:OK
+#699/5   verifier_value_or_null/invalid memory access with multiple map_lookup_elem calls:OK
+#699/6   verifier_value_or_null/valid indirect map_lookup_elem access with 2nd lookup in branch:OK
+#699/7   verifier_value_or_null/map lookup and null branch prediction:OK
+#699/8   verifier_value_or_null/invalid map access from else condition:OK
+#699/9   verifier_value_or_null/invalid map access from else condition @unpriv:OK
+#699/10  verifier_value_or_null/MAP_VALUE_OR_NULL check_ids() in regsafe():OK
+#699/11  verifier_value_or_null/MAP_VALUE_OR_NULL check_ids() in regsafe() @unpriv:OK
+#699     verifier_value_or_null:OK
+#700/1   verifier_value_ptr_arith/map access: known scalar += value_ptr unknown vs const:OK
+#700/2   verifier_value_ptr_arith/map access: known scalar += value_ptr unknown vs const @unpriv:OK
+#700/3   verifier_value_ptr_arith/map access: known scalar += value_ptr const vs unknown:OK
+#700/4   verifier_value_ptr_arith/map access: known scalar += value_ptr const vs unknown @unpriv:OK
+#700/5   verifier_value_ptr_arith/map access: known scalar += value_ptr const vs const (ne):OK
+#700/6   verifier_value_ptr_arith/map access: known scalar += value_ptr const vs const (ne) @unpriv:OK
+#700/7   verifier_value_ptr_arith/map access: known scalar += value_ptr const vs const (eq):OK
+#700/8   verifier_value_ptr_arith/map access: known scalar += value_ptr const vs const (eq) @unpriv:OK
+#700/9   verifier_value_ptr_arith/map access: known scalar += value_ptr unknown vs unknown (eq):OK
+#700/10  verifier_value_ptr_arith/map access: known scalar += value_ptr unknown vs unknown (eq) @unpriv:OK
+#700/11  verifier_value_ptr_arith/map access: known scalar += value_ptr unknown vs unknown (lt):OK
+#700/12  verifier_value_ptr_arith/map access: known scalar += value_ptr unknown vs unknown (lt) @unpriv:OK
+#700/13  verifier_value_ptr_arith/map access: known scalar += value_ptr unknown vs unknown (gt):OK
+#700/14  verifier_value_ptr_arith/map access: known scalar += value_ptr unknown vs unknown (gt) @unpriv:OK
+#700/15  verifier_value_ptr_arith/map access: known scalar += value_ptr from different maps:OK
+#700/16  verifier_value_ptr_arith/map access: known scalar += value_ptr from different maps @unpriv:OK
+#700/17  verifier_value_ptr_arith/map access: value_ptr -= known scalar from different maps:OK
+#700/18  verifier_value_ptr_arith/map access: value_ptr -= known scalar from different maps @unpriv:OK
+#700/19  verifier_value_ptr_arith/map access: known scalar += value_ptr from different maps, but same value properties:OK
+#700/20  verifier_value_ptr_arith/map access: known scalar += value_ptr from different maps, but same value properties @unpriv:OK
+#700/21  verifier_value_ptr_arith/map access: mixing value pointer and scalar, 1:OK
+#700/22  verifier_value_ptr_arith/map access: mixing value pointer and scalar, 1 @unpriv:OK
+#700/23  verifier_value_ptr_arith/map access: mixing value pointer and scalar, 2:OK
+#700/24  verifier_value_ptr_arith/map access: mixing value pointer and scalar, 2 @unpriv:OK
+#700/25  verifier_value_ptr_arith/sanitation: alu with different scalars 1:OK
+#700/26  verifier_value_ptr_arith/sanitation: alu with different scalars 1 @unpriv:OK
+#700/27  verifier_value_ptr_arith/sanitation: alu with different scalars 2:OK
+#700/28  verifier_value_ptr_arith/sanitation: alu with different scalars 2 @unpriv:OK
+#700/29  verifier_value_ptr_arith/sanitation: alu with different scalars 3:OK
+#700/30  verifier_value_ptr_arith/sanitation: alu with different scalars 3 @unpriv:OK
+#700/31  verifier_value_ptr_arith/map access: value_ptr += known scalar, upper oob arith, test 1:OK
+#700/32  verifier_value_ptr_arith/map access: value_ptr += known scalar, upper oob arith, test 1 @unpriv:OK
+#700/33  verifier_value_ptr_arith/map access: value_ptr += known scalar, upper oob arith, test 2:OK
+#700/34  verifier_value_ptr_arith/map access: value_ptr += known scalar, upper oob arith, test 2 @unpriv:OK
+#700/35  verifier_value_ptr_arith/map access: value_ptr += known scalar, upper oob arith, test 3:OK
+#700/36  verifier_value_ptr_arith/map access: value_ptr += known scalar, upper oob arith, test 3 @unpriv:OK
+#700/37  verifier_value_ptr_arith/map access: value_ptr -= known scalar, lower oob arith, test 1:OK
+#700/38  verifier_value_ptr_arith/map access: value_ptr -= known scalar, lower oob arith, test 2:OK
+#700/39  verifier_value_ptr_arith/map access: value_ptr -= known scalar, lower oob arith, test 2 @unpriv:OK
+#700/40  verifier_value_ptr_arith/map access: value_ptr -= known scalar, lower oob arith, test 3:OK
+#700/41  verifier_value_ptr_arith/map access: value_ptr -= known scalar, lower oob arith, test 3 @unpriv:OK
+#700/42  verifier_value_ptr_arith/map access: known scalar += value_ptr:OK
+#700/43  verifier_value_ptr_arith/map access: known scalar += value_ptr @unpriv:OK
+#700/44  verifier_value_ptr_arith/map access: value_ptr += known scalar, 1:OK
+#700/45  verifier_value_ptr_arith/map access: value_ptr += known scalar, 1 @unpriv:OK
+#700/46  verifier_value_ptr_arith/map access: value_ptr += known scalar, 2:OK
+#700/47  verifier_value_ptr_arith/map access: value_ptr += known scalar, 2 @unpriv:OK
+#700/48  verifier_value_ptr_arith/map access: value_ptr += known scalar, 3:OK
+#700/49  verifier_value_ptr_arith/map access: value_ptr += known scalar, 3 @unpriv:OK
+#700/50  verifier_value_ptr_arith/map access: value_ptr += known scalar, 4:OK
+#700/51  verifier_value_ptr_arith/map access: value_ptr += known scalar, 4 @unpriv:OK
+#700/52  verifier_value_ptr_arith/map access: value_ptr += known scalar, 5:OK
+#700/53  verifier_value_ptr_arith/map access: value_ptr += known scalar, 5 @unpriv:OK
+#700/54  verifier_value_ptr_arith/map access: value_ptr += known scalar, 6:OK
+#700/55  verifier_value_ptr_arith/map access: value_ptr += known scalar, 6 @unpriv:OK
+#700/56  verifier_value_ptr_arith/map access: value_ptr += N, value_ptr -= N known scalar:OK
+#700/57  verifier_value_ptr_arith/map access: value_ptr += N, value_ptr -= N known scalar @unpriv:OK
+#700/58  verifier_value_ptr_arith/map access: unknown scalar += value_ptr, 1:OK
+#700/59  verifier_value_ptr_arith/map access: unknown scalar += value_ptr, 1 @unpriv:OK
+#700/60  verifier_value_ptr_arith/map access: unknown scalar += value_ptr, 2:OK
+#700/61  verifier_value_ptr_arith/map access: unknown scalar += value_ptr, 2 @unpriv:OK
+#700/62  verifier_value_ptr_arith/map access: unknown scalar += value_ptr, 3:OK
+#700/63  verifier_value_ptr_arith/map access: unknown scalar += value_ptr, 3 @unpriv:OK
+#700/64  verifier_value_ptr_arith/map access: unknown scalar += value_ptr, 4:OK
+#700/65  verifier_value_ptr_arith/map access: unknown scalar += value_ptr, 4 @unpriv:OK
+#700/66  verifier_value_ptr_arith/map access: value_ptr += unknown scalar, 1:OK
+#700/67  verifier_value_ptr_arith/map access: value_ptr += unknown scalar, 1 @unpriv:OK
+#700/68  verifier_value_ptr_arith/map access: value_ptr += unknown scalar, 2:OK
+#700/69  verifier_value_ptr_arith/map access: value_ptr += unknown scalar, 2 @unpriv:OK
+#700/70  verifier_value_ptr_arith/map access: value_ptr += unknown scalar, 3:OK
+#700/71  verifier_value_ptr_arith/map access: value_ptr += unknown scalar, 3 @unpriv:OK
+#700/72  verifier_value_ptr_arith/map access: value_ptr += value_ptr:OK
+#700/73  verifier_value_ptr_arith/map access: value_ptr += value_ptr @unpriv:OK
+#700/74  verifier_value_ptr_arith/map access: known scalar -= value_ptr:OK
+#700/75  verifier_value_ptr_arith/map access: known scalar -= value_ptr @unpriv:OK
+#700/76  verifier_value_ptr_arith/map access: value_ptr -= known scalar:OK
+#700/77  verifier_value_ptr_arith/map access: value_ptr -= known scalar @unpriv:OK
+#700/78  verifier_value_ptr_arith/map access: value_ptr -= known scalar, 2:OK
+#700/79  verifier_value_ptr_arith/map access: value_ptr -= known scalar, 2 @unpriv:OK
+#700/80  verifier_value_ptr_arith/map access: unknown scalar -= value_ptr:OK
+#700/81  verifier_value_ptr_arith/map access: unknown scalar -= value_ptr @unpriv:OK
+#700/82  verifier_value_ptr_arith/map access: value_ptr -= unknown scalar:OK
+#700/83  verifier_value_ptr_arith/map access: value_ptr -= unknown scalar @unpriv:OK
+#700/84  verifier_value_ptr_arith/map access: value_ptr -= unknown scalar, 2:OK
+#700/85  verifier_value_ptr_arith/map access: value_ptr -= unknown scalar, 2 @unpriv:OK
+#700/86  verifier_value_ptr_arith/map access: value_ptr -= value_ptr:OK
+#700/87  verifier_value_ptr_arith/map access: value_ptr -= value_ptr @unpriv:OK
+#700/88  verifier_value_ptr_arith/map access: trying to leak tainted dst reg:OK
+#700/89  verifier_value_ptr_arith/map access: trying to leak tainted dst reg @unpriv:OK
+#700/90  verifier_value_ptr_arith/32bit pkt_ptr -= scalar:OK
+#700/91  verifier_value_ptr_arith/32bit scalar -= pkt_ptr:OK
+#700     verifier_value_ptr_arith:OK
+#701/1   verifier_var_off/variable-offset ctx access:OK
+#701/2   verifier_var_off/indirect variable-offset stack access, max out of bound:OK
+#701/3   verifier_var_off/indirect variable-offset stack access, min out of bound:OK
+#701/4   verifier_var_off/indirect variable-offset stack access, ok:OK
+#701/5   verifier_var_off/variable-offset stack read, priv vs unpriv:OK
+#701/6   verifier_var_off/variable-offset stack read, priv vs unpriv @unpriv:OK
+#701/7   verifier_var_off/variable-offset stack read preserves spilled zero:OK
+#701/8   verifier_var_off/variable-offset stack read preserves spilled zero across slots:OK
+#701/9   verifier_var_off/variable-offset stack read preserves partial spilled zero:OK
+#701/10  verifier_var_off/variable-offset stack read partial spill with misc data:OK
+#701/11  verifier_var_off/variable-offset stack read, uninitialized:OK
+#701/12  verifier_var_off/variable-offset stack read, uninitialized @unpriv:OK
+#701/13  verifier_var_off/indirect variable-offset stack access, min_off < min_initialized:OK
+#701/14  verifier_var_off/indirect variable-offset stack access, min_off < min_initialized @unpriv:OK
+#701/15  verifier_var_off/indirect variable-offset stack access, priv vs unpriv:OK
+#701/16  verifier_var_off/indirect variable-offset stack access, priv vs unpriv @unpriv:OK
+#701/17  verifier_var_off/variable-offset stack write, priv vs unpriv:OK
+#701/18  verifier_var_off/variable-offset stack write, priv vs unpriv @unpriv:OK
+#701/19  verifier_var_off/variable-offset stack write followed by read:OK
+#701/20  verifier_var_off/variable-offset stack write followed by read @unpriv:OK
+#701/21  verifier_var_off/variable-offset stack write clobbers spilled regs:OK
+#701/22  verifier_var_off/variable-offset stack write clobbers spilled regs @unpriv:OK
+#701/23  verifier_var_off/indirect variable-offset stack access, zero-sized, max out of bound:OK
+#701/24  verifier_var_off/indirect variable-offset stack access, unbounded:OK
+#701     verifier_var_off:OK
+#702/1   verifier_vfs_accept/get_task_exe_file_and_put_kfunc_from_current_sleepable:OK
+#702/2   verifier_vfs_accept/path_d_path_from_file_argument:OK
+#702/3   verifier_vfs_accept/get_task_exe_file_and_put_kfunc_from_current_non_sleepable:OK
+#702/4   verifier_vfs_accept/get_task_exe_file_and_put_kfunc_from_argument:OK
+#702/5   verifier_vfs_accept/path_d_path_from_path_argument:OK
+#702/6   verifier_vfs_accept/inode_rename:OK
+#702     verifier_vfs_accept:OK
+#703/1   verifier_vfs_reject/get_task_exe_file_kfunc_null:OK
+#703/2   verifier_vfs_reject/get_task_exe_file_kfunc_untrusted:OK
+#703/3   verifier_vfs_reject/get_task_exe_file_kfunc_unreleased:OK
+#703/4   verifier_vfs_reject/put_file_kfunc_unacquired:OK
+#703/5   verifier_vfs_reject/path_d_path_kfunc_null:OK
+#703/6   verifier_vfs_reject/path_d_path_kfunc_untrusted_from_current:OK
+#703/7   verifier_vfs_reject/path_d_path_kfunc_type_mismatch:OK
+#703/8   verifier_vfs_reject/path_d_path_kfunc_invalid_buf_sz:OK
+#703/9   verifier_vfs_reject/get_task_exe_file_kfunc_fp:OK
+#703/10  verifier_vfs_reject/path_d_path_kfunc_untrusted_from_argument:OK
+#703/11  verifier_vfs_reject/path_d_path_kfunc_non_lsm:OK
+#703/12  verifier_vfs_reject/inode_rename:OK
+#703     verifier_vfs_reject:OK
+#704/1   verifier_xadd/xadd/w check unaligned stack:OK
+#704/2   verifier_xadd/xadd/w check unaligned map:OK
+#704/3   verifier_xadd/xadd/w check whether src/dst got mangled, 1:OK
+#704/4   verifier_xadd/xadd/w check whether src/dst got mangled, 2:OK
+#704/5   verifier_xadd/xadd/w check unaligned pkt:OK
+#704     verifier_xadd:OK
+#705/1   verifier_xdp/XDP, using ifindex from netdev:OK
+#705/2   verifier_xdp/XDP, using xdp_store_bytes from RO map:OK
+#705     verifier_xdp:OK
+#706/1   verifier_xdp_direct_packet_access/XDP pkt read, pkt_end mangling, bad access 1:OK
+#706/2   verifier_xdp_direct_packet_access/XDP pkt read, pkt_end mangling, bad access 2:OK
+#706/3   verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' > pkt_end, corner case, good access:OK
+#706/4   verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' > pkt_end, bad access 1:OK
+#706/5   verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' > pkt_end, bad access 2:OK
+#706/6   verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' > pkt_end, corner case +1, good access:OK
+#706/7   verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' > pkt_end, corner case -1, bad access:OK
+#706/8   verifier_xdp_direct_packet_access/XDP pkt read, pkt_end > pkt_data', good access:OK
+#706/9   verifier_xdp_direct_packet_access/XDP pkt read, pkt_end > pkt_data', corner case -1, bad access:OK
+#706/10  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end > pkt_data', bad access 2:OK
+#706/11  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end > pkt_data', corner case, good access:OK
+#706/12  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end > pkt_data', corner case +1, good access:OK
+#706/13  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' < pkt_end, good access:OK
+#706/14  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' < pkt_end, corner case -1, bad access:OK
+#706/15  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' < pkt_end, bad access 2:OK
+#706/16  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' < pkt_end, corner case, good access:OK
+#706/17  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' < pkt_end, corner case +1, good access:OK
+#706/18  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end < pkt_data', corner case, good access:OK
+#706/19  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end < pkt_data', bad access 1:OK
+#706/20  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end < pkt_data', bad access 2:OK
+#706/21  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end < pkt_data', corner case +1, good access:OK
+#706/22  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end < pkt_data', corner case -1, bad access:OK
+#706/23  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' >= pkt_end, good access:OK
+#706/24  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' >= pkt_end, corner case -1, bad access:OK
+#706/25  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' >= pkt_end, bad access 2:OK
+#706/26  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' >= pkt_end, corner case, good access:OK
+#706/27  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' >= pkt_end, corner case +1, good access:OK
+#706/28  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end >= pkt_data', corner case, good access:OK
+#706/29  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end >= pkt_data', bad access 1:OK
+#706/30  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end >= pkt_data', bad access 2:OK
+#706/31  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end >= pkt_data', corner case +1, good access:OK
+#706/32  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end >= pkt_data', corner case -1, bad access:OK
+#706/33  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' <= pkt_end, corner case, good access:OK
+#706/34  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' <= pkt_end, bad access 1:OK
+#706/35  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' <= pkt_end, bad access 2:OK
+#706/36  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' <= pkt_end, corner case +1, good access:OK
+#706/37  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data' <= pkt_end, corner case -1, bad access:OK
+#706/38  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end <= pkt_data', good access:OK
+#706/39  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end <= pkt_data', corner case -1, bad access:OK
+#706/40  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end <= pkt_data', bad access 2:OK
+#706/41  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end <= pkt_data', corner case, good access:OK
+#706/42  verifier_xdp_direct_packet_access/XDP pkt read, pkt_end <= pkt_data', corner case +1, good access:OK
+#706/43  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' > pkt_data, corner case, good access:OK
+#706/44  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' > pkt_data, bad access 1:OK
+#706/45  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' > pkt_data, bad access 2:OK
+#706/46  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' > pkt_data, corner case +1, good access:OK
+#706/47  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' > pkt_data, corner case -1, bad access:OK
+#706/48  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data > pkt_meta', good access:OK
+#706/49  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data > pkt_meta', corner case -1, bad access:OK
+#706/50  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data > pkt_meta', bad access 2:OK
+#706/51  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data > pkt_meta', corner case, good access:OK
+#706/52  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data > pkt_meta', corner case +1, good access:OK
+#706/53  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' < pkt_data, good access:OK
+#706/54  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' < pkt_data, corner case -1, bad access:OK
+#706/55  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' < pkt_data, bad access 2:OK
+#706/56  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' < pkt_data, corner case, good access:OK
+#706/57  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' < pkt_data, corner case +1, good access:OK
+#706/58  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data < pkt_meta', corner case, good access:OK
+#706/59  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data < pkt_meta', bad access 1:OK
+#706/60  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data < pkt_meta', bad access 2:OK
+#706/61  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data < pkt_meta', corner case +1, good access:OK
+#706/62  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data < pkt_meta', corner case -1, bad access:OK
+#706/63  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' >= pkt_data, good access:OK
+#706/64  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' >= pkt_data, corner case -1, bad access:OK
+#706/65  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' >= pkt_data, bad access 2:OK
+#706/66  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' >= pkt_data, corner case, good access:OK
+#706/67  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' >= pkt_data, corner case +1, good access:OK
+#706/68  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data >= pkt_meta', corner case, good access:OK
+#706/69  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data >= pkt_meta', bad access 1:OK
+#706/70  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data >= pkt_meta', bad access 2:OK
+#706/71  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data >= pkt_meta', corner case +1, good access:OK
+#706/72  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data >= pkt_meta', corner case -1, bad access:OK
+#706/73  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' <= pkt_data, corner case, good access:OK
+#706/74  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' <= pkt_data, bad access 1:OK
+#706/75  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' <= pkt_data, bad access 2:OK
+#706/76  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' <= pkt_data, corner case +1, good access:OK
+#706/77  verifier_xdp_direct_packet_access/XDP pkt read, pkt_meta' <= pkt_data, corner case -1, bad access:OK
+#706/78  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data <= pkt_meta', good access:OK
+#706/79  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data <= pkt_meta', corner case -1, bad access:OK
+#706/80  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data <= pkt_meta', bad access 2:OK
+#706/81  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data <= pkt_meta', corner case, good access:OK
+#706/82  verifier_xdp_direct_packet_access/XDP pkt read, pkt_data <= pkt_meta', corner case +1, good access:OK
+#706     verifier_xdp_direct_packet_access:OK
+Summary: 121/2456 PASSED, 16 SKIPPED, 0 FAILED

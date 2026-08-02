@@ -4,10 +4,10 @@
 // Direct translation of tools/testing/selftests/bpf/progs/stacktrace_map.c,
 // bpf-rs-core idiom.
 //
-// NOTE: blocked on the UML harness — bpf_get_stackid()/bpf_get_stack()
-// never succeed there (perf_callchain unwinding is broken for the whole
-// stack-trace test class, C originals included), so this translation
-// compiles and passes the verifier but cannot pass the oracle.
+// NOTE: verified under the QEMU oracle (FLAVOR=qemu). The UML flavor
+// cannot run it — bpf_get_stackid()/bpf_get_stack() never succeed there
+// (perf_callchain unwinding is broken for the whole stack-trace test
+// class, C originals included).
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::{
@@ -18,17 +18,6 @@ use bpf_rs_core::maps::{self, BpfMap};
 const PERF_MAX_STACK_DEPTH: usize = 127;
 #[allow(non_camel_case_types)]
 type stack_trace_t = [u64; PERF_MAX_STACK_DEPTH];
-
-// llvm-objcopy's --update-section (used by scripts/btf_rename.py) corrupted
-// the rewritten .rel.BTF section header's sh_info for this object's exact
-// original .BTF type-table size (agent-reported, not yet minimally
-// reproduced). Two inert padding statics shift the blob out of the
-// suspect size range; oncpu() reads them so DCE keeps them, but being
-// plain `static` (not #[no_mangle]) they never reach the exported ABI.
-#[allow(dead_code)]
-static BTF_SIZE_PAD_0: [u8; 1000] = [0; 1000];
-#[allow(dead_code)]
-static BTF_SIZE_PAD_1: [u8; 1001] = [0; 1001];
 
 // taken from /sys/kernel/tracing/events/sched/sched_switch/format
 #[repr(C)]
@@ -65,11 +54,6 @@ static mut stack_id: u32 = 0;
 #[link_section = "tracepoint/sched/sched_switch"]
 #[no_mangle]
 extern "C" fn oncpu(ctx: *const sched_switch_args) -> i32 {
-    unsafe {
-        core::ptr::read_volatile(&BTF_SIZE_PAD_0[0]);
-        core::ptr::read_volatile(&BTF_SIZE_PAD_1[0]);
-    }
-
     let ctx = ctx as *const core::ffi::c_void;
     let max_len: u32 = PERF_MAX_STACK_DEPTH as u32 * core::mem::size_of::<u64>() as u32;
     let mut key: u32 = 0;

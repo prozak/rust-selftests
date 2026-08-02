@@ -29,9 +29,20 @@
 #   UML_HARNESS       bpf-uml-selftests checkout (uml-veristat/uml-test-progs)
 #   UML_INSTALL_DIR   uml-veristat install to boot (kernel, modules)
 
+# FLAVOR selects the oracle: uml (default) or qemu (x86_64 kernel worktree
+# + vng runner; ~10x faster, has kprobes/uprobes/stack unwinding).
+FLAVOR ?= uml
+ifeq ($(FLAVOR),qemu)
+KERNEL_SRC ?= $(abspath $(CURDIR)/../uml-harness/.build/bpf-next-x86)
+SELFTESTS_OUTPUT ?= $(abspath $(CURDIR)/../uml-harness/.build/selftests-output-qemu)
+VMLINUX_BTF ?= $(KERNEL_SRC)/vmlinux
+TEST_RUNNER ?= $(CURDIR)/scripts/qemu-test-progs
+export VMLINUX_BTF TEST_RUNNER
+else
 KERNEL_SRC ?= $(abspath $(CURDIR)/../uml-harness/.build/bpf-next)
-SELFTESTS_SRC := $(KERNEL_SRC)/tools/testing/selftests/bpf
 SELFTESTS_OUTPUT ?= $(abspath $(CURDIR)/../uml-harness/.build/selftests-output-heimdall)
+endif
+SELFTESTS_SRC := $(KERNEL_SRC)/tools/testing/selftests/bpf
 RUSTBPF ?= $(abspath $(CURDIR)/../rust-bpf)
 LLVM_PREFIX ?= $(abspath $(CURDIR)/../uml-harness/.build/llvm-install)
 UML_HARNESS ?= $(abspath $(CURDIR)/../uml-harness)

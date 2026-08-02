@@ -27,7 +27,7 @@ PROG_TESTS="${KERNEL_SRC}/tools/testing/selftests/bpf/prog_tests"
 
 SWEEP="sweep"
 mkdir -p "${SWEEP}/logs"
-RESULTS="${SWEEP}/results.md"
+RESULTS="${SWEEP_RESULTS:-${SWEEP}/results.md}"
 [ -f "${RESULTS}" ] || {
     echo "| program | loc | secs | feats | verdict | attempts | wall | cost (USD) |" > "${RESULTS}"
     echo "|---|---|---|---|---|---|---|---|" >> "${RESULTS}"

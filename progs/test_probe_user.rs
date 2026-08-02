@@ -8,7 +8,9 @@
 // other arch (including UML/x86_64, which this build targets).
 
 use bpf_rs_core::bpf_object;
-use bpf_rs_core::helpers::{bpf_get_current_pid_tgid, bpf_probe_read_user, bpf_probe_write_user};
+use bpf_rs_core::helpers::{
+    bpf_get_current_pid_tgid, bpf_probe_read_kernel, bpf_probe_read_user, bpf_probe_write_user,
+};
 use core::ffi::c_void;
 
 /// Mirrors C's `struct test_pro_bss { struct sockaddr_in old; __u32 test_pid; }`.
@@ -51,19 +53,27 @@ fn handle_sys_connect_common(uservaddr: *mut c_void) -> i32 {
 
 /// BPF_KSYSCALL(handle_sys_connect, int fd, struct sockaddr_in *uservaddr,
 /// int addrlen): ctx is `struct pt_regs *`. LINUX_HAS_SYSCALL_WRAPPER is a
-/// kconfig extern that resolves false here (arch/um never selects
-/// CONFIG_ARCH_HAS_SYSCALL_WRAPPER), so the macro always takes the
-/// "read syscall args straight off pt_regs" branch (PT_REGS_PARMn_SYSCALL).
-/// UML's `struct pt_regs` is `{ struct uml_pt_regs regs; }`, whose first
-/// field is `gp: [unsigned long; N]` at offset 0 (arch/x86/um), so ctx
-/// doubles as a `*const u64` register-slot array; PARM1/2/3_SYSCALL are
-/// gp[14]/gp[13]/gp[12] (di/si/dx) per tools/lib/bpf/bpf_tracing.h's
-/// __UML_PT_REGS__ block. uservaddr is the second syscall arg (si).
+/// `__kconfig` extern the macro branches on; rustc can't emit `__kconfig`
+/// BTF VARs, so the branch is hardcoded here to match this build's kernel
+/// (.config has CONFIG_ARCH_HAS_SYSCALL_WRAPPER=y for x86_64), i.e. the
+/// "read pt_regs via the wrapper's inner regs pointer" branch.
+/// ctx is the kprobe pt_regs at the entry of `__x64_sys_connect(struct
+/// pt_regs *regs)`; x86_64's `struct pt_regs` is 21 `long`-sized fields
+/// (r15,r14,r13,r12,bp,bx,r11,r10,r9,r8,ax,cx,dx,si,di,orig_ax,ip,cs,flags,
+/// sp,ss), so it doubles as a `*const u64` register-slot array.
+/// PT_REGS_PARM1(ctx) = ctx->di (slot 14) is the real syscall pt_regs
+/// pointer; this is a direct ctx-relative load, which the verifier
+/// auto-converts to a fault-tolerant PROBE_MEM read. That pointer is then
+/// a plain scalar (not ctx-relative), so PT_REGS_PARM2_CORE_SYSCALL(regs)
+/// = regs->si (slot 13, uservaddr, the second syscall arg) must go through
+/// bpf_probe_read_kernel rather than a direct dereference.
 #[link_section = "ksyscall/connect"]
 #[no_mangle]
 extern "C" fn handle_sys_connect(ctx: *const u64) -> i32 {
-    let uservaddr = unsafe { *ctx.add(13) } as *mut c_void;
-    handle_sys_connect_common(uservaddr)
+    let regs = unsafe { *ctx.add(14) } as *const u64;
+    let mut uservaddr: u64 = 0;
+    bpf_probe_read_kernel(&mut uservaddr, 8, unsafe { regs.add(13) } as *const c_void);
+    handle_sys_connect_common(uservaddr as *mut c_void)
 }
 
 bpf_object!("GPL");

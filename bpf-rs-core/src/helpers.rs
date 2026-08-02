@@ -532,3 +532,9 @@ pub fn bpf_lwt_seg6_adjust_srh(skb: *const c_void, offset: u32, delta: i32) -> i
 pub fn bpf_lwt_seg6_action(skb: *const c_void, action: u32, param: *mut c_void, param_len: u32) -> i64 {
     thunk!(76, fn(*const c_void, u32, *mut c_void, u32) -> i64)(skb, action, param, param_len)
 }
+
+/// `long bpf_override_return(struct pt_regs *regs, u64 rc)`.
+#[inline(always)]
+pub fn bpf_override_return(regs: *const c_void, rc: u64) -> i64 {
+    thunk!(58, fn(*const c_void, u64) -> i64)(regs, rc)
+}

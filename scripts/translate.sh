@@ -68,7 +68,7 @@ Read, in this order, before writing any code:
 Then iterate until done:
 - 'make' must compile your translation to bld/${NAME}.bpf.o
 - 'make test-${NAME}' swaps your object into the selftests build and runs
-  every affected test_progs test in a UML kernel. It must end with
+  every affected test_progs test in a virtualized kernel. It must end with
   '0 FAILED' and a nonzero PASSED count. Load failures in its output are
   kernel-verifier rejections; test FAILs are behavioral divergence from
   the C original — read the log, fix progs/${NAME}.rs, re-run.

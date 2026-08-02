@@ -46,4 +46,4 @@ exec timeout "${QEMU_TIMEOUT:-600}" "${VNG}" \
     --rw \
     --cwd "${OUT}" \
     --verbose \
-    -- "./$(basename "${TEST_PROGS}") -t '${FILTER}'"
+    -- "mount -t bpf bpffs /sys/fs/bpf 2>/dev/null; ./$(basename "${TEST_PROGS}") -t '${FILTER}'"

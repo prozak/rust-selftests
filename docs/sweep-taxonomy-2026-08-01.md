@@ -95,6 +95,26 @@ candidates; also an argument for gate-log diffing in the controller.
   selftests-output + own bld/, helper additions merged between batches),
   larger timeout tier for >400-loc programs, cost capture on timeout kill.
 
+## Update 2026-08-02: classes A and C resolved
+
+- **Class C/D/E (UML env, 9 FAILs + 4 pre-gates)**: QEMU oracle (FLAVOR=qemu)
+  rescued 13/14 — 8 archived translations passed with zero agent cost.
+- **Class A (kfunc protos, 7+ FAILs)**: fixed in rust-bpf `add_ksyms.py`
+  (kernel-BTF proto mirroring; see rust-bpf ce8ddb4). Rescued 7/10: four
+  free (kfunc_module_order, iters_task incl. the 93-subtest iters suite,
+  xfrm_info, dmabuf_iter), three with one agent attempt
+  (test_xdp_pull_data, test_attach_probe, bpf_iter_task_file).
+- Remaining archived failures reclassify as: **class B** (rustc BTF
+  emission: kptr_xchg_inline TYPE_TAG, test_skeleton __kconfig,
+  metadata_unused plain-char, uptr_map_failure __uptr), **harness**
+  (strobemeta_bpf_loop / xdp_redirect_map -t name mapping;
+  test_cls_redirect_subprogs timeout), **verifier-special kfunc**
+  (get_func_ip_fsession_test: bpf_session_is_return is inlined by the
+  verifier only for genuine kfunc call patterns), and **objcopy bug**
+  (cgroup_iter_memcg: the .rel.BTF sh_info corruption from the
+  stacktrace_map episode is now REPRODUCED and nondeterministic — fix
+  btf_rename.py's --update-section usage).
+
 ## Corrections applied during the run
 
 - `bench.sh`-inherited stdin bug in the sweep loop: `claude` consumed a

@@ -41,8 +41,14 @@ export VMLINUX_BTF TEST_RUNNER
 else
 KERNEL_SRC ?= $(abspath $(CURDIR)/../uml-harness/.build/bpf-next)
 SELFTESTS_OUTPUT ?= $(abspath $(CURDIR)/../uml-harness/.build/selftests-output-heimdall)
+VMLINUX_BTF ?= $(KERNEL_SRC)/linux
 endif
 SELFTESTS_SRC := $(KERNEL_SRC)/tools/testing/selftests/bpf
+
+# kfunc extern protos are mirrored from kernel BTF by add_ksyms.py
+# (vmlinux first = base BTF, then the test kmods' split BTFs).
+BPFTOOL_BIN := $(dir $(SELFTESTS_OUTPUT))bpftool-output-$(patsubst selftests-output-%,%,$(notdir $(SELFTESTS_OUTPUT)))/bpftool
+KSYM_BTF_FILES := $(VMLINUX_BTF) $(wildcard $(SELFTESTS_OUTPUT)/*.ko)
 RUSTBPF ?= $(abspath $(CURDIR)/../rust-bpf)
 LLVM_PREFIX ?= $(abspath $(CURDIR)/../uml-harness/.build/llvm-install)
 UML_HARNESS ?= $(abspath $(CURDIR)/../uml-harness)
@@ -130,11 +136,13 @@ $(BLDDIR)/%-opt.bc: $(BLDDIR)/%-reloc.bc $(BLDDIR)/%.keep
 # --- invoke->call, unreachable->ret, .ksyms ---
 $(BLDDIR)/%-ksyms.bc: $(BLDDIR)/%-opt.bc
 	$(LLVM_DIS) $< -o $@.ll
-	python3 $(RUSTBPF)/add_ksyms.py $@.ll $@.ll
+	KSYM_BTF_FILES="$(KSYM_BTF_FILES)" BPFTOOL="$(BPFTOOL_BIN)" \
+		python3 $(RUSTBPF)/add_ksyms.py $@.ll $@.ll
 	$(LLVM_AS) $@.ll -o $@.tmp.bc
 	$(OPT) -passes=simplifycfg $@.tmp.bc -o $@.tmp2.bc
 	$(LLVM_DIS) $@.tmp2.bc -o $@.ll
-	python3 $(RUSTBPF)/add_ksyms.py $@.ll $@.ll
+	KSYM_BTF_FILES="$(KSYM_BTF_FILES)" BPFTOOL="$(BPFTOOL_BIN)" \
+		python3 $(RUSTBPF)/add_ksyms.py $@.ll $@.ll
 	$(LLVM_AS) $@.ll -o $@
 	@rm -f $@.ll $@.tmp.bc $@.tmp2.bc
 

@@ -98,8 +98,10 @@ def main(path, objcopy):
                 renamed += 1
             # DATASEC (15) names are section names (".maps", ".bss", ...):
             # the kernel validates those with section-name rules, dots are
-            # legal and load-bearing for libbpf — never touch them.
-            elif kind != 15 and not valid_ident.match(name):
+            # legal and load-bearing for libbpf — never touch them. INT
+            # names are C type names where spaces are legal ("long
+            # unsigned int" is all over vmlinux BTF) — exempt too.
+            elif kind not in (15, BTF_KIND_INT) and not valid_ident.match(name):
                 struct.pack_into(
                     "<I", data, pos, intern(re.sub(r"[^A-Za-z0-9_]", "_", name)))
                 sanitized += 1

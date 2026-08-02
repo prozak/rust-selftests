@@ -9,12 +9,16 @@
 // verifier only allows the ctx[-1] trampoline-flags read it inlines to as a
 // fixup keyed on recognizing that exact kfunc call; a hand-written raw read
 // at a negative ctx offset is rejected: "invalid bpf_context access
-// off=-8 size=8"). Resolving any kfunc call requires libbpf's BTF
-// func_proto compat check to succeed, but this pipeline's add_ksyms.py
-// unconditionally emits a `void ()` DISubroutineType for every extern
-// function declaration regardless of its real Rust signature, so the
-// vlen check (0 vs the kfunc's real arity) always fails. Same issue blocks
-// resolving `&bpf_fentry_test1`'s address via a func-kind ksym extern.
+// off=-8 size=8"). Its real kernel BTF proto is
+// `bool bpf_session_is_return(void *ctx)` — a genuine untyped `void *`
+// argument (pointee BTF type_id 0). The pipeline's add_ksyms.py mirrors the
+// kernel FUNC_PROTO for this into LLVM debug info as a baseType-less
+// DIDerivedType pointer, which this LLVM's llvm-as hard-rejects at the
+// `make` ksyms step: "error: missing required field 'baseType'". This is
+// out-of-file-scope (add_ksyms.py lives outside rust-selftests/) and
+// unfixable via the Rust-side extern declaration, since add_ksyms.py picks
+// the mirrored proto by kernel-BTF function-name match, not by the local
+// declared signature.
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::bpf_get_func_ip;

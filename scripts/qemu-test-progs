@@ -33,6 +33,8 @@ QEMU_KERNEL="${QEMU_KERNEL:-$(cd "${HERE}/.." && pwd)/uml-harness/.build/bpf-nex
 VNG="${VNG:-${HOME}/.local/share/vng-venv/bin/vng}"
 
 [ -x "${VNG}" ] || { echo "vng not found at ${VNG}" >&2; exit 1; }
+# vng shells out to virtme-run etc. from its own venv — put it on PATH
+export PATH="$(dirname "${VNG}"):${PATH}"
 [ -f "${QEMU_KERNEL}" ] || { echo "kernel not found: ${QEMU_KERNEL}" >&2; exit 1; }
 [ -x "${TEST_PROGS}" ] || { echo "test_progs not found: ${TEST_PROGS}" >&2; exit 1; }
 

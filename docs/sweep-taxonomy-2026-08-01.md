@@ -10,11 +10,12 @@ the 653 eligible untranslated selftest programs; sonnet-5, 2-attempt budget,
 
 | verdict | n | agent cost | wall |
 |---|---|---|---|
-| PASS | 30 | $59.63 | 3.3 h |
+| PASS | 31 | $60.30 | 3.4 h |
 | FAIL | 25 | $81.95 | 6.5 h |
 | ORACLE-UNAVAILABLE (pre-gated, free) | 4 | $0 | — |
 
-- **Every one of the 30 passes was a first-attempt pass.** Corpus grew 11 → 41
+- **Every one of the 31 passes was a first-attempt pass** (incl. `atomics`,
+  re-run after the stdin bug). Corpus grew 11 → 42
   verified translations, adding whole idiom families: struct_ops, freplace,
   fmod_ret, cgroup/cgroup_skb/connect4, arena (+atomics), rbtree/graph kptrs,
   bpf_timer in syscall progs, callback subprogs (for_each_map_elem), LWT encap

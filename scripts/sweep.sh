@@ -40,7 +40,7 @@ while IFS=$'\t' read -r NAME LOC SECS FEATS; do
         echo "skip ${NAME}: translation already exists" >&2
         continue
     fi
-    if grep -q "| ${NAME} |" "${RESULTS}"; then
+    if grep -q "^| ${NAME} |" "${RESULTS}"; then
         echo "skip ${NAME}: already in results" >&2
         continue
     fi

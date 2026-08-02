@@ -59,3 +59,4 @@
 | test_lwt_seg6local | 428 | add_egr_x+encap_srh+inspect_t+license+pop_egr | - | PASS | 1 | 796s | 3.41 |
 | bpf_gotox | 479 | .data+fentry+license+syscall | core,vmlinux,bpf2bpf | PASS | 1 | 263s | 0.80 |
 | test_cls_redirect | 1076 | .maps+license+tc | maps,bpf2bpf | PASS | 1 | 553s | 5.27 |
+| atomics | 170 | raw_tp | atomics | PASS | 1 | 112s | 0.67 |

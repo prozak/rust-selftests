@@ -54,9 +54,11 @@ while IFS=$'\t' read -r NAME LOC SECS FEATS; do
     fi
 
     START=$(date +%s)
+    # </dev/null: anything inside the loop reading stdin would swallow
+    # sample lines (this ate one program in the 2026-08-01 run)
     if MODEL="${MODEL_ID}" TRANSLATE_JSON=1 timeout 1800 \
             ./scripts/translate.sh "${NAME}" "${MAX_ATTEMPTS}" \
-            > "${SWEEP}/logs/${NAME}.log" 2>&1; then
+            > "${SWEEP}/logs/${NAME}.log" 2>&1 < /dev/null; then
         VERDICT=PASS
         PASSED+=("${NAME}")
     else

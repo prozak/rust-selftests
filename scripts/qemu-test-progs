@@ -1,0 +1,47 @@
+#!/bin/bash
+# qemu-test-progs -t <comma-separated-tests>
+#
+# QEMU/virtme-ng counterpart of bpf-uml-selftests' uml-test-progs: run the
+# selftests' test_progs with a -t filter inside a QEMU guest booting the
+# x86_64 kernel built from the same pinned bpf-next tree. The host
+# filesystem is shared into the guest (virtme), so the selftests output
+# directory is used in place — same model as UML hostfs.
+#
+# Env:
+#   SELFTESTS_OUTPUT  selftests output dir to run in (required)
+#   TEST_PROGS        test_progs binary (default: $SELFTESTS_OUTPUT/test_progs)
+#   QEMU_KERNEL       bzImage (default: uml-harness/.build/bpf-next-x86/arch/x86/boot/bzImage)
+#   VNG               vng binary (default: ~/.local/share/vng-venv/bin/vng)
+#   QEMU_CPUS/QEMU_MEM  guest size (default 8 / 4G)
+#   QEMU_TIMEOUT      seconds before the guest is killed (default 600)
+
+set -uo pipefail
+
+FILTER=""
+while getopts "t:" opt; do
+    case "$opt" in
+        t) FILTER="$OPTARG" ;;
+        *) echo "usage: $0 -t <tests>" >&2; exit 2 ;;
+    esac
+done
+
+: "${SELFTESTS_OUTPUT:?}"
+OUT="${SELFTESTS_OUTPUT}"
+TEST_PROGS="${TEST_PROGS:-${OUT}/test_progs}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+QEMU_KERNEL="${QEMU_KERNEL:-$(cd "${HERE}/.." && pwd)/uml-harness/.build/bpf-next-x86/arch/x86/boot/bzImage}"
+VNG="${VNG:-${HOME}/.local/share/vng-venv/bin/vng}"
+
+[ -x "${VNG}" ] || { echo "vng not found at ${VNG}" >&2; exit 1; }
+[ -f "${QEMU_KERNEL}" ] || { echo "kernel not found: ${QEMU_KERNEL}" >&2; exit 1; }
+[ -x "${TEST_PROGS}" ] || { echo "test_progs not found: ${TEST_PROGS}" >&2; exit 1; }
+
+# vng: boot the kernel, share host fs, run the command in $OUT, propagate
+# the exit status. --verbose keeps kernel oops visible in the log.
+exec timeout "${QEMU_TIMEOUT:-600}" "${VNG}" \
+    --run "${QEMU_KERNEL}" \
+    --cpus "${QEMU_CPUS:-8}" --memory "${QEMU_MEM:-4G}" \
+    --rw \
+    --cwd "${OUT}" \
+    --verbose \
+    -- "./$(basename "${TEST_PROGS}") -t '${FILTER}'"

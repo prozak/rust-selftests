@@ -50,7 +50,7 @@ sfmake() {
         LLC="${LLVM_PREFIX}/bin/llc" \
         LD="${LLVM_PREFIX}/bin/ld.lld" \
         BPFTOOL="$(dirname "${OUT}")/bpftool-output-$(basename "${OUT}" | sed 's/^selftests-output-//')/bpftool" \
-        VMLINUX_BTF="${KERNEL_SRC}/linux" \
+        VMLINUX_BTF="${VMLINUX_BTF:-${KERNEL_SRC}/linux}" \
         ARCH=x86_64 TEST_KMODS= SKIP_LLVM=1 \
         EXTRA_BPF_CFLAGS=-D__UML_PT_REGS__ BPF_STRICT_BUILD=0 \
         -j"$(nproc)" -k "$@"
@@ -101,7 +101,9 @@ done
 echo "[swap] affected tests: ${TESTS[*]}"
 
 FILTER="$(IFS=,; echo "${TESTS[*]}")"
+# TEST_RUNNER selects the guest runner (default: UML). Any runner must
+# accept -t <comma-list> and honor TEST_PROGS/SELFTESTS_OUTPUT.
 TEST_PROGS="${OUT}/test_progs" \
 SELFTESTS_OUTPUT="${OUT}" \
 UML_INSTALL_DIR="${UML_INSTALL_DIR}" \
-    "${UML_HARNESS}/uml-test-progs" -t "${FILTER}"
+    "${TEST_RUNNER:-${UML_HARNESS}/uml-test-progs}" -t "${FILTER}"

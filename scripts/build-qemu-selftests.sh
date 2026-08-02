@@ -14,6 +14,11 @@ LLVM_PREFIX="${LLVM_PREFIX:-${BUILD}/llvm-install}"
 
 [ -f "${KSRC}/vmlinux" ] || { echo "x86_64 kernel not built yet (${KSRC}/vmlinux)" >&2; exit 1; }
 
+# The harness-built pahole (1.31) must be used everywhere: the stock 1.25
+# lacks kfunc decl-tag support, which silently drops the extern __ksym
+# kfunc declarations from the generated vmlinux.h (libarena etc. need them).
+export PATH="${BUILD}/pahole-install/bin:${PATH}"
+
 mkdir -p "${OUT}"
 # bpftool flavor dir expected by swap-and-test.sh's BPFTOOL derivation;
 # the host bpftool from the UML flavor works for skeleton generation.
@@ -21,6 +26,13 @@ if [ ! -e "${BUILD}/bpftool-output-qemu" ]; then
     ln -s bpftool-output-heimdall "${BUILD}/bpftool-output-qemu"
 fi
 
+# Module.symvers (via modules) so test_kmods builds against THIS kernel,
+# not the host's /lib/modules fallback.
+make -C "${KSRC}" -j"$(nproc)" modules
+
+# Mirror bpf-uml-selftests build.sh: default goal, -k + BPF_STRICT_BUILD=0
+# tolerate upstream-drifting selftests and link a PARTIAL test_progs — an
+# explicit test_progs goal would make any failed skeleton fatal.
 make -C "${KSRC}/tools/testing/selftests/bpf" \
     OUTPUT="${OUT}/" \
     CLANG="${LLVM_PREFIX}/bin/clang" \
@@ -29,8 +41,8 @@ make -C "${KSRC}/tools/testing/selftests/bpf" \
     BPFTOOL="${BUILD}/bpftool-output-qemu/bpftool" \
     VMLINUX_BTF="${KSRC}/vmlinux" \
     ARCH=x86_64 SKIP_LLVM=1 BPF_STRICT_BUILD=0 \
-    -j"$(nproc)" -k \
-    test_progs
+    -j"$(nproc)" -k || true
 
-echo "=== selftests-output-qemu built ==="
+echo "=== selftests-output-qemu build finished (partial failures tolerated) ==="
 ls "${OUT}/test_progs"
+ls "${OUT}"/test_kmods/bpf_testmod.ko 2>/dev/null || ls "${OUT}"/bpf_testmod.ko 2>/dev/null || echo "WARNING: bpf_testmod.ko missing"

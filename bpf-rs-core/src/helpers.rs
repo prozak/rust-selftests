@@ -538,3 +538,265 @@ pub fn bpf_lwt_seg6_action(skb: *const c_void, action: u32, param: *mut c_void, 
 pub fn bpf_override_return(regs: *const c_void, rc: u64) -> i64 {
     thunk!(58, fn(*const c_void, u64) -> i64)(regs, rc)
 }
+
+/// `long bpf_bind(struct bpf_sock_addr *ctx, struct sockaddr *addr, int addr_len)`.
+/// Generic over the caller's `bpf_sock_addr`-named ctx struct and the
+/// sockaddr-shaped addr struct, same pointee-erased-at-the-call-site
+/// genericity as `bpf_spin_lock`.
+#[inline(always)]
+pub fn bpf_bind<C, A>(ctx: *mut C, addr: *mut A, addr_len: i32) -> i64 {
+    thunk!(64, fn(*mut C, *mut A, i32) -> i64)(ctx, addr, addr_len)
+}
+
+/// `void *bpf_cgrp_storage_get(struct bpf_map *map, struct cgroup *cgroup,
+/// void *value, u64 flags)`. Generic over both the map-def type and the
+/// cgroup-pointer type: the verifier's arg-type check for `ARG_PTR_TO_BTF_ID`
+/// looks at the actual BTF id carried by the register at the call site, not
+/// any source-level pointer cast, so passing a pointer whose real BTF type
+/// isn't `struct cgroup` (e.g. a `struct task_struct *`) reproduces C's
+/// `(struct cgroup *)task` type-confusion exactly.
+#[inline(always)]
+pub fn bpf_cgrp_storage_get<M, T>(
+    map: *const M,
+    cgroup: *mut T,
+    value: *mut c_void,
+    flags: u64,
+) -> *mut c_void {
+    thunk!(210, fn(*const M, *mut T, *mut c_void, u64) -> *mut c_void)(map, cgroup, value, flags)
+}
+
+/// `long bpf_csum_diff(__be32 *from, u32 from_size, __be32 *to, u32 to_size, __wsum seed)`.
+#[inline(always)]
+pub fn bpf_csum_diff(
+    from: *const c_void,
+    from_size: u32,
+    to: *const c_void,
+    to_size: u32,
+    seed: u32,
+) -> i64 {
+    thunk!(28, fn(*const c_void, u32, *const c_void, u32, u32) -> i64)(
+        from, from_size, to, to_size, seed,
+    )
+}
+
+/// `long bpf_d_path(const struct path *path, char *buf, u32 sz)`.
+#[inline(always)]
+pub fn bpf_d_path<T>(path: *mut T, buf: *mut c_void, sz: u32) -> i64 {
+    thunk!(147, fn(*mut T, *mut c_void, u32) -> i64)(path, buf, sz)
+}
+
+/// `bpf_find_vma(task, addr, callback_fn, callback_ctx, flags)`. Same
+/// fn-pointer-as-BPF_PSEUDO_FUNC mechanism as `bpf_loop`; the callback
+/// signature mirrors the kernel's `long (*callback_fn)(struct task_struct
+/// *task, struct vm_area_struct *vma, void *callback_ctx)`.
+#[inline(always)]
+pub fn bpf_find_vma<T, V, C>(
+    task: *mut T,
+    addr: u64,
+    callback_fn: extern "C" fn(*mut T, *mut V, *mut C) -> i64,
+    callback_ctx: *mut C,
+    flags: u64,
+) -> i64 {
+    thunk!(180, fn(*mut T, u64, extern "C" fn(*mut T, *mut V, *mut C) -> i64, *mut C, u64) -> i64)(
+        task,
+        addr,
+        callback_fn,
+        callback_ctx,
+        flags,
+    )
+}
+
+#[inline(always)]
+pub fn bpf_get_current_cgroup_id() -> u64 {
+    thunk!(80, fn() -> u64)()
+}
+
+/// `long bpf_getsockopt(void *bpf_socket, int level, int optname, void *optval, int optlen)`.
+#[inline(always)]
+pub fn bpf_getsockopt<C>(
+    bpf_socket: *mut C,
+    level: i32,
+    optname: i32,
+    optval: *mut c_void,
+    optlen: i32,
+) -> i64 {
+    thunk!(57, fn(*mut C, i32, i32, *mut c_void, i32) -> i64)(
+        bpf_socket, level, optname, optval, optlen,
+    )
+}
+
+/// `u64 bpf_ktime_get_tai_ns(void)`.
+#[inline(always)]
+pub fn bpf_ktime_get_tai_ns() -> u64 {
+    thunk!(208, fn() -> u64)()
+}
+
+/// `long bpf_map_pop_elem(struct bpf_map *map, void *value)`:
+/// BPF_MAP_TYPE_QUEUE/STACK pop (removes and returns the front/top element).
+#[inline(always)]
+pub fn bpf_map_pop_elem<M, V>(map: *const M, value: &mut V) -> i64 {
+    thunk!(88, fn(*const M, *mut c_void) -> i64)(map, value as *mut V as *mut c_void)
+}
+
+/// `long bpf_map_push_elem(struct bpf_map *map, const void *value, u64 flags)`:
+/// BPF_MAP_TYPE_QUEUE/STACK push.
+#[inline(always)]
+pub fn bpf_map_push_elem<M, V>(map: *const M, value: &V, flags: u64) -> i64 {
+    thunk!(87, fn(*const M, *const c_void, u64) -> i64)(
+        map,
+        value as *const V as *const c_void,
+        flags,
+    )
+}
+
+/// `long bpf_map_update_elem(...)` variant taking the value as a raw
+/// pointer instead of `&V` — for call sites that already hold a pointer
+/// (e.g. passing a `PTR_TO_SOCKET` straight through, as C does when it
+/// deliberately misuses the helper on a sockmap).
+#[inline(always)]
+pub fn bpf_map_update_elem_ptr<M, K>(map: *const M, key: &K, value: *const c_void, flags: u64) -> i64 {
+    thunk!(2, fn(*const M, *const c_void, *const c_void, u64) -> i64)(
+        map,
+        key as *const K as *const c_void,
+        value,
+        flags,
+    )
+}
+
+/// `long bpf_msg_pop_data(struct sk_msg_buff *msg, u32 start, u32 len, u64 flags)`.
+#[inline(always)]
+pub fn bpf_msg_pop_data<T>(msg: *mut T, start: u32, len: u32, flags: u64) -> i64 {
+    thunk!(91, fn(*mut T, u32, u32, u64) -> i64)(msg, start, len, flags)
+}
+
+/// `void *bpf_per_cpu_ptr(const void *percpu_ptr, u32 cpu)`: may return NULL,
+/// caller must check.
+#[inline(always)]
+pub fn bpf_per_cpu_ptr(percpu_ptr: *const c_void, cpu: u32) -> *mut c_void {
+    thunk!(153, fn(*const c_void, u32) -> *mut c_void)(percpu_ptr, cpu)
+}
+
+/// Raw-pointer variant of `bpf_probe_read_kernel` for callers that build up a
+/// payload at a runtime-computed destination address (e.g. a `void *payload`
+/// cursor advanced across several CO-RE field chases), where the generic
+/// `&mut T` form of `bpf_probe_read_kernel` can't express the destination.
+#[inline(always)]
+pub fn bpf_probe_read_kernel_raw(dst: *mut c_void, size: u32, src: *const c_void) -> i64 {
+    thunk!(113, fn(*mut c_void, u32, *const c_void) -> i64)(dst, size, src)
+}
+
+/// `bpf_get_current_task_btf()`: like `bpf_get_current_task`, but returns a
+/// BTF-typed (PTR_TO_BTF_ID) `struct task_struct *`, so callers may pass the
+/// result to CO-RE field reads directly instead of going through
+/// `bpf_probe_read_kernel`.
+/// `bpf_seq_write(seq, data, len)`: write raw bytes to the seq_file, the
+/// helper `BPF_SEQ_PRINTF`'s sibling `bpf_seq_write()` libbpf macro wraps.
+#[inline(always)]
+pub fn bpf_seq_write(seq: *mut c_void, data: *const c_void, len: u32) -> i64 {
+    thunk!(127, fn(*mut c_void, *const c_void, u32) -> i64)(seq, data, len)
+}
+
+/// `long bpf_sk_assign(struct sk_buff *skb, struct bpf_sock *sk, u64 flags)`.
+#[inline(always)]
+pub fn bpf_sk_assign(skb: *const c_void, sk: *mut c_void, flags: u64) -> i64 {
+    thunk!(124, fn(*const c_void, *mut c_void, u64) -> i64)(skb, sk, flags)
+}
+
+#[inline(always)]
+pub fn bpf_skb_change_proto(skb: *const c_void, proto: u16, flags: u64) -> i64 {
+    thunk!(31, fn(*const c_void, u16, u64) -> i64)(skb, proto, flags)
+}
+
+/// `long bpf_snprintf(char *str, u32 str_size, const char *fmt, u64 *data, u32 data_len)`.
+#[inline(always)]
+pub fn bpf_snprintf(
+    str_: *mut c_void,
+    str_size: u32,
+    fmt: *const c_void,
+    data: *const c_void,
+    data_len: u32,
+) -> i64 {
+    thunk!(165, fn(*mut c_void, u32, *const c_void, *const c_void, u32) -> i64)(
+        str_, str_size, fmt, data, data_len,
+    )
+}
+
+/// `long bpf_task_pt_regs(struct task_struct *task)`: returns the
+/// kernel-internal `struct pt_regs *` for a `task_struct *` (typically from
+/// `bpf_get_current_task_btf()`), as a raw pointer value.
+#[inline(always)]
+pub fn bpf_task_pt_regs(task: *mut c_void) -> u64 {
+    thunk!(175, fn(*mut c_void) -> u64)(task)
+}
+
+/// `void *bpf_this_cpu_ptr(const void *percpu_ptr)`.
+#[inline(always)]
+pub fn bpf_this_cpu_ptr(percpu_ptr: *const c_void) -> *mut c_void {
+    thunk!(154, fn(*const c_void) -> *mut c_void)(percpu_ptr)
+}
+
+#[inline(always)]
+pub fn bpf_trace_printk(fmt: *const c_void, fmt_size: u32, arg1: u64, arg2: u64, arg3: u64) -> i64 {
+    thunk!(6, fn(*const c_void, u32, u64, u64, u64) -> i64)(fmt, fmt_size, arg1, arg2, arg3)
+}
+
+/// `long bpf_xdp_adjust_meta(struct xdp_md *xdp_md, int delta)`.
+#[inline(always)]
+pub fn bpf_xdp_adjust_meta<T>(xdp: *mut T, delta: i32) -> i64 {
+    thunk!(54, fn(*mut T, i32) -> i64)(xdp, delta)
+}
+
+/// __sync_fetch_and_add on a plain `__u64`/`unsigned long long` global: same
+/// atomic-view-punned-at-the-call-site idea as `sync_fetch_and_add_u32`, but
+/// for globals whose C/BTF type is 64-bit unsigned.
+#[inline(always)]
+pub fn sync_fetch_and_add_u64(p: *mut u64, v: u64) {
+    use core::sync::atomic::{AtomicU64, Ordering};
+    unsafe { (*(p as *mut AtomicU64)).fetch_add(v, Ordering::SeqCst) };
+}
+
+/// `long bpf_setsockopt(void *bpf_socket, int level, int optname,
+/// void *optval, int optlen)`. Generic over the ctx-shaped socket pointer;
+/// optval is *const so both mut and const call sites coerce.
+#[inline(always)]
+pub fn bpf_setsockopt<C>(
+    bpf_socket: *mut C,
+    level: i32,
+    optname: i32,
+    optval: *const c_void,
+    optlen: i32,
+) -> i64 {
+    thunk!(49, fn(*mut C, i32, i32, *const c_void, i32) -> i64)(
+        bpf_socket, level, optname, optval, optlen,
+    )
+}
+
+/// `void *bpf_task_storage_get(struct bpf_map *map, struct task_struct *task,
+/// void *value, u64 flags)`. Generic over map-def and task pointer types;
+/// may return NULL, caller must check.
+#[inline(always)]
+pub fn bpf_task_storage_get<M, T>(
+    map: *const M,
+    task: *mut T,
+    value: *const c_void,
+    flags: u64,
+) -> *mut c_void {
+    thunk!(156, fn(*const M, *mut T, *const c_void, u64) -> *mut c_void)(
+        map, task, value, flags,
+    )
+}
+
+/// `void *bpf_sk_storage_get(struct bpf_map *map, struct sock *sk,
+/// void *value, u64 flags)`. Generic over map-def and sk pointer types
+/// (both mut and const sk call sites coerce); may return NULL.
+#[inline(always)]
+pub fn bpf_sk_storage_get<M, T>(
+    map: *const M,
+    sk: *const T,
+    value: *const c_void,
+    flags: u64,
+) -> *mut c_void {
+    thunk!(107, fn(*const M, *const T, *const c_void, u64) -> *mut c_void)(
+        map, sk, value, flags,
+    )
+}

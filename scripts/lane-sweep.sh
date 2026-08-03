@@ -47,7 +47,9 @@ done_anywhere() {
     return 1
 }
 
-while IFS=$'\t' read -r NAME LOC SECS FEATS; do
+# read the sample via fd 3: anything inside the loop that touches
+# stdin (vng puts the guest console on stdio!) must not eat the list
+while IFS=$'\t' read -u 3 -r NAME LOC SECS FEATS; do
     [ -n "${NAME}" ] || continue
     if [ -f "${STOP}" ]; then
         echo "[lane${LANE}] STOP file present — exiting cleanly"
@@ -80,9 +82,9 @@ while IFS=$'\t' read -r NAME LOC SECS FEATS; do
 
     # keep the lane's output near-pristine: reinstate the C object
     # (validation failure here is recorded but non-fatal)
-    timeout 900 make "restore-${NAME}" > /dev/null 2>&1 \
+    timeout 900 make "restore-${NAME}" > /dev/null 2>&1 < /dev/null \
         || cp "${SELFTESTS_OUTPUT}/${NAME}.bpf.o.corig" \
               "${SELFTESTS_OUTPUT}/${NAME}.bpf.o" 2>/dev/null || true
-done < "${SAMPLE}"
+done 3< "${SAMPLE}"
 
 echo "[lane${LANE}] done"

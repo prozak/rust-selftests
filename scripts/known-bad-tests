@@ -1,0 +1,9 @@
+# Registered test names that fail with PRISTINE C objects in this
+# harness (kernel limits or environment), independent of any translation.
+# swap-and-test.sh subtracts these from the -t filter so bundled
+# always-broken tests cannot fail otherwise-correct translations.
+# One name per line; '#' comments.
+
+# E2BIG / jump-sequence-too-complex at verification in the pinned kernel,
+# both UML and QEMU flavors (checked with the unmodified C object).
+verif_scale_pyperf600

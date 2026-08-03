@@ -69,6 +69,25 @@ macro_rules! bump {
     };
 }
 
+// Byte-at-a-time through read_volatile/write_volatile, not
+// core::ptr::copy_nonoverlapping: LLVM's MemCpyOpt pass recognizes small
+// fixed-size copies (the 16-byte in6_addr copies in fill_tuple/
+// process_icmpv6, the 6-byte ETH_ALEN swap in forward_to_next_hop) as
+// memcpy-shaped and rewrites them into an llvm.memcpy call, which
+// add_ksyms.py then turns into an extern bpf_arena_memcpy kfunc call — not
+// present in this kernel's BTF outside arena progs (see
+// [[rel-btf-6-relocs-corrupts-shinfo]]). Volatile accesses are the one
+// pattern the optimizer is forbidden from merging into a memcpy call, since
+// that would change the observable number/width of memory accesses.
+#[inline(always)]
+unsafe fn vcopy(dst: *mut u8, src: *const u8, len: usize) {
+    let mut i = 0usize;
+    while i < len {
+        core::ptr::write_volatile(dst.add(i), core::ptr::read_volatile(src.add(i)));
+        i += 1;
+    }
+}
+
 const CONTINUE_PROCESSING: i32 = -1;
 
 macro_rules! maybe_return {
@@ -823,9 +842,9 @@ extern "C" fn forward_to_next_hop(
     let dest = unsafe { core::ptr::addr_of_mut!((*encap).eth.h_dest) } as *mut u8;
     let source = unsafe { core::ptr::addr_of_mut!((*encap).eth.h_source) } as *mut u8;
     unsafe {
-        core::ptr::copy_nonoverlapping(dest, temp.as_mut_ptr(), ETH_ALEN);
-        core::ptr::copy_nonoverlapping(source, dest, ETH_ALEN);
-        core::ptr::copy_nonoverlapping(temp.as_ptr(), source, ETH_ALEN);
+        vcopy(temp.as_mut_ptr(), dest, ETH_ALEN);
+        vcopy(dest, source, ETH_ALEN);
+        vcopy(source, temp.as_ptr(), ETH_ALEN);
     }
 
     let hop_count = pget!((*encap).unigue.hop_count);
@@ -919,14 +938,14 @@ extern "C" fn fill_tuple(
     } else if iphlen == core::mem::size_of::<Ipv6Hdr>() as u64 {
         let ipv6 = iph as *const Ipv6Hdr;
         unsafe {
-            core::ptr::copy_nonoverlapping(
-                core::ptr::addr_of!((*ipv6).daddr) as *const u8,
+            vcopy(
                 core::ptr::addr_of_mut!((*tuple).ipv6.daddr) as *mut u8,
+                core::ptr::addr_of!((*ipv6).daddr) as *const u8,
                 16,
             );
-            core::ptr::copy_nonoverlapping(
-                core::ptr::addr_of!((*ipv6).saddr) as *const u8,
+            vcopy(
                 core::ptr::addr_of_mut!((*tuple).ipv6.saddr) as *mut u8,
+                core::ptr::addr_of!((*ipv6).saddr) as *const u8,
                 16,
             );
         }
@@ -1161,14 +1180,14 @@ extern "C" fn process_icmpv6(pkt: *mut Buf, metrics: *mut Metrics) -> i32 {
     };
     let tuple_ptr = core::ptr::addr_of_mut!(tuple);
     unsafe {
-        core::ptr::copy_nonoverlapping(
-            core::ptr::addr_of!((*ipv6).daddr) as *const u8,
+        vcopy(
             core::ptr::addr_of_mut!((*tuple_ptr).ipv6.saddr) as *mut u8,
+            core::ptr::addr_of!((*ipv6).daddr) as *const u8,
             16,
         );
-        core::ptr::copy_nonoverlapping(
-            core::ptr::addr_of!((*ipv6).saddr) as *const u8,
+        vcopy(
             core::ptr::addr_of_mut!((*tuple_ptr).ipv6.daddr) as *mut u8,
+            core::ptr::addr_of!((*ipv6).saddr) as *const u8,
             16,
         );
     }

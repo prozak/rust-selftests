@@ -98,6 +98,41 @@ for f in $(grep -l -E "\"[^\"]*${NAME}\.bpf\.o\"" "${SELFTESTS_SRC}"/prog_tests/
     case " ${TESTS[*]-} " in *" ${base} "*) ;; *) TESTS+=("${base}") ;; esac
 done
 [ "${#TESTS[@]}" -gt 0 ] || { echo "no prog_tests consume ${NAME}" >&2; exit 1; }
+
+# The names collected above are prog_tests FILE basenames, but the -t
+# filter matches REGISTERED test names (the test_<name>() functions).
+# They coincide for most files but not all (bpf_verif_scale.c registers
+# verif_scale_*, test_xdp_veth.c registers xdp_veth_*, ...) — expand each
+# file to the test names it actually defines, falling back to the
+# basename when extraction finds nothing.
+EXPANDED=()
+for t in "${TESTS[@]}"; do
+    src="${SELFTESTS_SRC}/prog_tests/${t}.c"
+    names=""
+    [ -f "${src}" ] && names=$(grep -oE '^void (serial_)?test_[A-Za-z0-9_]+' "${src}" \
+        | sed -E 's/^void (serial_)?test_//' | sort -u)
+    if [ -n "${names}" ]; then
+        for n in ${names}; do
+            case " ${EXPANDED[*]-} " in *" ${n} "*) ;; *) EXPANDED+=("${n}") ;; esac
+        done
+    else
+        EXPANDED+=("${t}")
+    fi
+done
+# Subtract tests known to fail with pristine C objects (kernel limits /
+# environment) so bundled always-broken tests can't fail a translation.
+DENY="$(dirname "${BASH_SOURCE[0]}")/known-bad-tests"
+if [ -f "${DENY}" ]; then
+    KEPT=()
+    for n in "${EXPANDED[@]}"; do
+        grep -qxF "${n}" <(grep -v '^#' "${DENY}") || KEPT+=("${n}")
+    done
+    [ "${#KEPT[@]}" -lt "${#EXPANDED[@]}" ] && \
+        echo "[swap] denylisted: $(( ${#EXPANDED[@]} - ${#KEPT[@]} )) test(s)"
+    EXPANDED=("${KEPT[@]}")
+fi
+
+TESTS=("${EXPANDED[@]}")
 echo "[swap] affected tests: ${TESTS[*]}"
 
 FILTER="$(IFS=,; echo "${TESTS[*]}")"

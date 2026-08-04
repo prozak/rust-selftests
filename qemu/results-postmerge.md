@@ -2,8 +2,8 @@
 |---|---|---|
 | cgrp_ls_attach_cgroup | PASS | Summary: 1/13 PASSED, 0 SKIPPED, 0 FAILED |
 | cgrp_ls_recursion | PASS | Summary: 1/13 PASSED, 0 SKIPPED, 0 FAILED |
-| connect6_prog | FAIL | Summary: 1/46 PASSED, 0 SKIPPED, 1 FAILED |
-| missed_tp_recursion | FAIL | Summary: 0/1 PASSED, 0 SKIPPED, 1 FAILED |
+| connect6_prog | PASS | Summary: 2/152 PASSED, 0 SKIPPED, 0 FAILED (clean harness) |
+| missed_tp_recursion | PASS | Summary: 1/3 PASSED, 0 SKIPPED, 0 FAILED (clean harness) |
 | mptcp_sock | PASS | Summary: 1/4 PASSED, 0 SKIPPED, 0 FAILED |
 | mptcp_sockmap | PASS | Summary: 1/4 PASSED, 0 SKIPPED, 0 FAILED |
 | net_timestamping | PASS | Summary: 1/4 PASSED, 0 SKIPPED, 0 FAILED |

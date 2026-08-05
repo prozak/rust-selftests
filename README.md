@@ -77,16 +77,42 @@ Output:
   Summary line);
 - full run logs in `qemu/logs/<name>.log` and `<name>.restore.log`.
 
-**Resume semantics:** a program already present in `qemu/results.md` is
-skipped, so an interrupted run resumes by re-invoking the same command. To
-force a full re-run, move `qemu/results.md` aside first (the file is the
-only state — logs are just overwritten).
+**Resume semantics:** in the no-argument (whole-corpus) form, a program
+already present in `qemu/results.md` is skipped, so an interrupted run
+resumes by re-invoking the same command. **Explicitly named programs always
+re-run**, replacing their existing row. To force a full re-run of the
+corpus, move `qemu/results.md` aside first (that file is the only state —
+logs are just overwritten). The final table printed by a run lists only the
+programs that run actually tested.
+
+**One run at a time.** The driver mutates a single selftests output
+directory and rewrites `qemu/results.md` in place; two concurrent runs
+corrupt each other's swapped objects, logs and rows. Use separate lanes
+(below) for parallelism.
 
 **Timing:** most programs take 10–20s wall; networking-heavy ones
 (`test_lwt_ip_encap`, `test_tc_link`, `test_tc_neigh_fib`, `test_uprobe`,
 `verifier_mtu`) take 30–160s. Budget a couple of hours for the full
 550-program corpus. Per-program caps: 1200s for the make step, 600s
 (`QEMU_TIMEOUT`) for a single guest boot.
+
+**Reading the Summary line.** The `notes` column is `test_progs`' own
+summary, and its two leading numbers are *not* a ratio
+(`test_progs.c`: `printf("Summary: %d/%d PASSED, ...", succ_cnt,
+sub_succ_cnt, ...)`) — they are **top-level tests passed / subtests
+passed**:
+
+- `1/10 PASSED` — one test, whose 10 subtests all passed;
+- `1/0 PASSED` — one test that registers no subtests (normal, not a
+  failure);
+- `121/2455 PASSED` — 121 tests and 2455 subtests, because the `-t` filter
+  expands to every test registered in the consuming `prog_tests` file
+  (`verifier_mtu.bpf.o` is consumed by `prog_tests/verifier.c`, which
+  registers all 121 `verifier_*` tests). Over-broad relative to the one
+  swapped object, which can only catch more regressions, never fewer.
+
+Skips and failures are counted separately; `0 FAILED` is the pass
+condition.
 
 **Finding failures:**
 

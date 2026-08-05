@@ -21,8 +21,15 @@ export SELFTESTS_OUTPUT="${BUILD}/selftests-output-qemu"
 export VMLINUX_BTF="${KERNEL_SRC}/vmlinux"
 export TEST_RUNNER="${REPO}/scripts/qemu-test-progs"
 
+# With no arguments the whole corpus runs and an existing results row means
+# "already done" (resume an interrupted run). Explicitly named programs are
+# always re-run — their stale row is replaced.
 PROGS=("$@")
-[ "${#PROGS[@]}" -gt 0 ] || PROGS=($(ls progs/*.rs | xargs -n1 basename | sed 's/\.rs$//'))
+EXPLICIT=1
+if [ "${#PROGS[@]}" -eq 0 ]; then
+    EXPLICIT=0
+    PROGS=($(ls progs/*.rs | xargs -n1 basename | sed 's/\.rs$//'))
+fi
 
 mkdir -p qemu/logs
 RESULTS="qemu/results.md"
@@ -31,8 +38,15 @@ RESULTS="qemu/results.md"
     echo "|---|---|---|---|" >> "${RESULTS}"
 }
 
+ADDED=()
 for NAME in "${PROGS[@]}"; do
-    grep -q "^| ${NAME} |" "${RESULTS}" && { echo "skip ${NAME}: already in results" >&2; continue; }
+    if grep -q "^| ${NAME} |" "${RESULTS}"; then
+        if [ "${EXPLICIT}" -eq 0 ]; then
+            echo "skip ${NAME}: already in results" >&2
+            continue
+        fi
+        sed -i "/^| ${NAME} |/d" "${RESULTS}"
+    fi
     echo "=== qemu-verify ${NAME} ==="
     START=$(date +%s)
     if timeout 1200 make "test-${NAME}" > "qemu/logs/${NAME}.log" 2>&1 < /dev/null; then
@@ -45,9 +59,15 @@ for NAME in "${PROGS[@]}"; do
     if ! timeout 1200 make "restore-${NAME}" > "qemu/logs/${NAME}.restore.log" 2>&1 < /dev/null; then
         NOTE="${NOTE}; restore-validation-failed"
     fi
-    echo "| ${NAME} | ${VERDICT} | ${WALL}s | ${NOTE} |" >> "${RESULTS}"
-    tail -1 "${RESULTS}"
+    ROW="| ${NAME} | ${VERDICT} | ${WALL}s | ${NOTE} |"
+    echo "${ROW}" >> "${RESULTS}"
+    ADDED+=("${ROW}")
+    echo "${ROW}"
 done
 
-echo "=== qemu-verify done ==="
-cat "${RESULTS}"
+# Report only what THIS run produced; the full table lives in ${RESULTS}.
+echo "=== qemu-verify done: ${#ADDED[@]} program(s) run ==="
+if [ "${#ADDED[@]}" -gt 0 ]; then
+    head -2 "${RESULTS}"
+    printf '%s\n' "${ADDED[@]}"
+fi

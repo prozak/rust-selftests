@@ -3,6 +3,7 @@
 Standalone (no pyelftools): sections, symbols, and REL relocations —
 everything the symbolic equivalence executor needs.
 """
+import re
 import struct
 from collections import namedtuple
 
@@ -19,6 +20,19 @@ SHF_EXECINSTR = 0x4
 STT_OBJECT = 1
 STT_FUNC = 2
 STT_SECTION = 3
+
+
+def normalize_name(name):
+    """Map Rust v0-mangled static names to their source identifier, so the
+    same logical global gets the same region in both objects
+    (_RNvCs..._13modify_return8sequence.0 -> sequence)."""
+    base = name.split(".", 1)[0]
+    if not base.startswith("_R"):
+        return name
+    m = re.match(r".*(\d+)([A-Za-z_][A-Za-z0-9_]*)$", base)
+    if m and int(m.group(1)) == len(m.group(2)):
+        return m.group(2)
+    return name
 
 
 class BpfElf:
@@ -82,6 +96,65 @@ class BpfElf:
         """Program-carrying sections (non-empty, executable)."""
         return [s for s in self.sections
                 if s.flags & SHF_EXECINSTR and s.size > 0]
+
+    # BTF kind ids
+    _BTF_EXTRA = {1: 4, 3: 12, 14: 4, 17: 4}          # INT, ARRAY, VAR, DECL_TAG
+    _BTF_PER_VLEN = {4: 12, 5: 12, 6: 8, 13: 8, 15: 12, 19: 12}
+    _BTF_MODIFIERS = {8, 9, 10, 11, 18}               # TYPEDEF..CONST..TYPE_TAG
+
+    def btf_types(self):
+        """id -> (kind, name, type/size, vlen). Lazy, minimal, id 0 = void."""
+        if hasattr(self, "_btf"):
+            return self._btf
+        self._btf = {0: (0, "", 0, 0)}
+        sec = self.section_by_name(".BTF")
+        if sec is None:
+            return self._btf
+        b = sec.data
+        hdr_len, = struct.unpack_from("<I", b, 4)
+        type_off, type_len, str_off, str_len = struct.unpack_from("<IIII", b, 8)
+        strings = b[hdr_len + str_off:hdr_len + str_off + str_len]
+        pos, end, tid = hdr_len + type_off, hdr_len + type_off + type_len, 1
+        while pos + 12 <= end:
+            name_off, info, size_or_type = struct.unpack_from("<III", b, pos)
+            kind = (info >> 24) & 0x1F
+            vlen = info & 0xFFFF
+            name = ""
+            if name_off and name_off < len(strings):
+                name = strings[name_off:strings.index(b"\x00", name_off)].decode()
+            self._btf[tid] = (kind, name, size_or_type, vlen)
+            pos += 12 + self._BTF_EXTRA.get(kind, 0) + self._BTF_PER_VLEN.get(kind, 0) * vlen
+            tid += 1
+        return self._btf
+
+    def func_ret_bits(self, func_name):
+        """Return width in bits of a BTF FUNC's return type: 0 = void,
+        None = unknown/no BTF."""
+        types = self.btf_types()
+        proto = None
+        for kind, name, typ, _vlen in types.values():
+            if kind == 12 and name == func_name:  # FUNC
+                proto = types.get(typ)
+                break
+        if proto is None or proto[0] != 13:  # FUNC_PROTO
+            return None
+        rt = proto[2]
+        for _ in range(32):  # unwrap modifiers/typedefs
+            if rt == 0:
+                return 0
+            t = types.get(rt)
+            if t is None:
+                return None
+            kind, _name, typ_or_size, _vlen = t
+            if kind in self._BTF_MODIFIERS:
+                rt = typ_or_size
+                continue
+            if kind in (1, 6, 16, 19):  # INT, ENUM, FLOAT, ENUM64
+                return typ_or_size * 8
+            if kind == 2:               # PTR
+                return 64
+            return None
+        return None
 
     def core_relo_sections(self):
         """Section names that carry CO-RE relocations (from .BTF.ext)."""

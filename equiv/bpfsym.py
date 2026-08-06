@@ -21,12 +21,42 @@ out-of-scope rather than guessing.
 """
 import z3
 
-from bpfelf import SHF_ALLOC, SHF_EXECINSTR, SHT_NOBITS, STT_SECTION
+from bpfelf import (SHF_ALLOC, SHF_EXECINSTR, SHT_NOBITS, STT_SECTION,
+                    normalize_name)
 
 STACK_SIZE = 512
 MAX_INSNS_PER_PATH = 50_000
 MAX_PATHS = 4096
 FEAS_TIMEOUT_MS = 200
+MAX_COPY = 512  # largest concrete probe_read size we'll expand byte-wise
+
+# Argument-free helpers whose return value is environment-determined: modeled
+# as a shared oracle stream — the nth call in the C program and the nth call
+# in the Rust program observe the same value. Value is the helper's true
+# return width (zero-extended), so impossible upper bits can't fake diffs.
+PURE_ORACLE_HELPERS = {
+    5: 64,    # ktime_get_ns
+    7: 32,    # get_prandom_u32
+    8: 32,    # get_smp_processor_id
+    14: 64,   # get_current_pid_tgid
+    15: 64,   # get_current_uid_gid
+    35: 64,   # get_current_task
+    42: 32,   # get_numa_node_id
+    125: 64,  # ktime_get_boot_ns
+    158: 64,  # get_current_task_btf
+    160: 64,  # ktime_get_coarse_ns
+    208: 64,  # ktime_get_tai_ns
+}
+PROBE_READ_HELPERS = {4, 112, 113}       # probe_read, _kernel, _user
+PROBE_READ_STR_HELPERS = {45, 114, 115}  # probe_read_str, _kernel_str, _user_str
+
+# Environment refinement: values the kernel can actually produce.
+# pid_tgid packs tgid<<32|pid, both bounded by PID_MAX_LIMIT (< 2^31) —
+# without this, C's sign-extended int-vs-u64 pid compares "diverge" from
+# Rust's 32-bit compares on impossible tgid values.
+ORACLE_MASK = {14: 0x7FFFFFFF_7FFFFFFF}
+
+BV64S = z3.BitVecSort(64)
 
 
 class Bail(Exception):
@@ -84,6 +114,7 @@ class Executor:
         self.tag = tag  # 'A' / 'B', namespaces per-run regions
         self.insns = self._decode(sec)
         self.paths = []
+        self.nclobber = 0
         self.feas = z3.Solver()
         self.feas.set("timeout", FEAS_TIMEOUT_MS)
 
@@ -126,7 +157,10 @@ class Executor:
         if region in self.shared:
             mem[region] = self.shared[region]
         elif region.startswith("stack:"):
-            mem[region] = z3.Array(f"{region}", z3.BitVecSort(64), z3.BitVecSort(8))
+            # Initial (uninit) stack garbage is shared between the two runs —
+            # the bisimulation assumption that both environments hand the
+            # program the same residue. Writes still diverge per run.
+            mem[region] = z3.Array("stack_init", z3.BitVecSort(64), z3.BitVecSort(8))
         elif region.startswith("ro:"):
             mem[region] = self._concrete_array(region)
         else:
@@ -188,7 +222,7 @@ class Executor:
             raise Bail(f"reloc into unsupported section {secname}")
         if secname.startswith(".rodata"):
             return Ptr(f"ro:{self.tag}:{secname}", bv64(sym.value + addend))
-        return Ptr(f"g:{sym.name}", bv64(addend))
+        return Ptr(f"g:{normalize_name(sym.name)}", bv64(addend))
 
     def _section_ptr(self, secname, addend):
         if secname.startswith(".rodata") or ".rodata" in secname:
@@ -289,6 +323,69 @@ class Executor:
             raise Bail(f"JMP opcode {code} in {what}")
         return ops[code](dstv, srcv)
 
+    # ---------- helper calls (tier 1) ----------
+
+    def _addr_add(self, p, k):
+        if is_ptr(p):
+            return Ptr(p.region, p.off + bv64(k))
+        return p + bv64(k)
+
+    def _concrete_u64(self, v, what):
+        if is_ptr(v):
+            raise Bail(f"pointer where scalar expected in {what}")
+        v = z3.simplify(v)
+        if not z3.is_bv_value(v):
+            raise Bail(f"symbolic size argument in {what}")
+        return v.as_long()
+
+    def _helper_call(self, hid, regs, mem, counters, what):
+        """Model one helper call; mutates mem/counters, returns new regs."""
+        idx = counters.get(hid, 0)
+        counters[hid] = idx + 1
+        dst, size, src = regs[1], regs[2], regs[3]
+
+        if hid in PURE_ORACLE_HELPERS:
+            width = PURE_ORACLE_HELPERS[hid]
+            f = z3.Function(f"oracle_h{hid}", BV64S, z3.BitVecSort(width))
+            ret = z3.ZeroExt(64 - width, f(bv64(idx))) if width < 64 else f(bv64(idx))
+            if hid in ORACLE_MASK:
+                ret = ret & bv64(ORACLE_MASK[hid])
+        elif hid in PROBE_READ_HELPERS:
+            n = self._concrete_u64(size, what)
+            if n > MAX_COPY:
+                raise Bail(f"probe_read size {n} > {MAX_COPY} in {what}")
+            for k in range(n):  # assumed non-faulting (see module docstring)
+                byte = self._load(mem, self._addr_add(src, k), 1)
+                self._store(mem, self._addr_add(dst, k), 1, byte)
+            ret = bv64(0)
+        elif hid in PROBE_READ_STR_HELPERS:
+            n = self._concrete_u64(size, what)
+            if n > MAX_COPY:
+                raise Bail(f"probe_read_str size {n} > {MAX_COPY} in {what}")
+            # NUL position abstracted as a shared oracle length in [1, n]:
+            # both programs' nth _str call sees the same L and the same bytes.
+            # Out-of-range oracle values clamp to 1 (keeps L in range without
+            # polluting path conditions with environment assumptions).
+            Lr = z3.Function(f"oracle_strlen_h{hid}", BV64S, BV64S)(bv64(idx))
+            L = z3.If(z3.And(z3.UGE(Lr, bv64(1)), z3.ULE(Lr, bv64(n))),
+                      Lr, bv64(1))
+            for k in range(n):
+                old = self._load(mem, self._addr_add(dst, k), 1)
+                kb = self._load(mem, self._addr_add(src, k), 1)
+                val = z3.If(z3.ULT(bv64(k + 1), L), kb,
+                            z3.If(bv64(k + 1) == L, bv64(0), old))
+                self._store(mem, self._addr_add(dst, k), 1, val)
+            ret = L
+        else:
+            raise Bail(f"helper {hid} in {what}")
+
+        regs = regs[:]
+        regs[0] = ret
+        for i in range(1, 6):  # caller-saved, unreadable after the call
+            self.nclobber += 1
+            regs[i] = z3.BitVec(f"clobber_{self.tag}_{self.nclobber}", 64)
+        return regs
+
     # ---------- main loop ----------
 
     def run(self, entry_pc=0):
@@ -298,11 +395,11 @@ class Executor:
         regs[1] = Ptr("ctx", bv64(0))
         regs[10] = Ptr(f"stack:{self.tag}", bv64(STACK_SIZE))
         self.init_r0 = regs[0]
-        work = [(entry_pc, regs, {}, [])]
+        work = [(entry_pc, regs, {}, [], {})]
         while work:
             if len(self.paths) + len(work) > MAX_PATHS:
                 raise Bail("path explosion (> MAX_PATHS)")
-            pc, regs, mem, conds = work.pop()
+            pc, regs, mem, conds, counters = work.pop()
             steps = 0
             while True:
                 steps += 1
@@ -372,7 +469,15 @@ class Executor:
                 if cls in (5, 6):  # JMP / JMP32
                     code = op >> 4
                     if code == 8:
-                        raise Bail(f"call (helper/subprog) in {what}")
+                        if src == 1:
+                            raise Bail(f"subprog call in {what}")
+                        if src == 2:
+                            raise Bail(f"kfunc call in {what}")
+                        mem = dict(mem)
+                        regs = self._helper_call(ins["imm"], regs, mem,
+                                                 counters, what)
+                        pc += 1
+                        continue
                     if code == 9:  # EXIT
                         ret = need_data(regs[0], what)
                         self.paths.append(Path(conds, ret, mem))
@@ -394,7 +499,8 @@ class Executor:
                         pc += 1
                         continue
                     if self._feasible(conds + [c]):
-                        work.append((taken, regs[:], dict(mem), conds + [c]))
+                        work.append((taken, regs[:], dict(mem), conds + [c],
+                                     dict(counters)))
                     if self._feasible(conds + [z3.Not(c)]):
                         pc += 1
                         conds = conds + [z3.Not(c)]

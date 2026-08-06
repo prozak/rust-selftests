@@ -44,26 +44,60 @@ equiv/sweep.sh <names-file> <out-dir> 10
 - `CORESKIP`: section carries unapplied CO-RE relocations; comparing pre-load
   bytecode is not meaningful. Needs load-time reloc application (v2).
 
+Helper calls (tier 1):
+
+- probe_read/_kernel/_user: byte copy from the shared `kmem` (or source
+  region) — deterministic, no oracle; concrete size ≤ 512 required.
+- probe_read_*_str: NUL position abstracted as a shared per-call-index oracle
+  length clamped to [1, size]; bytes past it keep prior contents.
+- Argument-free environment reads (ktime, pid_tgid, smp_processor_id, ...):
+  shared oracle streams at the helper's true return width; pid_tgid is
+  additionally masked to kernel-possible values (both halves < 2^31), since
+  C sign-extends `int` pid compares where Rust compares 32-bit.
+- Everything else (maps, printk, kfuncs, subprogs) still bails → tiers 2–4.
+
+Rust v0-mangled static names are normalized to their source identifier so the
+same logical global maps to the same region in both objects. The C object's
+BTF is ground truth for return contracts: void functions skip the return
+comparison, ≤32-bit return types compare low 32 bits.
+
+`equiv/waivers.tsv` records accepted semantic divergences (verdict WAIVED,
+non-failing, reason required). First entry: test_stack_var_off — the C
+program deliberately reads uninitialized stack residue; the Rust translation
+zero-initializes, a deterministic refinement.
+
 Soundness stance: unsupported constructs BAIL rather than being approximated,
 so EQUIV verdicts only rest on modeled semantics. Known deliberate
 assumptions: probe-reads never fault; LD_IMM64 global/map pointers are
-non-NULL; both programs see the same kernel memory snapshot.
+non-NULL; both programs see the same kernel memory snapshot and the same
+initial (uninit) stack residue; the nth call to a given helper observes the
+same environment value in both programs.
 
-## Verdict sweep (2026-08-05, v1, no helper support)
+## Verdict sweeps (2026-08-05)
 
-550-program corpus: see the session results dir; headline: 83 EQUIV before
-artifact fixes, dominant BAIL cause is `call` (helpers) — that is v1.1.
+550-object corpus, per-program totals:
+
+- v1 (no helpers): 335 EQUIV / 0 INEQUIV; all 26 initial INEQUIVs were
+  model artifacts (void rets, .text subprogs, .struct_ops data, CO-RE).
+- tier 1 (probe_read family + pure oracles): **366 EQUIV / 0 INEQUIV /
+  1 WAIVED** (83 objects fully proved). The tier-1 triage surfaced and fixed:
+  oracle return widths, pid_tgid range refinement, Rust static demangling,
+  BTF-based return contracts, shared stack residue — and found one genuine
+  divergence (test_stack_var_off, waived).
+
+Results tables: `results/`.
 
 ## Roadmap
 
-1. **v1.1 helpers**: pure-read helpers as a shared per-call-index oracle
-   (`ret = oracle(helper_id, index)`); side-effecting helpers as an observable
-   call trace — sequence equality of (helper, args) with pointer args compared
-   by (region, offset) for shared regions, later by pointed-to bytes using
-   key/value sizes parsed from map BTF defs.
-2. **CO-RE application**: apply `.BTF.ext` relocations against the pinned
-   vmlinux BTF (like libbpf) before lifting, unlocking the CORESKIP class.
-3. **Regression guard**: bytecode-hash fast path; re-prove after quality-layer
-   edits (policy linter / clippy hardening), alarm on equivalence break.
-4. Atomics, endian ops, bounded-loop widening, subprog calls (inline at
-   call site).
+1. **Tier 2**: observable call-trace framework for side-effecting helpers
+   (map_update etc.) — sequence equality of (helper, args), pointer args
+   compared by pointed-to bytes using key/value sizes from map BTF defs.
+2. **Tier 3**: map_lookup_elem returned-pointer model (per-index mapval
+   regions + shared NULL oracle).
+3. **Tier 4**: subprog inlining (345 bail sites), atomics, bswap, pointer
+   spills to stack.
+4. **CO-RE application**: apply `.BTF.ext` relocations against the pinned
+   vmlinux BTF (like libbpf) before lifting, unlocking the CORESKIP class
+   (504 programs).
+5. **Regression guard**: bytecode-hash fast path; re-prove after
+   quality-layer edits, alarm on equivalence break.

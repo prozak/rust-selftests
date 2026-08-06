@@ -1,0 +1,2 @@
+# prog<TAB>section:func<TAB>reason — accepted semantic divergences (verdict WAIVED)
+test_stack_var_off	tracepoint/syscalls/sys_enter_nanosleep:probe	C reads uninit stack residue for len>4 (verifier stress test); Rust zero-inits stack_buf — deterministic refinement, test contract only exercises len=4

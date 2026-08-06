@@ -15,6 +15,7 @@ run_one() {
         </dev/null >"$log" 2>&1
     rc=$?
     n_equiv=$(grep -c '^  EQUIV' "$log")   # counts EQUIV and EQUIV32
+    n_waiv=$(grep -c '^  WAIVED' "$log")
     n_ineq=$(grep -c '^  INEQUIV' "$log")
     n_bail=$(grep -c '^  BAIL' "$log")
     n_core=$(grep -c '^  CORESKIP' "$log")
@@ -25,11 +26,11 @@ run_one() {
     elif [ "$n_bail" -gt 0 ]; then verdict=BAIL
     elif [ "$n_unk" -gt 0 ]; then verdict=UNKNOWN
     elif [ "$n_core" -gt 0 ]; then verdict=CORESKIP
-    elif [ "$n_equiv" -gt 0 ] && [ $rc -eq 0 ]; then verdict=EQUIV
+    elif [ $((n_equiv + n_waiv)) -gt 0 ] && [ $rc -eq 0 ]; then verdict=EQUIV
     elif grep -q ': 0/0 program' "$log"; then verdict=NOPROGS
     else verdict=ERROR
     fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$verdict" "$n_equiv" "$n_ineq" "$n_bail" "$n_core" "$n_unk"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$verdict" "$n_equiv" "$n_ineq" "$n_bail" "$n_core" "$n_unk" "$n_waiv"
 }
 export -f run_one 2>/dev/null || true
 export OUT PY REPO

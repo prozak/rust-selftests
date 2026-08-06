@@ -25,7 +25,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import z3
-from bpfelf import BpfElf, SHF_ALLOC, SHF_EXECINSTR, SHT_NOBITS, STT_FUNC, STT_OBJECT
+from bpfelf import (BpfElf, SHF_ALLOC, SHF_EXECINSTR, SHT_NOBITS, STT_FUNC,
+                    STT_OBJECT, normalize_name)
 from bpfsym import Bail, Executor
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -63,16 +64,17 @@ def global_regions(elves):
                     or sec.name.startswith(".BTF")
                     or sec.name.startswith(".struct_ops")):
                 continue  # struct_ops data is map material, not runtime state
+            name = normalize_name(sym.name)
             init = (b"\x00" * sym.size if sec.type == SHT_NOBITS
                     else sec.data[sym.value:sym.value + sym.size])
-            if sym.name in seen and seen[sym.name] != (sym.size, init):
+            if name in seen and seen[name] != (sym.size, init):
                 warnings.append(
-                    f"global '{sym.name}': size/init differs between objects "
-                    f"({seen[sym.name][0]}B vs {sym.size}B)")
-            seen[sym.name] = (sym.size, init)
+                    f"global '{name}': size/init differs between objects "
+                    f"({seen[name][0]}B vs {sym.size}B)")
+            seen[name] = (sym.size, init)
             regions.setdefault(
-                f"g:{sym.name}",
-                z3.Array(f"g_{sym.name}", z3.BitVecSort(64), z3.BitVecSort(8)))
+                f"g:{name}",
+                z3.Array(f"g_{name}", z3.BitVecSort(64), z3.BitVecSort(8)))
     return regions, warnings
 
 
@@ -93,7 +95,7 @@ def summarize_ret(paths):
     return expr
 
 
-def check_program(name, elves, shared, timeout_ms):
+def check_program(name, func, elves, shared, timeout_ms):
     paths, void = {}, {}
     for tag, (elf, sec, entry) in elves.items():
         ex = Executor(elf, sec, shared, tag)
@@ -112,7 +114,15 @@ def check_program(name, elves, shared, timeout_ms):
         s.add(z3.Not(z3.And(*eqs)))
         return s, s.check()
 
-    ret_observable = not (void["A"] or void["B"])
+    # C-side BTF is ground truth for the return contract
+    ret_bits = elves["A"][0].func_ret_bits(func)
+    if ret_bits is not None:
+        ret_observable = ret_bits != 0
+    else:
+        ret_observable = not (void["A"] or void["B"])
+    if ret_observable and ret_bits is not None and ret_bits <= 32:
+        ret_a, ret_b = z3.Extract(31, 0, ret_a), z3.Extract(31, 0, ret_b)
+
     eq = ([ret_a == ret_b] if ret_observable else []) + mem_eq
     s, res = solve(eq)
     if res == z3.unsat:
@@ -121,7 +131,7 @@ def check_program(name, elves, shared, timeout_ms):
     if res == z3.unknown:
         return "UNKNOWN", "solver timeout/gave-up"
 
-    if ret_observable:
+    if ret_observable and (ret_bits is None or ret_bits > 32):
         # divergence only in upper 32 bits of r0 is benign for <=32-bit ret types
         _, res32 = solve([z3.Extract(31, 0, ret_a) == z3.Extract(31, 0, ret_b)] + mem_eq)
         if res32 == z3.unsat:
@@ -169,6 +179,16 @@ def main():
 
     core_secs = elf_c.core_relo_sections() | elf_r.core_relo_sections()
 
+    waivers = {}
+    wpath = os.path.join(REPO, "equiv", "waivers.tsv")
+    if os.path.exists(wpath):
+        for line in open(wpath):
+            if line.startswith("#") or not line.strip():
+                continue
+            prog, label, reason = line.rstrip("\n").split("\t", 2)
+            if prog == args.prog:
+                waivers[label] = reason
+
     failures = 0
     for key in keys:
         secname, func = key
@@ -183,12 +203,14 @@ def main():
             continue
         try:
             verdict, detail = check_program(
-                label,
+                label, func,
                 {"A": (elf_c,) + progs_c[key], "B": (elf_r,) + progs_r[key]},
                 shared, args.timeout)
         except Bail as e:
             verdict, detail = "BAIL", str(e)
-        if verdict not in ("EQUIV", "EQUIV32"):
+        if verdict == "INEQUIV" and label in waivers:
+            verdict, detail = "WAIVED", waivers[label]
+        if verdict not in ("EQUIV", "EQUIV32", "WAIVED"):
             failures += 1
         print(f"  {verdict:8s} {label}  [{detail}]")
 

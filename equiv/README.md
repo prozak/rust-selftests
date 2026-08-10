@@ -85,9 +85,36 @@ Helper calls (tier 2) — observable call trace:
 - bswap (BPF_END) and atomics (add/or/and/xor ± fetch, xchg, cmpxchg,
   load-acquire/store-release) are modeled exactly; atomics get sequential
   semantics, consistent with the model's single-threaded stance.
-- Still bailing → tier 3: map_lookup_elem / ringbuf_reserve (pointer
-  returns); tier 4: subprog calls, packet/ctx-pointer stores, pointer
-  compares across regions, spilled pointer stores.
+
+Helper calls (tier 3) — nullable pointer returns:
+
+- map_lookup_elem (and _percpu_elem, sk/inode/task/cgrp storage_get) emits
+  a trace event with its question (map, key bytes / object+flags), then
+  FORKS the path on a shared per-call-index NULL oracle: in any one model
+  both programs' nth call takes the same branch. The non-null side returns
+  a pointer into a per-call-index `mapval:` region with shared initial
+  contents; writes through it are map state, compared as observables.
+  Sharing per index is justified exactly as in tier 2: the trace pins the
+  question and the mutation order. get_local_storage is verifier-typed
+  non-null, so it gets the region without the fork.
+- Same-key aliasing between separate lookups is NOT modeled (each call gets
+  a fresh region); this cannot fake equivalence — a value written via one
+  pointer and reread via another shows up as a mapval observable diff — and
+  adds no false INEQUIVs beyond what trace equality already demands.
+- map-in-map lookups return a dynamic inner-map handle whose key/value
+  sizes come from the outer def's `values` BTF member.
+- ringbuf_reserve forks NULL/pointer into a shared-residue `rbuf:` region;
+  submit's trace event captures the buffer bytes — publication is the
+  observable moment — while discarded buffers stay unobservable, as in the
+  kernel. ringbuf_query is a per-index oracle read with a trace event.
+- spin_lock/unlock are no-ops under sequential semantics, kept as trace
+  events (region + offset) so lock placement must match.
+- Pointer spills to the stack live in a per-region shadow keyed by concrete
+  offset: 8-byte reloads return the pointer, partial/overlapping reads bail
+  rather than see garbage, and data overwrites invalidate the slot.
+- Still bailing → tier 4: subprog calls, packet/ctx-pointer stores
+  (skb data/optval windows), pointer compares across regions (needs shared
+  symbolic region bases), kptr_xchg, tail_call.
 
 Rust v0-mangled static names are normalized to their source identifier so the
 same logical global maps to the same region in both objects. The C object's
@@ -129,22 +156,30 @@ same environment value in both programs.
   unsigned — the Rust translation misbehaved for negative optlen, invisible
   to the test oracle; fixed in progs/ and re-proved + QEMU-verified.
 
-Results tables: `results/`. Remaining bail histogram (call sites):
-subprog calls ×346, map_lookup ×96, tail_call ×21, .text (subprog address)
-relocs ×18, spilled pointer stores ×16, packet/ctx-pointer stores ×15, then
-a long tail of context-specific helpers (get_attach_cookie, check_mtu,
-get_local_storage, sk_lookup_tcp, redirect_map, ...).
+- tier 3 (2026-08-10; nullable-pointer helpers + pointer spills +
+  map-in-map): **495 EQUIV / 0 INEQUIV / 2 WAIVED / 4 UNKNOWN** (128
+  objects fully proved; object verdicts 128 EQUIV / 237 BAIL /
+  164 CORESKIP / 11 NOPROGS / 9 TIMEOUT / 1 UNKNOWN). Negative controls:
+  mutated lookup key, value flowing through the looked-up pointer, and a
+  store offset through it — all flagged INEQUIV (the last via the mapval
+  region observable). The 9 TIMEOUTs are the pyperf/strobemeta
+  verifier-stress class: single-side path enumeration alone exceeds 300 s
+  (50+-iteration unrolled loops; would need join-point path merging).
+  access_map_in_map is UNKNOWN — Z3 gives up on its equality query even at
+  a 5-minute budget. strobemeta_nounroll1 bails on a symbolic-size
+  probe_read (bounded symbolic copies are future work).
+
+Results tables: `results/`.
 
 ## Roadmap
 
-1. **Tier 3**: map_lookup_elem returned-pointer model (per-index mapval
-   regions + shared NULL oracle) — 96 call sites, and 21 objects wait on
-   it alone.
-2. **Tier 4**: subprog inlining (346 bail sites), spilled pointer stores,
-   packet pointers (skb->data/data_end as a region), pointer compares
-   across regions (shared symbolic region bases).
-3. **CO-RE application**: apply `.BTF.ext` relocations against the pinned
+1. **Tier 4**: subprog inlining (346 bail sites), packet/ctx-pointer
+   window stores (skb->data/optval; needs pointer-field regions), pointer
+   compares across regions / pointer-as-data (needs shared symbolic region
+   bases), kfunc calls, tail_call, symbolic-size copies.
+2. **CO-RE application**: apply `.BTF.ext` relocations against the pinned
    vmlinux BTF (like libbpf) before lifting, unlocking the CORESKIP class
    (504 programs).
+3. **Path-merging at join points** for the pyperf/strobemeta TIMEOUT class.
 4. **Regression guard**: bytecode-hash fast path; re-prove after
    quality-layer edits, alarm on equivalence break.

@@ -29,6 +29,7 @@ MAX_INSNS_PER_PATH = 50_000
 MAX_PATHS = 4096
 FEAS_TIMEOUT_MS = 200
 MAX_COPY = 512  # largest concrete probe_read size we'll expand byte-wise
+MAX_ARG = 8192  # largest key/value/data arg we'll byte-compare in an event
 
 # Argument-free helpers whose return value is environment-determined: modeled
 # as a shared oracle stream — the nth call in the C program and the nth call
@@ -66,6 +67,26 @@ H_TRACE_PRINTK = 6
 H_GET_CURRENT_COMM = 16
 H_SKB_LOAD_BYTES = 26
 H_GET_RETVAL, H_SET_RETVAL = 186, 187  # 4-byte shared "sysret" state region
+
+# Tier 3: helpers returning a nullable pointer fork the path on a shared
+# per-call-index NULL oracle; the non-null side points into a fresh
+# per-call-index region with shared initial contents ("both environments
+# hand back the same memory"), whose final state is observable. Each call
+# also appends a trace event carrying its question (map, key/flags), which
+# is what justifies the per-index sharing — see tier-2 rationale.
+H_MAP_LOOKUP, H_MAP_LOOKUP_PERCPU = 1, 195
+H_SK_STORAGE_GET, H_INODE_STORAGE_GET = 107, 145
+H_TASK_STORAGE_GET, H_CGRP_STORAGE_GET = 156, 210
+H_GET_LOCAL_STORAGE = 81                     # verifier-typed non-null
+H_RINGBUF_RESERVE, H_RINGBUF_SUBMIT, H_RINGBUF_DISCARD = 131, 132, 133
+H_RINGBUF_QUERY = 134
+H_SPIN_LOCK, H_SPIN_UNLOCK = 93, 94
+
+PTR_FORK_HELPERS = {H_MAP_LOOKUP, H_MAP_LOOKUP_PERCPU, H_SK_STORAGE_GET,
+                    H_INODE_STORAGE_GET, H_TASK_STORAGE_GET,
+                    H_CGRP_STORAGE_GET, H_RINGBUF_RESERVE}
+PTR_HELPERS = PTR_FORK_HELPERS | {H_GET_LOCAL_STORAGE}
+MAP_IN_MAP_TYPES = {12, 13}  # ARRAY_OF_MAPS, HASH_OF_MAPS
 
 # Environment refinement: values the kernel can actually produce.
 # pid_tgid packs tgid<<32|pid, both bounded by PID_MAX_LIMIT (< 2^31) —
@@ -132,6 +153,7 @@ class Executor:
         self.shared = shared
         self.tag = tag  # 'A' / 'B', namespaces per-run regions
         self.insns = self._decode(sec)
+        self.dynamic_maps = {}  # inner-map handles from map-in-map lookups
         self.paths = []
         self.nclobber = 0
         self.feas = z3.Solver()
@@ -182,6 +204,12 @@ class Executor:
             mem[region] = z3.Array("stack_init", z3.BitVecSort(64), z3.BitVecSort(8))
         elif region.startswith("ro:"):
             mem[region] = self._concrete_array(region)
+        elif region.startswith(("mapval:", "rbuf:")):
+            # per-call-index memory handed back by the environment: shared
+            # initial contents, per-run writes (observable for mapval)
+            mem[region] = self.shared.setdefault(
+                region, z3.Array("init_" + region.replace(":", "_"),
+                                 BV64S, BV8S))
         else:
             raise Bail(f"load/store in unmodeled region {region}")
         return mem[region]
@@ -195,6 +223,12 @@ class Executor:
                 arr = z3.Store(arr, bv64(i), z3.BitVecVal(b, 8))
         return arr
 
+    def _concrete_addr(self, addr, what):
+        a = z3.simplify(addr)
+        if not z3.is_bv_value(a):
+            raise Bail(f"symbolic address over pointer-spill shadow in {what}")
+        return a.as_long()
+
     def _load(self, mem, ptr, size):
         if is_ptr(ptr):
             region, addr = ptr.region, ptr.off
@@ -202,6 +236,13 @@ class Executor:
                 raise Bail(f"deref of map pointer {region}")
         else:
             region, addr = "kmem", ptr  # probe-read of kernel memory
+        sh = mem.get(("shadow", region))
+        if sh:
+            a = self._concrete_addr(addr, region)
+            if size == 8 and a in sh:
+                return sh[a]  # reload of a spilled pointer
+            if any(o < a + size and a < o + 8 for o in sh):
+                raise Bail(f"partial read of spilled pointer in {region}")
         arr = self._region_array(mem, region)
         byts = [z3.Select(arr, addr + bv64(k)) for k in range(size)]
         val = z3.Concat(*reversed(byts)) if size > 1 else byts[0]
@@ -213,6 +254,28 @@ class Executor:
         region, addr = ptr.region, ptr.off
         if region.startswith(("ro:", "map:")) or region == "kmem":
             raise Bail(f"store into read-only region {region}")
+        if is_ptr(val):
+            # pointer spill: kept in a per-region shadow keyed by concrete
+            # offset; the byte array is left alone, so any byte-wise read of
+            # the slot bails instead of seeing garbage
+            if not region.startswith("stack:") or size != 8:
+                raise Bail(f"spilled pointer store into {region}")
+            a = self._concrete_addr(addr, region)
+            sh = dict(mem.get(("shadow", region), {}))
+            for o in [o for o in sh if o < a + 8 and a < o + 8]:
+                del sh[o]
+            sh[a] = val
+            mem[("shadow", region)] = sh
+            return
+        sh = mem.get(("shadow", region))
+        if sh:
+            a = self._concrete_addr(addr, region)
+            hit = [o for o in sh if o < a + size and a < o + 8]
+            if hit:  # data overwrite invalidates the spilled pointer
+                sh = dict(sh)
+                for o in hit:
+                    del sh[o]
+                mem[("shadow", region)] = sh
         arr = self._region_array(mem, region)
         for k in range(size):
             arr = z3.Store(arr, addr + bv64(k), z3.Extract(8 * k + 7, 8 * k, val))
@@ -346,7 +409,7 @@ class Executor:
         p = Ptr(ptr.region, ptr.off + bv64(ins["off"])) if is_ptr(ptr) \
             else need_data(ptr, what) + bv64(ins["off"])
         srcv = need_data(regs[ins["src"]], what)
-        old = self._load(mem, p, size)  # zero-extended to 64
+        old = need_data(self._load(mem, p, size), what)  # zero-extended to 64
         regs = regs[:]
         if aop == 0xF1:  # CMPXCHG: compares r0, stores src on match, r0 = old
             w = size * 8
@@ -440,10 +503,14 @@ class Executor:
             raise Bail(f"non-map pointer as map argument in {what}")
         return v.region[4:]
 
-    def _map_kv(self, mname, what):
-        d = self.elf.map_defs().get(mname)
+    def _map_def(self, mname, what):
+        d = self.dynamic_maps.get(mname) or self.elf.map_defs().get(mname)
         if d is None:
             raise Bail(f"no BTF def for map {mname} in {what}")
+        return d
+
+    def _map_kv(self, mname, what):
+        d = self._map_def(mname, what)
         return d["key_size"], d["value_size"]
 
     def _name_bytes(self, name):
@@ -451,8 +518,8 @@ class Executor:
         return [len(enc) & 0xFF] + list(enc)
 
     def _mem_bytes(self, mem, ptr, n, what):
-        if n > MAX_COPY:
-            raise Bail(f"arg byte compare of {n} > {MAX_COPY} in {what}")
+        if n > MAX_ARG:
+            raise Bail(f"arg byte compare of {n} > {MAX_ARG} in {what}")
         return [z3.Extract(7, 0, self._load(mem, self._addr_add(ptr, k), 1))
                 for k in range(n)]
 
@@ -638,6 +705,37 @@ class Executor:
                             z3.If(err == bv64(0), z3.Select(skb, off + bv64(k)),
                                   z3.BitVecVal(0, 8)))
             ret = err
+        elif hid in (H_SPIN_LOCK, H_SPIN_UNLOCK):
+            # no-ops under sequential semantics, but lock identity stays
+            # observable so lock placement must match across programs
+            p = regs[1]
+            if not is_ptr(p) or p.region.startswith("stack:"):
+                raise Bail(f"spin_lock on non-region pointer in {what}")
+            payload = self._name_bytes(p.region) + self._val_bytes(p.off, 8, what)
+            self._emit_event(mem, counters, hid, payload)
+            ret = bv64(0)
+        elif hid in (H_RINGBUF_SUBMIT, H_RINGBUF_DISCARD):
+            p = regs[1]
+            if not is_ptr(p) or not p.region.startswith("rbuf:"):
+                raise Bail(f"ringbuf submit/discard of non-reserve ptr in {what}")
+            off = z3.simplify(p.off)
+            if not z3.is_bv_value(off) or off.as_long() != 0:
+                raise Bail(f"ringbuf submit at nonzero offset in {what}")
+            payload = self._val_bytes(regs[2], 8, what)
+            if hid == H_RINGBUF_SUBMIT:  # publication is the observable moment
+                n = counters.get(("rbufsz", p.region))
+                if n is None:
+                    raise Bail(f"submit of unknown reservation in {what}")
+                payload += self._mem_bytes(mem, Ptr(p.region, bv64(0)), n, what)
+            self._emit_event(mem, counters, hid, payload)
+            ret = bv64(0)
+        elif hid == H_RINGBUF_QUERY:
+            # state read whose answer evolves with submits: per-index shared
+            # oracle, order kept observable by the trace event
+            mname = self._map_name(regs[1], what)
+            self._emit_event(mem, counters, hid,
+                             self._name_bytes(mname) + self._val_bytes(regs[2], 8, what))
+            ret = z3.Function(f"oracle_h{hid}", BV64S, BV64S)(bv64(idx))
         elif hid == H_GET_RETVAL:
             # reads the syscall-retval cell; helper returns int, and the
             # BPF_CALL wrapper's int->u64 conversion sign-extends
@@ -650,12 +748,76 @@ class Executor:
         else:
             raise Bail(f"helper {hid} in {what}")
 
+        return self._ret_clobbered(regs, ret)
+
+    def _ret_clobbered(self, regs, ret):
         regs = regs[:]
         regs[0] = ret
         for i in range(1, 6):  # caller-saved, unreadable after the call
             self.nclobber += 1
             regs[i] = z3.BitVec(f"clobber_{self.tag}_{self.nclobber}", 64)
         return regs
+
+    # ---------- tier-3: nullable-pointer helpers (path fork) ----------
+
+    def _ptr_helper(self, hid, regs, mem, counters, what):
+        """Model a pointer-returning helper. Returns continuations
+        [(cond, regs, mem, counters), ...]; the first is the primary path."""
+        idx = counters.get(hid, 0)
+        counters[hid] = idx + 1
+
+        inner = None
+        if hid in (H_MAP_LOOKUP, H_MAP_LOOKUP_PERCPU):
+            mname = self._map_name(regs[1], what)
+            d = self._map_def(mname, what)
+            if d.get("map_type") in MAP_IN_MAP_TYPES:
+                inner = d.get("inner")  # lookup returns an inner-map handle
+                if inner is None:
+                    raise Bail(f"map-in-map {mname} without inner def in {what}")
+            ks = d["key_size"]
+            if ks is None:
+                raise Bail(f"map {mname} def lacks key size in {what}")
+            payload = self._name_bytes(mname) + self._mem_bytes(mem, regs[2], ks, what)
+            if hid == H_MAP_LOOKUP_PERCPU:
+                payload += self._val_bytes(regs[3], 8, what)
+        elif hid == H_GET_LOCAL_STORAGE:
+            mname = self._map_name(regs[1], what)
+            payload = self._name_bytes(mname) + self._val_bytes(regs[2], 8, what)
+        elif hid == H_RINGBUF_RESERVE:
+            mname = self._map_name(regs[1], what)
+            n = self._concrete_u64(regs[2], what)
+            if n > MAX_COPY:
+                raise Bail(f"ringbuf_reserve size {n} > {MAX_COPY} in {what}")
+            payload = (self._name_bytes(mname) + list(n.to_bytes(8, "little"))
+                       + self._val_bytes(regs[3], 8, what))
+        else:  # sk/inode/task/cgrp storage_get(map, obj, value, flags)
+            mname = self._map_name(regs[1], what)
+            payload = (self._name_bytes(mname) + self._val_bytes(regs[2], 8, what)
+                       + self._val_bytes(regs[4], 8, what))
+            if is_ptr(regs[3]):  # optional initial-value pointer (CREATE flag)
+                _ks, vs = self._map_kv(mname, what)
+                if vs is None:
+                    raise Bail(f"map {mname} def lacks value size in {what}")
+                payload += [1] + self._mem_bytes(mem, regs[3], vs, what)
+            else:
+                payload += [0] + self._val_bytes(regs[3], 8, what)
+
+        self._emit_event(mem, counters, hid, payload)
+        if inner is not None:  # a map handle, not value memory
+            region = f"map:{mname}#in{idx}"
+            self.dynamic_maps[region[4:]] = inner
+        elif hid == H_RINGBUF_RESERVE:
+            region = f"rbuf:{idx}"
+            counters[("rbufsz", region)] = n
+        else:
+            region = f"mapval:{hid}:{mname}:{idx}"
+        ptr_regs = self._ret_clobbered(regs, Ptr(region, bv64(0)))
+        if hid == H_GET_LOCAL_STORAGE:  # never NULL, no fork
+            return [(None, ptr_regs, mem, counters)]
+        isnull = z3.Function(f"oracle_null_h{hid}", BV64S, z3.BoolSort())(bv64(idx))
+        null_regs = self._ret_clobbered(regs, bv64(0))
+        return [(z3.Not(isnull), ptr_regs, mem, counters),
+                (isnull, null_regs, dict(mem), dict(counters))]
 
     # ---------- main loop ----------
 
@@ -719,7 +881,9 @@ class Executor:
                         else need_data(ptr, what) + bv64(ins["off"])
                     val = self._load(mem, p, size)
                     if mode == 4:  # MEMSX
-                        val = z3.SignExt(64 - size * 8, z3.Extract(size * 8 - 1, 0, val))
+                        val = z3.SignExt(64 - size * 8,
+                                         z3.Extract(size * 8 - 1, 0,
+                                                    need_data(val, what)))
                     elif mode != 3:
                         raise Bail(f"LDX mode {mode} in {what}")
                     regs = regs[:]
@@ -744,8 +908,6 @@ class Executor:
                     p = Ptr(ptr.region, ptr.off + bv64(ins["off"])) if is_ptr(ptr) \
                         else need_data(ptr, what) + bv64(ins["off"])
                     val = bv64(ins["imm"]) if cls == 2 else regs[src]
-                    if is_ptr(val):
-                        raise Bail(f"spilled pointer store in {what}")
                     mem = dict(mem)
                     self._store(mem, p, size, val)
                     pc += 1
@@ -759,8 +921,18 @@ class Executor:
                         if src == 2:
                             raise Bail(f"kfunc call in {what}")
                         mem = dict(mem)
-                        regs = self._helper_call(ins["imm"], regs, mem,
-                                                 counters, what)
+                        if ins["imm"] in PTR_HELPERS:
+                            conts = self._ptr_helper(ins["imm"], regs, mem,
+                                                     counters, what)
+                            for cond, r2, m2, k2 in conts[1:]:
+                                work.append((pc + 1, r2, m2,
+                                             conds + [cond], k2))
+                            cond, regs, mem, counters = conts[0]
+                            if cond is not None:
+                                conds = conds + [cond]
+                        else:
+                            regs = self._helper_call(ins["imm"], regs, mem,
+                                                     counters, what)
                         pc += 1
                         continue
                     if code == 9:  # EXIT

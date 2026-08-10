@@ -103,8 +103,12 @@ def check_program(name, func, elves, shared, timeout_ms):
         # r0 never assigned on any path => BTF-void return (verifier-enforced)
         void[tag] = all(z3.eq(p.ret, ex.init_r0) for p in paths[tag])
 
-    obs_regions = [r for r in shared if r.startswith("g:")] + ["ctx", "trace",
-                                                               "sysret"]
+    # mapval:* regions are created on demand during the runs above (writes
+    # through looked-up pointers are map state); rbuf:* stays unobservable —
+    # ringbuf content is captured by the submit trace event, and a discarded
+    # buffer's scribbles are invisible to userspace.
+    obs_regions = [r for r in shared if r.startswith(("g:", "mapval:"))] \
+        + ["ctx", "trace", "sysret"]
     ret_a, ret_b = summarize_ret(paths["A"]), summarize_ret(paths["B"])
     mem_eq = [summarize(paths["A"], shared, r) == summarize(paths["B"], shared, r)
               for r in obs_regions]

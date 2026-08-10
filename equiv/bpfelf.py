@@ -165,11 +165,52 @@ class BpfElf:
             return None
         return None
 
+    def _unwrap_modifiers(self, tid):
+        types = self.btf_types()
+        for _ in range(32):
+            t = types.get(tid)
+            if t is None or t[0] not in self._BTF_MODIFIERS:
+                break
+            tid = t[2]
+        return tid
+
+    def _parse_map_struct(self, tid, depth=0):
+        """Parse one libbpf-style map def struct: __type members are pointers
+        to the real type, __uint members encode the value as a pointee-array
+        length, __array(values, ...) carries an inner map def."""
+        types = self.btf_types()
+        st = types.get(self._unwrap_modifiers(tid))
+        if st is None or st[0] not in (4, 5):
+            return None
+        d = {"key_size": None, "value_size": None, "map_type": None,
+             "inner": None}
+        for memb_name, memb_tid in st[4]:
+            mt = types.get(memb_tid)
+            if mt is None:
+                continue
+            if memb_name == "values" and mt[0] == 3 and depth < 2:
+                elem = types.get(self._unwrap_modifiers(mt[4][0]))
+                if elem is not None and elem[0] == 2:  # PTR to inner def
+                    d["inner"] = self._parse_map_struct(elem[2], depth + 1)
+                continue
+            if mt[0] != 2:  # remaining members are pointers
+                continue
+            pointee = types.get(mt[2])
+            if memb_name in ("key", "value"):
+                d[memb_name + "_size"] = self.btf_type_size(mt[2])
+            elif pointee is not None and pointee[0] == 3:  # __uint array
+                n = pointee[4][1]
+                if memb_name == "key_size":
+                    d["key_size"] = n
+                elif memb_name == "value_size":
+                    d["value_size"] = n
+                elif memb_name == "type":
+                    d["map_type"] = n
+        return d
+
     def map_defs(self):
-        """map name -> {'key_size', 'value_size', 'map_type'} from the .maps
-        DATASEC BTF (libbpf-style defs: __type members are pointers to the
-        real type, __uint members encode the value as a pointee-array length).
-        Values are None when the def doesn't carry them."""
+        """map name -> parsed def dict (see _parse_map_struct) from the
+        .maps DATASEC BTF. Values are None when the def doesn't carry them."""
         if hasattr(self, "_map_defs"):
             return self._map_defs
         types = self.btf_types()
@@ -181,33 +222,9 @@ class BpfElf:
                 var = types.get(var_id)
                 if var is None or var[0] != 14:  # VAR
                     continue
-                mname = normalize_name(var[1])
-                tid = var[2]
-                for _ in range(32):  # unwrap modifiers to the def struct
-                    t = types.get(tid)
-                    if t is None or t[0] not in self._BTF_MODIFIERS:
-                        break
-                    tid = t[2]
-                st = types.get(tid)
-                if st is None or st[0] not in (4, 5):
-                    continue
-                d = {"key_size": None, "value_size": None, "map_type": None}
-                for memb_name, memb_tid in st[4]:
-                    mt = types.get(memb_tid)
-                    if mt is None or mt[0] != 2:  # members are pointers
-                        continue
-                    pointee = types.get(mt[2])
-                    if memb_name in ("key", "value"):
-                        d[memb_name + "_size"] = self.btf_type_size(mt[2])
-                    elif pointee is not None and pointee[0] == 3:  # __uint array
-                        n = pointee[4][1]
-                        if memb_name == "key_size":
-                            d["key_size"] = n
-                        elif memb_name == "value_size":
-                            d["value_size"] = n
-                        elif memb_name == "type":
-                            d["map_type"] = n
-                self._map_defs[mname] = d
+                d = self._parse_map_struct(var[2])
+                if d is not None:
+                    self._map_defs[normalize_name(var[1])] = d
         return self._map_defs
 
     def func_ret_bits(self, func_name):

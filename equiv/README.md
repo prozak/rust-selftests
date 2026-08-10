@@ -54,7 +54,40 @@ Helper calls (tier 1):
   shared oracle streams at the helper's true return width; pid_tgid is
   additionally masked to kernel-possible values (both halves < 2^31), since
   C sign-extends `int` pid compares where Rust compares 32-bit.
-- Everything else (maps, printk, kfuncs, subprogs) still bails → tiers 2–4.
+
+Helper calls (tier 2) — observable call trace:
+
+- Side-effecting helpers (map_update/delete/push/pop/peek,
+  perf_event_output, ringbuf_output, get_stackid, trace_printk) append an
+  event `[helper id][len][payload]` to a shared `trace` region that is
+  compared like any other observable: equivalence requires the same call
+  sequence with the same arguments. Key/value pointer args are compared by
+  pointed-to bytes, sizes taken from each object's own `.maps` BTF def (so a
+  key/value-size mismatch between C and Rust surfaces as INEQUIV). The
+  concrete trace cursor makes encodings prefix-comparable: the first
+  diverging event differs in place, and a missing trailing event leaves
+  symbolic `trace_init` residue some input distinguishes.
+- Their environment-determined errno return is a shared per-call-index
+  oracle sign-extended from 32 bits (real returns fit in an int; full-width
+  freedom would fake divergences between C `long` and Rust `i32` compares).
+  Per-index sharing is sound *because* traces are compared: equal traces
+  imply equal map/env state at the nth call.
+- map_pop/peek produce value bytes from a shared per-call-index oracle,
+  written only when the shared errno says success.
+- trace_printk requires a concrete format string (rodata/stack); numeric
+  conversions compare at the width the kernel reads (%d → 4 bytes,
+  %ld/%lld → 8); `%s`/`%p` bail.
+- Pure environment reads keyed by their question, not by call order:
+  get_current_comm bytes are `oracle(size, k)` (kernel NUL-pads per size, so
+  different sizes must not alias); skb_load_bytes reads a shared symbolic
+  `skbdata` packet array with success `oracle(offset, len)`; both zero-fill
+  the destination on error, as the kernel does.
+- bswap (BPF_END) and atomics (add/or/and/xor ± fetch, xchg, cmpxchg,
+  load-acquire/store-release) are modeled exactly; atomics get sequential
+  semantics, consistent with the model's single-threaded stance.
+- Still bailing → tier 3: map_lookup_elem / ringbuf_reserve (pointer
+  returns); tier 4: subprog calls, packet/ctx-pointer stores, pointer
+  compares across regions, spilled pointer stores.
 
 Rust v0-mangled static names are normalized to their source identifier so the
 same logical global maps to the same region in both objects. The C object's
@@ -62,9 +95,11 @@ BTF is ground truth for return contracts: void functions skip the return
 comparison, ≤32-bit return types compare low 32 bits.
 
 `equiv/waivers.tsv` records accepted semantic divergences (verdict WAIVED,
-non-failing, reason required). First entry: test_stack_var_off — the C
-program deliberately reads uninitialized stack residue; the Rust translation
-zero-initializes, a deterministic refinement.
+non-failing, reason required). Entries: test_stack_var_off — the C program
+deliberately reads uninitialized stack residue; the Rust translation
+zero-initializes, a deterministic refinement. bpf_flow/flow_dissector_4 —
+LLVM compiles the C source's `!(data + thoff)` to `!data` via pointer
+provenance; divergence needs a NULL skb->data, kernel-impossible.
 
 Soundness stance: unsupported constructs BAIL rather than being approximated,
 so EQUIV verdicts only rest on modeled semantics. Known deliberate
@@ -84,20 +119,32 @@ same environment value in both programs.
   oracle return widths, pid_tgid range refinement, Rust static demangling,
   BTF-based return contracts, shared stack residue — and found one genuine
   divergence (test_stack_var_off, waived).
+- tier 2 (2026-08-10; call trace + bswap + atomics + retval state):
+  **456 EQUIV / 0 INEQUIV / 2 WAIVED** (106 objects fully proved; object
+  verdicts 106 EQUIV / 268 BAIL / 164 CORESKIP / 11 NOPROGS / 1 TIMEOUT).
+  Negative controls: mutated map_update flags and key offset both flagged
+  INEQUIV through the trace observable. **Second true finding**:
+  cgroup_getset_retval_getsockopt compared `optlen > page_size` signed where
+  C (with `__u32 page_size`, unlike its sibling files' `__s32`) compares
+  unsigned — the Rust translation misbehaved for negative optlen, invisible
+  to the test oracle; fixed in progs/ and re-proved + QEMU-verified.
 
-Results tables: `results/`.
+Results tables: `results/`. Remaining bail histogram (call sites):
+subprog calls ×346, map_lookup ×96, tail_call ×21, .text (subprog address)
+relocs ×18, spilled pointer stores ×16, packet/ctx-pointer stores ×15, then
+a long tail of context-specific helpers (get_attach_cookie, check_mtu,
+get_local_storage, sk_lookup_tcp, redirect_map, ...).
 
 ## Roadmap
 
-1. **Tier 2**: observable call-trace framework for side-effecting helpers
-   (map_update etc.) — sequence equality of (helper, args), pointer args
-   compared by pointed-to bytes using key/value sizes from map BTF defs.
-2. **Tier 3**: map_lookup_elem returned-pointer model (per-index mapval
-   regions + shared NULL oracle).
-3. **Tier 4**: subprog inlining (345 bail sites), atomics, bswap, pointer
-   spills to stack.
-4. **CO-RE application**: apply `.BTF.ext` relocations against the pinned
+1. **Tier 3**: map_lookup_elem returned-pointer model (per-index mapval
+   regions + shared NULL oracle) — 96 call sites, and 21 objects wait on
+   it alone.
+2. **Tier 4**: subprog inlining (346 bail sites), spilled pointer stores,
+   packet pointers (skb->data/data_end as a region), pointer compares
+   across regions (shared symbolic region bases).
+3. **CO-RE application**: apply `.BTF.ext` relocations against the pinned
    vmlinux BTF (like libbpf) before lifting, unlocking the CORESKIP class
    (504 programs).
-5. **Regression guard**: bytecode-hash fast path; re-prove after
+4. **Regression guard**: bytecode-hash fast path; re-prove after
    quality-layer edits, alarm on equivalence break.

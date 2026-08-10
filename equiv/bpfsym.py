@@ -50,6 +50,23 @@ PURE_ORACLE_HELPERS = {
 PROBE_READ_HELPERS = {4, 112, 113}       # probe_read, _kernel, _user
 PROBE_READ_STR_HELPERS = {45, 114, 115}  # probe_read_str, _kernel_str, _user_str
 
+# Tier 2: side-effecting helpers become events in a shared observable trace
+# region — equivalence then requires both programs to make the same call
+# sequence with the same arguments (pointer args compared by pointed-to
+# bytes, sizes from the map's BTF def). Their environment-determined errno
+# return is a shared per-call-index oracle, sign-extended from 32 bits (real
+# returns fit in an int; full-width symbolic values would fake divergences
+# between C long compares and Rust i32 compares). Sharing per index is sound
+# because equal traces imply equal map/env state at the nth call.
+H_MAP_UPDATE, H_MAP_DELETE = 2, 3
+H_MAP_PUSH, H_MAP_POP, H_MAP_PEEK = 87, 88, 89
+H_PERF_EVENT_OUTPUT, H_RINGBUF_OUTPUT = 25, 130
+H_GET_STACKID = 27
+H_TRACE_PRINTK = 6
+H_GET_CURRENT_COMM = 16
+H_SKB_LOAD_BYTES = 26
+H_GET_RETVAL, H_SET_RETVAL = 186, 187  # 4-byte shared "sysret" state region
+
 # Environment refinement: values the kernel can actually produce.
 # pid_tgid packs tgid<<32|pid, both bounded by PID_MAX_LIMIT (< 2^31) —
 # without this, C's sign-extended int-vs-u64 pid compares "diverge" from
@@ -57,6 +74,8 @@ PROBE_READ_STR_HELPERS = {45, 114, 115}  # probe_read_str, _kernel_str, _user_st
 ORACLE_MASK = {14: 0x7FFFFFFF_7FFFFFFF}
 
 BV64S = z3.BitVecSort(64)
+BV32S = z3.BitVecSort(32)
+BV8S = z3.BitVecSort(8)
 
 
 class Bail(Exception):
@@ -216,7 +235,7 @@ class Executor:
                 return self._section_ptr(secname, addend)
         secname = self.elf.sections[sym.shndx].name
         if secname == ".maps":
-            return Ptr(f"map:{sym.name}", bv64(addend))
+            return Ptr(f"map:{normalize_name(sym.name)}", bv64(addend))
         sec = self.elf.sections[sym.shndx]
         if not sec.flags & SHF_ALLOC or sec.flags & SHF_EXECINSTR:
             raise Bail(f"reloc into unsupported section {secname}")
@@ -285,12 +304,68 @@ class Executor:
             return zx(a ^ b)
         if code == 12:
             return zx(a >> (b & (w - 1)))
-        if code == 13:  # END (byte swap family)
-            return self._endian(a if is64 else zext64(a), is64, soff, what)
         raise Bail(f"ALU opcode {code} in {what}")
 
-    def _endian(self, v, is64_class, _soff, what):
-        raise Bail(f"endian/bswap op in {what}")
+    def _endian_op(self, op, is64_cls, v, width, what):
+        """BPF_END: to_le/to_be (ALU class) or unconditional bswap (ALU64
+        class). Target is little-endian; result is zero-extended."""
+        if width not in (16, 32, 64):
+            raise Bail(f"bswap width {width} in {what}")
+        low = z3.Extract(width - 1, 0, v)
+        swapped = z3.Concat(*[z3.Extract(8 * k + 7, 8 * k, low)
+                              for k in range(width // 8)])
+        if is64_cls or op & 8:   # bswap, or to_be on a LE target
+            res = swapped
+        else:                    # to_le on a LE target: just truncate
+            res = low
+        return z3.ZeroExt(64 - width, res) if width < 64 else res
+
+    # ---------- atomics ----------
+
+    def _atomic(self, ins, regs, mem, what):
+        """STX mode 6: read-modify-write on [dst+off]; returns new regs."""
+        size = (8, 4, 2, 1)[[3, 0, 1, 2].index((ins["op"] >> 3) & 3)]
+        aop = ins["imm"]
+        if aop in (0x100, 0x110):  # LOAD_ACQ / STORE_REL: plain load/store
+            # under sequential semantics; note LOAD_ACQ's pointer is src
+            regs = regs[:]
+            if aop == 0x100:
+                ptr = regs[ins["src"]]
+                p = Ptr(ptr.region, ptr.off + bv64(ins["off"])) if is_ptr(ptr) \
+                    else need_data(ptr, what) + bv64(ins["off"])
+                regs[ins["dst"]] = self._load(mem, p, size)
+            else:
+                ptr = regs[ins["dst"]]
+                p = Ptr(ptr.region, ptr.off + bv64(ins["off"])) if is_ptr(ptr) \
+                    else need_data(ptr, what) + bv64(ins["off"])
+                self._store(mem, p, size, need_data(regs[ins["src"]], what))
+            return regs
+        if size not in (4, 8):
+            raise Bail(f"atomic size {size} in {what}")
+        ptr = regs[ins["dst"]]
+        p = Ptr(ptr.region, ptr.off + bv64(ins["off"])) if is_ptr(ptr) \
+            else need_data(ptr, what) + bv64(ins["off"])
+        srcv = need_data(regs[ins["src"]], what)
+        old = self._load(mem, p, size)  # zero-extended to 64
+        regs = regs[:]
+        if aop == 0xF1:  # CMPXCHG: compares r0, stores src on match, r0 = old
+            w = size * 8
+            eq = z3.Extract(w - 1, 0, old) == z3.Extract(w - 1, 0, regs[0])
+            self._store(mem, p, size, z3.If(eq, srcv, old))
+            regs[0] = old
+            return regs
+        if aop == 0xE1:  # XCHG
+            new = srcv
+        elif aop & ~1 in (0x00, 0x40, 0x50, 0xA0):  # ADD/OR/AND/XOR [|FETCH]
+            fn = {0x00: lambda a, b: a + b, 0x40: lambda a, b: a | b,
+                  0x50: lambda a, b: a & b, 0xA0: lambda a, b: a ^ b}[aop & ~1]
+            new = fn(old, srcv)
+        else:
+            raise Bail(f"atomic imm {aop:#x} in {what}")
+        self._store(mem, p, size, new)
+        if aop == 0xE1 or aop & 1:  # XCHG and FETCH variants return old
+            regs[ins["src"]] = old
+        return regs
 
     # ---------- JMP condition ----------
 
@@ -338,6 +413,90 @@ class Executor:
             raise Bail(f"symbolic size argument in {what}")
         return v.as_long()
 
+    # ---------- tier-2 machinery: observable call trace ----------
+
+    def _emit_event(self, mem, counters, hid, payload):
+        """Append [hid:1][len:2][payload] to the shared trace region.
+
+        The cursor is concrete (event sizes are concrete), so equal call
+        sequences write identical bytes at identical offsets; the first
+        diverging event differs in place, and a missing trailing event
+        leaves symbolic trace_init residue that some input distinguishes."""
+        cur = counters.get("cursor", 0)
+        arr = self._region_array(mem, "trace")
+        ev = [hid & 0xFF, len(payload) & 0xFF, (len(payload) >> 8) & 0xFF] + payload
+        for k, b in enumerate(ev):
+            b = z3.BitVecVal(b, 8) if isinstance(b, int) else b
+            arr = z3.Store(arr, bv64(cur + k), b)
+        mem["trace"] = arr
+        counters["cursor"] = cur + len(ev)
+
+    def _errno_oracle(self, hid, idx):
+        f = z3.Function(f"oracle_err_h{hid}", BV64S, BV32S)
+        return z3.SignExt(32, f(bv64(idx)))
+
+    def _map_name(self, v, what):
+        if not is_ptr(v) or not v.region.startswith("map:"):
+            raise Bail(f"non-map pointer as map argument in {what}")
+        return v.region[4:]
+
+    def _map_kv(self, mname, what):
+        d = self.elf.map_defs().get(mname)
+        if d is None:
+            raise Bail(f"no BTF def for map {mname} in {what}")
+        return d["key_size"], d["value_size"]
+
+    def _name_bytes(self, name):
+        enc = name.encode()
+        return [len(enc) & 0xFF] + list(enc)
+
+    def _mem_bytes(self, mem, ptr, n, what):
+        if n > MAX_COPY:
+            raise Bail(f"arg byte compare of {n} > {MAX_COPY} in {what}")
+        return [z3.Extract(7, 0, self._load(mem, self._addr_add(ptr, k), 1))
+                for k in range(n)]
+
+    def _val_bytes(self, v, n, what):
+        v = need_data(v, what)
+        return [z3.Extract(8 * k + 7, 8 * k, v) for k in range(n)]
+
+    def _concrete_bytes(self, mem, ptr, n, what):
+        out = []
+        for k in range(n):
+            b = z3.simplify(self._load(mem, self._addr_add(ptr, k), 1))
+            if not z3.is_bv_value(b):
+                raise Bail(f"symbolic byte in {what}")
+            out.append(b.as_long())
+        return out
+
+    def _printk_arg_widths(self, fmt, what):
+        """Byte widths of the args a bpf_printk format consumes."""
+        widths, i = [], 0
+        while i < len(fmt):
+            if fmt[i] != ord("%"):
+                i += 1
+                continue
+            i += 1
+            if i < len(fmt) and fmt[i] == ord("%"):
+                i += 1
+                continue
+            while i < len(fmt) and chr(fmt[i]) in "0123456789.-+ #":
+                i += 1
+            longs = 0
+            while i < len(fmt) and fmt[i] == ord("l"):
+                longs += 1
+                i += 1
+            conv = chr(fmt[i]) if i < len(fmt) else "?"
+            if conv not in "diuxXc":
+                raise Bail(f"printk conversion %{'l' * longs}{conv} in {what}")
+            widths.append(8 if longs else 4)
+            i += 1
+        if len(widths) > 3:
+            raise Bail(f"printk with {len(widths)} args in {what}")
+        return widths
+
+    # ---------- helper dispatch ----------
+
     def _helper_call(self, hid, regs, mem, counters, what):
         """Model one helper call; mutates mem/counters, returns new regs."""
         idx = counters.get(hid, 0)
@@ -376,6 +535,118 @@ class Executor:
                             z3.If(bv64(k + 1) == L, bv64(0), old))
                 self._store(mem, self._addr_add(dst, k), 1, val)
             ret = L
+        elif hid in (H_MAP_UPDATE, H_MAP_PUSH):
+            mname = self._map_name(regs[1], what)
+            ks, vs = self._map_kv(mname, what)
+            if vs is None or (hid == H_MAP_UPDATE and ks is None):
+                raise Bail(f"map {mname} def lacks key/value size in {what}")
+            payload = self._name_bytes(mname)
+            if hid == H_MAP_UPDATE:
+                payload += self._mem_bytes(mem, regs[2], ks, what)
+                payload += self._mem_bytes(mem, regs[3], vs, what)
+                flags = regs[4]
+            else:
+                payload += self._mem_bytes(mem, regs[2], vs, what)
+                flags = regs[3]
+            payload += self._val_bytes(flags, 8, what)
+            self._emit_event(mem, counters, hid, payload)
+            ret = self._errno_oracle(hid, idx)
+        elif hid == H_MAP_DELETE:
+            mname = self._map_name(regs[1], what)
+            ks, _vs = self._map_kv(mname, what)
+            if ks is None:
+                raise Bail(f"map {mname} def lacks key size in {what}")
+            payload = self._name_bytes(mname) + self._mem_bytes(mem, regs[2], ks, what)
+            self._emit_event(mem, counters, hid, payload)
+            ret = self._errno_oracle(hid, idx)
+        elif hid in (H_MAP_POP, H_MAP_PEEK):
+            # State-dependent read (pop also mutates): event keeps the call
+            # order observable; the value produced is a shared per-index
+            # oracle, written only on success, so equal traces see equal data.
+            mname = self._map_name(regs[1], what)
+            _ks, vs = self._map_kv(mname, what)
+            if vs is None:
+                raise Bail(f"map {mname} def lacks value size in {what}")
+            self._emit_event(mem, counters, hid, self._name_bytes(mname))
+            err = self._errno_oracle(hid, idx)
+            f = z3.Function(f"oracle_val_h{hid}", BV64S, BV64S, BV8S)
+            for k in range(vs):
+                old = z3.Extract(7, 0, self._load(mem, self._addr_add(regs[2], k), 1))
+                self._store(mem, self._addr_add(regs[2], k), 1,
+                            z3.If(err == bv64(0), f(bv64(idx), bv64(k)), old))
+            ret = err
+        elif hid == H_PERF_EVENT_OUTPUT:
+            mname = self._map_name(regs[2], what)
+            n = self._concrete_u64(regs[5], what)
+            payload = (self._name_bytes(mname) + self._val_bytes(regs[3], 8, what)
+                       + self._mem_bytes(mem, regs[4], n, what))
+            self._emit_event(mem, counters, hid, payload)
+            ret = self._errno_oracle(hid, idx)
+        elif hid == H_RINGBUF_OUTPUT:
+            mname = self._map_name(regs[1], what)
+            n = self._concrete_u64(regs[3], what)
+            payload = (self._name_bytes(mname) + self._mem_bytes(mem, regs[2], n, what)
+                       + self._val_bytes(regs[4], 8, what))
+            self._emit_event(mem, counters, hid, payload)
+            ret = self._errno_oracle(hid, idx)
+        elif hid == H_GET_STACKID:
+            mname = self._map_name(regs[2], what)
+            payload = self._name_bytes(mname) + self._val_bytes(regs[3], 8, what)
+            self._emit_event(mem, counters, hid, payload)
+            ret = self._errno_oracle(hid, idx)
+        elif hid == H_TRACE_PRINTK:
+            n = self._concrete_u64(size, what) & 0xFFFFFFFF
+            if n > MAX_COPY:
+                raise Bail(f"printk fmt size {n} > {MAX_COPY} in {what}")
+            fmt = self._concrete_bytes(mem, dst, n, what)
+            payload = [n & 0xFF, (n >> 8) & 0xFF] + fmt
+            for j, w in enumerate(self._printk_arg_widths(fmt, what)):
+                payload += self._val_bytes(regs[3 + j], w, what)
+            self._emit_event(mem, counters, hid, payload)
+            ret = self._errno_oracle(hid, idx)
+        elif hid == H_GET_CURRENT_COMM:
+            # Deterministic environment read: contents are a shared oracle
+            # keyed by (buffer size, position) — kernel pads/NULs per size,
+            # so different sizes must not alias. Zero-filled on error.
+            n = self._concrete_u64(size, what) & 0xFFFFFFFF
+            if n > MAX_COPY:
+                raise Bail(f"comm size {n} > {MAX_COPY} in {what}")
+            err = z3.SignExt(32, z3.Function("oracle_comm_err", BV64S, BV32S)(bv64(n)))
+            f = z3.Function("oracle_comm", BV64S, BV64S, BV8S)
+            for k in range(n):
+                self._store(mem, self._addr_add(dst, k), 1,
+                            z3.If(err == bv64(0), f(bv64(n), bv64(k)),
+                                  z3.BitVecVal(0, 8)))
+            ret = err
+        elif hid == H_SKB_LOAD_BYTES:
+            # Packet payload = shared symbolic array; success is a shared
+            # oracle keyed by (offset, len) — the environment answers the
+            # same question the same way in both programs. Zero-fill on error.
+            if not is_ptr(regs[1]) or regs[1].region != "ctx":
+                raise Bail(f"skb_load_bytes on non-ctx skb in {what}")
+            if "skbdata" not in self.shared:
+                raise Bail(f"no skbdata region provided in {what}")
+            off = zext64(lo32(need_data(regs[2], what)))
+            n = self._concrete_u64(regs[4], what) & 0xFFFFFFFF
+            if n > MAX_COPY:
+                raise Bail(f"skb_load_bytes len {n} > {MAX_COPY} in {what}")
+            skb = self.shared["skbdata"]
+            err = z3.SignExt(32, z3.Function("oracle_skb_err", BV64S, BV64S,
+                                             BV32S)(off, bv64(n)))
+            for k in range(n):
+                self._store(mem, self._addr_add(regs[3], k), 1,
+                            z3.If(err == bv64(0), z3.Select(skb, off + bv64(k)),
+                                  z3.BitVecVal(0, 8)))
+            ret = err
+        elif hid == H_GET_RETVAL:
+            # reads the syscall-retval cell; helper returns int, and the
+            # BPF_CALL wrapper's int->u64 conversion sign-extends
+            ret = z3.SignExt(32, z3.Extract(31, 0,
+                                            self._load(mem, Ptr("sysret", bv64(0)), 4)))
+        elif hid == H_SET_RETVAL:
+            self._store(mem, Ptr("sysret", bv64(0)), 4, need_data(regs[1], what))
+            err = z3.Function("oracle_setretval_err", BV32S, BV32S)
+            ret = z3.SignExt(32, err(lo32(need_data(regs[1], what))))
         else:
             raise Bail(f"helper {hid} in {what}")
 
@@ -421,6 +692,14 @@ class Executor:
                     pc += 2
                     continue
 
+                if cls in (4, 7) and (op >> 4) == 13:  # END (byte swap family)
+                    regs = regs[:]
+                    regs[dst] = self._endian_op(op, cls == 7,
+                                                need_data(regs[dst], what),
+                                                ins["imm"], what)
+                    pc += 1
+                    continue
+
                 if cls in (4, 7):  # ALU32 / ALU64
                     is64 = cls == 7
                     srcv = regs[src] if op & 8 else bv64(ins["imm"]) if is64 \
@@ -450,8 +729,14 @@ class Executor:
 
                 if cls in (2, 3):  # ST / STX
                     mode = (op >> 5) & 7
-                    if mode == 6:
-                        raise Bail(f"atomic op in {what}")
+                    if mode == 6:  # atomic (sequential semantics — the model
+                        # is single-threaded, same stance as everywhere else)
+                        if cls != 3:
+                            raise Bail(f"atomic ST in {what}")
+                        mem = dict(mem)
+                        regs = self._atomic(ins, regs, mem, what)
+                        pc += 1
+                        continue
                     if mode != 3:
                         raise Bail(f"store mode {mode} in {what}")
                     size = (8, 4, 2, 1)[[3, 0, 1, 2].index((op >> 3) & 3)]

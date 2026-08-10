@@ -33,7 +33,7 @@ static mut retval_value: u32 = 0;
 #[no_mangle]
 static mut ctx_retval_value: u32 = 0;
 #[no_mangle]
-static mut page_size: i32 = 0;
+static mut page_size: u32 = 0;
 
 #[link_section = "cgroup/getsockopt"]
 #[no_mangle]
@@ -49,7 +49,7 @@ extern "C" fn get_retval(ctx: *mut bpf_sockopt) -> i32 {
 
     sync_fetch_and_add_u32(unsafe { core::ptr::addr_of_mut!(invocations) }, 1);
 
-    if ctx.optlen > unsafe { page_size } {
+    if ctx.optlen as u32 > unsafe { page_size } {
         ctx.optlen = 0;
     }
 
@@ -66,7 +66,7 @@ extern "C" fn set_eisconn(ctx: *mut bpf_sockopt) -> i32 {
     }
 
     let ctx = unsafe { &mut *ctx };
-    if ctx.optlen > unsafe { page_size } {
+    if ctx.optlen as u32 > unsafe { page_size } {
         ctx.optlen = 0;
     }
 
@@ -81,7 +81,7 @@ extern "C" fn clear_retval(ctx: *mut bpf_sockopt) -> i32 {
     let ctx = unsafe { &mut *ctx };
     ctx.retval = 0;
 
-    if ctx.optlen > unsafe { page_size } {
+    if ctx.optlen as u32 > unsafe { page_size } {
         ctx.optlen = 0;
     }
 

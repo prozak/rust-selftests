@@ -103,7 +103,8 @@ def check_program(name, func, elves, shared, timeout_ms):
         # r0 never assigned on any path => BTF-void return (verifier-enforced)
         void[tag] = all(z3.eq(p.ret, ex.init_r0) for p in paths[tag])
 
-    obs_regions = [r for r in shared if r.startswith("g:")] + ["ctx"]
+    obs_regions = [r for r in shared if r.startswith("g:")] + ["ctx", "trace",
+                                                               "sysret"]
     ret_a, ret_b = summarize_ret(paths["A"]), summarize_ret(paths["B"])
     mem_eq = [summarize(paths["A"], shared, r) == summarize(paths["B"], shared, r)
               for r in obs_regions]
@@ -168,6 +169,11 @@ def main():
     shared, warnings = global_regions({"A": elf_c, "B": elf_r})
     shared["ctx"] = z3.Array("ctx", z3.BitVecSort(64), z3.BitVecSort(8))
     shared["kmem"] = z3.Array("kmem", z3.BitVecSort(64), z3.BitVecSort(8))
+    # tier 2: side-effecting helper calls append events here (observable);
+    # skbdata backs skb_load_bytes packet reads (input, not observable)
+    shared["trace"] = z3.Array("trace_init", z3.BitVecSort(64), z3.BitVecSort(8))
+    shared["skbdata"] = z3.Array("skbdata", z3.BitVecSort(64), z3.BitVecSort(8))
+    shared["sysret"] = z3.Array("sysret", z3.BitVecSort(64), z3.BitVecSort(8))
     for w in warnings:
         print(f"  WARN {w}")
 

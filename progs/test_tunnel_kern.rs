@@ -14,11 +14,33 @@ use bpf_rs_core::ctx::{__sk_buff, TC_ACT_OK, TC_ACT_SHOT};
 use bpf_rs_core::helpers::{
     bpf_csum_diff, bpf_l3_csum_replace, bpf_map_lookup_elem, bpf_skb_change_type,
     bpf_skb_get_tunnel_key, bpf_skb_get_tunnel_opt, bpf_skb_get_xfrm_state,
-    bpf_skb_set_tunnel_key, bpf_skb_set_tunnel_opt, bpf_skb_store_bytes,
+    bpf_skb_set_tunnel_key, bpf_skb_set_tunnel_opt, bpf_skb_store_bytes, bpf_trace_printk,
 };
 use bpf_rs_core::maps::{self, BpfMap};
 use bpf_rs_core::vload;
 use btf_macros::btf;
+
+// C: #define log_err(__ret) bpf_printk("ERROR line:%d ret:%d\n", __LINE__, __ret)
+// The first argument at each call site is the C file's __LINE__ of that
+// log_err() invocation, so the trace output matches the C object exactly.
+static LOG_FMT: [u8; 22] = *b"ERROR line:%d ret:%d\n\0";
+
+#[inline(always)]
+fn log_err(line: u64, ret: i64) {
+    bpf_trace_printk(
+        LOG_FMT.as_ptr() as *const c_void,
+        LOG_FMT.len() as u32,
+        line,
+        ret as u64,
+        0,
+    );
+}
+
+// Success-path bpf_printk() format strings from the C original.
+static KEY_REMOTE_IP_FMT: [u8; 23] = *b"key %d remote ip 0x%x\n\0";
+static KEY_REMOTE_IP6_LABEL_FMT: [u8; 33] = *b"key %d remote ip6 ::%x label %x\n\0";
+static REMOTE_IP_FMT: [u8; 16] = *b"remote ip 0x%x\n\0";
+static REMOTE_IP6_FMT: [u8; 19] = *b"remote ip6 %x::%x\n\0";
 
 const XDP_PASS: i32 = 2;
 
@@ -348,6 +370,7 @@ extern "C" fn gre_set_tunnel(skb: *const __sk_buff) -> i32 {
         BPF_F_ZERO_CSUM_TX | BPF_F_SEQ_NUMBER,
     );
     if ret < 0 {
+        log_err(71, ret);
         return TC_ACT_SHOT;
     }
 
@@ -370,6 +393,7 @@ extern "C" fn gre_set_tunnel_no_key(skb: *const __sk_buff) -> i32 {
         BPF_F_ZERO_CSUM_TX | BPF_F_SEQ_NUMBER | BPF_F_NO_TUNNEL_KEY,
     );
     if ret < 0 {
+        log_err(92, ret);
         return TC_ACT_SHOT;
     }
 
@@ -387,9 +411,18 @@ extern "C" fn gre_get_tunnel(skb: *const __sk_buff) -> i32 {
         0,
     );
     if ret < 0 {
+        log_err(107, ret);
         return TC_ACT_SHOT;
     }
 
+    /* C line 111: bpf_printk("key %d remote ip 0x%x\n", ...) */
+    bpf_trace_printk(
+        KEY_REMOTE_IP_FMT.as_ptr() as *const c_void,
+        KEY_REMOTE_IP_FMT.len() as u32,
+        key.tunnel_id as u64,
+        unsafe { key.remote.remote_ipv4 } as u64,
+        0,
+    );
     TC_ACT_OK
 }
 
@@ -412,6 +445,7 @@ extern "C" fn ip6gretap_set_tunnel(skb: *const __sk_buff) -> i32 {
         BPF_F_TUNINFO_IPV6 | BPF_F_ZERO_CSUM_TX | BPF_F_SEQ_NUMBER,
     );
     if ret < 0 {
+        log_err(132, ret);
         return TC_ACT_SHOT;
     }
 
@@ -429,9 +463,18 @@ extern "C" fn ip6gretap_get_tunnel(skb: *const __sk_buff) -> i32 {
         BPF_F_TUNINFO_IPV6,
     );
     if ret < 0 {
+        log_err(148, ret);
         return TC_ACT_SHOT;
     }
 
+    /* C line 152: bpf_printk("key %d remote ip6 ::%x label %x\n", ...) */
+    bpf_trace_printk(
+        KEY_REMOTE_IP6_LABEL_FMT.as_ptr() as *const c_void,
+        KEY_REMOTE_IP6_LABEL_FMT.len() as u32,
+        key.tunnel_id as u64,
+        unsafe { key.remote.remote_ipv6[3] } as u64,
+        key.tunnel_label as u64,
+    );
     TC_ACT_OK
 }
 
@@ -453,6 +496,7 @@ extern "C" fn erspan_set_tunnel(skb: *const __sk_buff) -> i32 {
         BPF_F_ZERO_CSUM_TX,
     );
     if ret < 0 {
+        log_err(174, ret);
         return TC_ACT_SHOT;
     }
 
@@ -466,6 +510,7 @@ extern "C" fn erspan_set_tunnel(skb: *const __sk_buff) -> i32 {
         core::mem::size_of::<ErspanMetadata>() as u32,
     );
     if ret < 0 {
+        log_err(194, ret);
         return TC_ACT_SHOT;
     }
 
@@ -483,6 +528,7 @@ extern "C" fn erspan_get_tunnel(skb: *const __sk_buff) -> i32 {
         0,
     );
     if ret < 0 {
+        log_err(210, ret);
         return TC_ACT_SHOT;
     }
 
@@ -493,6 +539,7 @@ extern "C" fn erspan_get_tunnel(skb: *const __sk_buff) -> i32 {
         core::mem::size_of::<ErspanMetadata>() as u32,
     );
     if ret < 0 {
+        log_err(216, ret);
         return TC_ACT_SHOT;
     }
 
@@ -517,6 +564,7 @@ extern "C" fn ip4ip6erspan_set_tunnel(skb: *const __sk_buff) -> i32 {
         BPF_F_TUNINFO_IPV6,
     );
     if ret < 0 {
+        log_err(253, ret);
         return TC_ACT_SHOT;
     }
 
@@ -530,6 +578,7 @@ extern "C" fn ip4ip6erspan_set_tunnel(skb: *const __sk_buff) -> i32 {
         core::mem::size_of::<ErspanMetadata>() as u32,
     );
     if ret < 0 {
+        log_err(274, ret);
         return TC_ACT_SHOT;
     }
 
@@ -547,6 +596,7 @@ extern "C" fn ip4ip6erspan_get_tunnel(skb: *const __sk_buff) -> i32 {
         BPF_F_TUNINFO_IPV6,
     );
     if ret < 0 {
+        log_err(291, ret);
         return TC_ACT_SHOT;
     }
 
@@ -557,6 +607,7 @@ extern "C" fn ip4ip6erspan_get_tunnel(skb: *const __sk_buff) -> i32 {
         core::mem::size_of::<ErspanMetadata>() as u32,
     );
     if ret < 0 {
+        log_err(297, ret);
         return TC_ACT_SHOT;
     }
 
@@ -569,6 +620,7 @@ extern "C" fn vxlan_set_tunnel_dst(skb: *const __sk_buff) -> i32 {
     let index: u32 = 0;
     let local_ip_ptr = bpf_map_lookup_elem(&local_ip_map, &index) as *const u32;
     if local_ip_ptr.is_null() {
+        log_err(329, 0);
         return TC_ACT_SHOT;
     }
     let local_ip = unsafe { *local_ip_ptr };
@@ -589,6 +641,7 @@ extern "C" fn vxlan_set_tunnel_dst(skb: *const __sk_buff) -> i32 {
         BPF_F_ZERO_CSUM_TX,
     );
     if ret < 0 {
+        log_err(343, ret);
         return TC_ACT_SHOT;
     }
 
@@ -599,6 +652,7 @@ extern "C" fn vxlan_set_tunnel_dst(skb: *const __sk_buff) -> i32 {
         core::mem::size_of::<VxlanMetadata>() as u32,
     );
     if ret < 0 {
+        log_err(350, ret);
         return TC_ACT_SHOT;
     }
 
@@ -611,6 +665,7 @@ extern "C" fn vxlan_set_tunnel_src(skb: *const __sk_buff) -> i32 {
     let index: u32 = 0;
     let local_ip_ptr = bpf_map_lookup_elem(&local_ip_map, &index) as *const u32;
     if local_ip_ptr.is_null() {
+        log_err(368, 0);
         return TC_ACT_SHOT;
     }
     let local_ip = unsafe { *local_ip_ptr };
@@ -631,6 +686,7 @@ extern "C" fn vxlan_set_tunnel_src(skb: *const __sk_buff) -> i32 {
         BPF_F_ZERO_CSUM_TX,
     );
     if ret < 0 {
+        log_err(382, ret);
         return TC_ACT_SHOT;
     }
 
@@ -641,6 +697,7 @@ extern "C" fn vxlan_set_tunnel_src(skb: *const __sk_buff) -> i32 {
         core::mem::size_of::<VxlanMetadata>() as u32,
     );
     if ret < 0 {
+        log_err(389, ret);
         return TC_ACT_SHOT;
     }
 
@@ -658,6 +715,7 @@ extern "C" fn vxlan_get_tunnel_src(skb: *const __sk_buff) -> i32 {
         BPF_F_TUNINFO_FLAGS,
     );
     if ret < 0 {
+        log_err(406, ret);
         return TC_ACT_SHOT;
     }
 
@@ -668,6 +726,7 @@ extern "C" fn vxlan_get_tunnel_src(skb: *const __sk_buff) -> i32 {
         core::mem::size_of::<VxlanMetadata>() as u32,
     );
     if ret < 0 {
+        log_err(412, ret);
         return TC_ACT_SHOT;
     }
 
@@ -678,6 +737,7 @@ extern "C" fn vxlan_get_tunnel_src(skb: *const __sk_buff) -> i32 {
         || (tunnel_flags & TUNNEL_KEY) == 0
         || (tunnel_flags & TUNNEL_CSUM) != 0
     {
+        log_err(423, ret);
         return TC_ACT_SHOT;
     }
 
@@ -692,6 +752,7 @@ extern "C" fn veth_set_outer_dst(skb: *const __sk_buff) -> i32 {
     let assigned_ip: u32 = ASSIGNED_ADDR_VETH1.to_be();
 
     if unsafe { data.add(core::mem::size_of::<EthHdr>()) } > data_end {
+        log_err(442, 0);
         return TC_ACT_SHOT;
     }
     let eth = data as *const EthHdr;
@@ -701,6 +762,7 @@ extern "C" fn veth_set_outer_dst(skb: *const __sk_buff) -> i32 {
 
     let iph_addr = unsafe { data.add(core::mem::size_of::<EthHdr>()) };
     if unsafe { iph_addr.add(core::mem::size_of::<IpHdr>()) } > data_end {
+        log_err(451, 0);
         return TC_ACT_SHOT;
     }
     let iph = iph_addr as *const IpHdr;
@@ -710,6 +772,7 @@ extern "C" fn veth_set_outer_dst(skb: *const __sk_buff) -> i32 {
 
     let udph_addr = unsafe { iph_addr.add(core::mem::size_of::<IpHdr>()) };
     if unsafe { udph_addr.add(core::mem::size_of::<UdpHdr>()) } > data_end {
+        log_err(459, 0);
         return TC_ACT_SHOT;
     }
     let udph = udph_addr as *const UdpHdr;
@@ -734,6 +797,7 @@ extern "C" fn veth_set_outer_dst(skb: *const __sk_buff) -> i32 {
             0,
         ) < 0
         {
+            log_err(470, 0);
             return TC_ACT_SHOT;
         }
         if bpf_l3_csum_replace(
@@ -744,6 +808,7 @@ extern "C" fn veth_set_outer_dst(skb: *const __sk_buff) -> i32 {
             0,
         ) < 0
         {
+            log_err(475, 0);
             return TC_ACT_SHOT;
         }
         bpf_skb_change_type(skb as *const c_void, PACKET_HOST);
@@ -758,6 +823,7 @@ extern "C" fn ip6vxlan_set_tunnel_dst(skb: *const __sk_buff) -> i32 {
     let index: u32 = 0;
     let local_ip_ptr = bpf_map_lookup_elem(&local_ip_map, &index) as *const u32;
     if local_ip_ptr.is_null() {
+        log_err(493, 0);
         return TC_ACT_SHOT;
     }
     let local_ip = unsafe { *local_ip_ptr };
@@ -778,6 +844,7 @@ extern "C" fn ip6vxlan_set_tunnel_dst(skb: *const __sk_buff) -> i32 {
         BPF_F_TUNINFO_IPV6,
     );
     if ret < 0 {
+        log_err(507, ret);
         return TC_ACT_SHOT;
     }
 
@@ -790,6 +857,7 @@ extern "C" fn ip6vxlan_set_tunnel_src(skb: *const __sk_buff) -> i32 {
     let index: u32 = 0;
     let local_ip_ptr = bpf_map_lookup_elem(&local_ip_map, &index) as *const u32;
     if local_ip_ptr.is_null() {
+        log_err(524, 0);
         return TC_ACT_SHOT;
     }
     let local_ip = unsafe { *local_ip_ptr };
@@ -810,6 +878,7 @@ extern "C" fn ip6vxlan_set_tunnel_src(skb: *const __sk_buff) -> i32 {
         BPF_F_TUNINFO_IPV6,
     );
     if ret < 0 {
+        log_err(538, ret);
         return TC_ACT_SHOT;
     }
 
@@ -822,6 +891,7 @@ extern "C" fn ip6vxlan_get_tunnel_src(skb: *const __sk_buff) -> i32 {
     let index: u32 = 0;
     let local_ip_ptr = bpf_map_lookup_elem(&local_ip_map, &index) as *const u32;
     if local_ip_ptr.is_null() {
+        log_err(555, 0);
         return TC_ACT_SHOT;
     }
     let local_ip = unsafe { *local_ip_ptr };
@@ -834,6 +904,7 @@ extern "C" fn ip6vxlan_get_tunnel_src(skb: *const __sk_buff) -> i32 {
         BPF_F_TUNINFO_IPV6 | BPF_F_TUNINFO_FLAGS,
     );
     if ret < 0 {
+        log_err(562, ret);
         return TC_ACT_SHOT;
     }
 
@@ -843,6 +914,7 @@ extern "C" fn ip6vxlan_get_tunnel_src(skb: *const __sk_buff) -> i32 {
         || (tunnel_flags & TUNNEL_KEY) == 0
         || (tunnel_flags & TUNNEL_CSUM) == 0
     {
+        log_err(574, ret);
         return TC_ACT_SHOT;
     }
 
@@ -876,6 +948,7 @@ extern "C" fn geneve_set_tunnel(skb: *const __sk_buff) -> i32 {
         BPF_F_ZERO_CSUM_TX,
     );
     if ret < 0 {
+        log_err(612, ret);
         return TC_ACT_SHOT;
     }
 
@@ -885,6 +958,7 @@ extern "C" fn geneve_set_tunnel(skb: *const __sk_buff) -> i32 {
         core::mem::size_of::<LocalGeneveOpt>() as u32,
     );
     if ret < 0 {
+        log_err(618, ret);
         return TC_ACT_SHOT;
     }
 
@@ -902,6 +976,7 @@ extern "C" fn geneve_get_tunnel(skb: *const __sk_buff) -> i32 {
         0,
     );
     if ret < 0 {
+        log_err(634, ret);
         return TC_ACT_SHOT;
     }
 
@@ -936,6 +1011,7 @@ extern "C" fn ip6geneve_set_tunnel(skb: *const __sk_buff) -> i32 {
         BPF_F_TUNINFO_IPV6,
     );
     if ret < 0 {
+        log_err(664, ret);
         return TC_ACT_SHOT;
     }
 
@@ -954,6 +1030,7 @@ extern "C" fn ip6geneve_set_tunnel(skb: *const __sk_buff) -> i32 {
         core::mem::size_of::<LocalGeneveOpt>() as u32,
     );
     if ret < 0 {
+        log_err(679, ret);
         return TC_ACT_SHOT;
     }
 
@@ -971,6 +1048,7 @@ extern "C" fn ip6geneve_get_tunnel(skb: *const __sk_buff) -> i32 {
         BPF_F_TUNINFO_IPV6,
     );
     if ret < 0 {
+        log_err(696, ret);
         return TC_ACT_SHOT;
     }
 
@@ -996,6 +1074,7 @@ extern "C" fn ipip_set_tunnel(skb: *const __sk_buff) -> i32 {
     let data_end = vload!((*skb).data_end) as usize as *const u8;
 
     if unsafe { data.add(core::mem::size_of::<IpHdr>()) } > data_end {
+        log_err(721, 1);
         return TC_ACT_SHOT;
     }
     let iph = data as *const IpHdr;
@@ -1012,6 +1091,7 @@ extern "C" fn ipip_set_tunnel(skb: *const __sk_buff) -> i32 {
         0,
     );
     if ret < 0 {
+        log_err(732, ret);
         return TC_ACT_SHOT;
     }
 
@@ -1029,9 +1109,18 @@ extern "C" fn ipip_get_tunnel(skb: *const __sk_buff) -> i32 {
         0,
     );
     if ret < 0 {
+        log_err(747, ret);
         return TC_ACT_SHOT;
     }
 
+    /* C line 751: bpf_printk("remote ip 0x%x\n", key.remote_ipv4) */
+    bpf_trace_printk(
+        REMOTE_IP_FMT.as_ptr() as *const c_void,
+        REMOTE_IP_FMT.len() as u32,
+        unsafe { key.remote.remote_ipv4 } as u64,
+        0,
+        0,
+    );
     TC_ACT_OK
 }
 
@@ -1044,6 +1133,7 @@ extern "C" fn ipip_gue_set_tunnel(skb: *const __sk_buff) -> i32 {
     let data_end = vload!((*skb).data_end) as usize as *const u8;
 
     if unsafe { data.add(core::mem::size_of::<IpHdr>()) } > data_end {
+        log_err(766, 1);
         return TC_ACT_SHOT;
     }
     let iph = data as *const IpHdr;
@@ -1060,6 +1150,7 @@ extern "C" fn ipip_gue_set_tunnel(skb: *const __sk_buff) -> i32 {
         0,
     );
     if ret < 0 {
+        log_err(776, ret);
         return TC_ACT_SHOT;
     }
 
@@ -1076,6 +1167,7 @@ extern "C" fn ipip_gue_set_tunnel(skb: *const __sk_buff) -> i32 {
         )
     };
     if ret < 0 {
+        log_err(787, ret as i64);
         return TC_ACT_SHOT;
     }
 
@@ -1091,6 +1183,7 @@ extern "C" fn ipip_fou_set_tunnel(skb: *const __sk_buff) -> i32 {
     let data_end = vload!((*skb).data_end) as usize as *const u8;
 
     if unsafe { data.add(core::mem::size_of::<IpHdr>()) } > data_end {
+        log_err(805, 1);
         return TC_ACT_SHOT;
     }
     let iph = data as *const IpHdr;
@@ -1107,6 +1200,7 @@ extern "C" fn ipip_fou_set_tunnel(skb: *const __sk_buff) -> i32 {
         0,
     );
     if ret < 0 {
+        log_err(815, ret);
         return TC_ACT_SHOT;
     }
 
@@ -1123,6 +1217,7 @@ extern "C" fn ipip_fou_set_tunnel(skb: *const __sk_buff) -> i32 {
         )
     };
     if ret < 0 {
+        log_err(825, ret as i64);
         return TC_ACT_SHOT;
     }
 
@@ -1140,12 +1235,14 @@ extern "C" fn ipip_encap_get_tunnel(skb: *const __sk_buff) -> i32 {
         0,
     );
     if ret < 0 {
+        log_err(841, ret);
         return TC_ACT_SHOT;
     }
 
     let mut encap: BpfFouEncap = unsafe { core::mem::zeroed() };
     let ret = unsafe { bpf_skb_get_fou_encap(skb as *mut __sk_buff, &mut encap as *mut BpfFouEncap) };
     if ret < 0 {
+        log_err(847, ret as i64);
         return TC_ACT_SHOT;
     }
 
@@ -1165,6 +1262,7 @@ extern "C" fn ipip6_set_tunnel(skb: *const __sk_buff) -> i32 {
     let data_end = vload!((*skb).data_end) as usize as *const u8;
 
     if unsafe { data.add(core::mem::size_of::<IpHdr>()) } > data_end {
+        log_err(871, 1);
         return TC_ACT_SHOT;
     }
     let iph = data as *const IpHdr;
@@ -1181,6 +1279,7 @@ extern "C" fn ipip6_set_tunnel(skb: *const __sk_buff) -> i32 {
         BPF_F_TUNINFO_IPV6,
     );
     if ret < 0 {
+        log_err(884, ret);
         return TC_ACT_SHOT;
     }
 
@@ -1198,9 +1297,18 @@ extern "C" fn ipip6_get_tunnel(skb: *const __sk_buff) -> i32 {
         BPF_F_TUNINFO_IPV6,
     );
     if ret < 0 {
+        log_err(900, ret);
         return TC_ACT_SHOT;
     }
 
+    /* C line 904: bpf_printk("remote ip6 %x::%x\n", htonl([0]), htonl([3])) */
+    bpf_trace_printk(
+        REMOTE_IP6_FMT.as_ptr() as *const c_void,
+        REMOTE_IP6_FMT.len() as u32,
+        unsafe { key.remote.remote_ipv6[0] }.to_be() as u64,
+        unsafe { key.remote.remote_ipv6[3] }.to_be() as u64,
+        0,
+    );
     TC_ACT_OK
 }
 
@@ -1213,6 +1321,7 @@ extern "C" fn ip6ip6_set_tunnel(skb: *const __sk_buff) -> i32 {
     let data_end = vload!((*skb).data_end) as usize as *const u8;
 
     if unsafe { data.add(core::mem::size_of::<Ipv6Hdr>()) } > data_end {
+        log_err(920, 1);
         return TC_ACT_SHOT;
     }
     let iph = data as *const Ipv6Hdr;
@@ -1231,6 +1340,7 @@ extern "C" fn ip6ip6_set_tunnel(skb: *const __sk_buff) -> i32 {
         BPF_F_TUNINFO_IPV6,
     );
     if ret < 0 {
+        log_err(932, ret);
         return TC_ACT_SHOT;
     }
 
@@ -1248,9 +1358,18 @@ extern "C" fn ip6ip6_get_tunnel(skb: *const __sk_buff) -> i32 {
         BPF_F_TUNINFO_IPV6,
     );
     if ret < 0 {
+        log_err(948, ret);
         return TC_ACT_SHOT;
     }
 
+    /* C line 952: bpf_printk("remote ip6 %x::%x\n", htonl([0]), htonl([3])) */
+    bpf_trace_printk(
+        REMOTE_IP6_FMT.as_ptr() as *const c_void,
+        REMOTE_IP6_FMT.len() as u32,
+        unsafe { key.remote.remote_ipv6[0] }.to_be() as u64,
+        unsafe { key.remote.remote_ipv6[3] }.to_be() as u64,
+        0,
+    );
     TC_ACT_OK
 }
 

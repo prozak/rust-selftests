@@ -420,17 +420,17 @@ pub extern "C" fn global_subprog_int(i: i32) -> i32 {
 #[no_mangle]
 #[inline(never)]
 pub extern "C" fn global_sleepable_helper_subprog(i: i32) -> i32 {
+    // C copies from user INTO `i` and returns the copied value, not the
+    // original argument.
+    let mut i = i;
     if i != 0 {
-        let mut buf: i32 = i;
         bpf_copy_from_user(
-            &mut buf as *mut i32 as *mut c_void,
+            &mut i as *mut i32 as *mut c_void,
             core::mem::size_of::<i32>() as u32,
             core::ptr::null(),
         );
     }
-    let mut v = i as usize;
-    helpers::barrier_var(&mut v);
-    v as i32
+    i
 }
 
 #[no_mangle]

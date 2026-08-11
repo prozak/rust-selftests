@@ -29,6 +29,11 @@ struct block_device {
 struct verity_info {
     has_roothash: u8,
     sig_valid: u8,
+    // C's `struct verity_info zero = {}` zeroes the whole object including
+    // the 2 alignment-padding bytes before the u32; a Rust struct literal
+    // leaves padding undefined, so the residue would leak into the map
+    // value bytes — make the padding an explicit, zeroed field.
+    _pad: [u8; 2],
     setintegrity_cnt: u32,
 }
 
@@ -58,6 +63,7 @@ extern "C" fn bdev_setintegrity(ctx: *const u64) -> i32 {
     let zero = verity_info {
         has_roothash: 0,
         sig_valid: 0,
+        _pad: [0; 2],
         setintegrity_cnt: 0,
     };
     let mut info = bpf_map_lookup_elem(&verity_devices, &dev) as *mut verity_info;

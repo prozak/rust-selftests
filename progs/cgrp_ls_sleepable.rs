@@ -76,7 +76,9 @@ static mut update_err: isize = 0;
 #[no_mangle]
 static mut target_hid: i32 = 0;
 #[no_mangle]
-static mut is_cgroup1: bool = false;
+// C compares the _Bool byte == 1 (jne 1 in the object); a Rust `if bool`
+// tests != 0 and diverges for out-of-range bytes -- mirror the C compare.
+static mut is_cgroup1: u8 = 0;
 
 #[inline(never)]
 fn store_cgroup_id_via_storage(cgrp: *mut cgroup) {
@@ -160,7 +162,7 @@ extern "C" fn yes_rcu_lock(_ctx: *const u64) -> i32 {
         return 0;
     }
 
-    if unsafe { is_cgroup1 } {
+    if unsafe { is_cgroup1 } == 1 {
         unsafe { bpf_rcu_read_lock() };
         let hid = unsafe { target_hid };
         let cgrp = unsafe { bpf_task_get_cgroup1(task, hid) };

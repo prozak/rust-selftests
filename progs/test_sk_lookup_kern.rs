@@ -154,7 +154,14 @@ extern "C" fn sk_lookup_success(skb: *const __sk_buff) -> i32 {
 
     let mut ipv4 = false;
     let tuple = get_tuple(data, core::mem::size_of::<EthHdr>(), data_end, eth_proto, &mut ipv4);
-    if tuple.is_null() || tuple as usize + core::mem::size_of::<SockTupleIpv6>() > data_end {
+    // C: `tuple + sizeof *tuple > data_end` — POINTER arithmetic, so the
+    // sizeof scales by the element size: the compiled object adds
+    // 36 * 36 = 1296 bytes, not 36 (upstream's quirk, kept faithfully).
+    if tuple.is_null()
+        || tuple as usize
+            + core::mem::size_of::<SockTupleIpv6>() * core::mem::size_of::<SockTupleIpv6>()
+            > data_end
+    {
         return TC_ACT_SHOT;
     }
 
@@ -226,7 +233,9 @@ extern "C" fn err_modify_sk_pointer(skb: *const __sk_buff) -> i32 {
     );
     if !sk.is_null() {
         // Pointer arithmetic on a reference-tracked socket pointer: rejected.
-        let sk = unsafe { (sk as *const u8).add(1) } as *mut c_void;
+        // C: `sk += 1` is POINTER arithmetic — the object advances by
+        // sizeof(struct bpf_sock) = 80 bytes, not 1; mirror it.
+        let sk = unsafe { (sk as *const u8).add(80) } as *mut c_void;
         bpf_sk_release(sk);
     }
     0
@@ -245,7 +254,9 @@ extern "C" fn err_modify_sk_or_null_pointer(skb: *const __sk_buff) -> i32 {
     );
     // Pointer arithmetic on a possibly-null, reference-tracked socket
     // pointer, done *before* the null check: rejected.
-    let sk = unsafe { (sk as *const u8).add(1) } as *mut c_void;
+    // C: `sk += 1` is POINTER arithmetic — the object advances by
+        // sizeof(struct bpf_sock) = 80 bytes, not 1; mirror it.
+        let sk = unsafe { (sk as *const u8).add(80) } as *mut c_void;
     if !sk.is_null() {
         bpf_sk_release(sk);
     }

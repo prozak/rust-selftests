@@ -76,16 +76,18 @@ fn prog_msg_verdict_common(msg: *const sk_msg_md) -> i32 {
     let pid = (bpf_get_current_pid_tgid() >> 32) as u32;
     let sk = unsafe { (*msg).sk } as *const c_void;
 
+    // C: sk_stg is __u64* — the store writes all 8 value bytes (pid
+    // zero-extended), not 4; a u32 store would leave residue in the map.
     let sk_stg = bpf_sk_storage_get(
         &socket_storage,
         sk,
         core::ptr::null(),
         BPF_SK_STORAGE_GET_F_CREATE,
-    ) as *mut u32;
+    ) as *mut u64;
     if sk_stg.is_null() {
         return SK_DROP;
     }
-    unsafe { *sk_stg = pid };
+    unsafe { *sk_stg = pid as u64 };
 
     let mut tpid: u32 = 0;
     let tgid_addr = unsafe { &*task }.tgid().as_ptr();

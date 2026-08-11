@@ -27,8 +27,10 @@ extern "C" fn prog_skb_verdict(skb: *const __sk_buff) -> i32 {
     let one: u32 = 1;
 
     let len = vload!((*skb).len);
+    // C: `skb->len > verdict_max_size` compares __u32 against int — the
+    // usual arithmetic conversions make it an UNSIGNED compare.
     let max_size = unsafe { verdict_max_size };
-    if len as i32 > max_size {
+    if len as u32 > max_size as u32 {
         return SK_PASS;
     }
 

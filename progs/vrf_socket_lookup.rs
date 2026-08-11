@@ -69,9 +69,12 @@ struct SockTupleIpv4 {
 #[no_mangle]
 static mut lookup_status: i32 = 0;
 #[no_mangle]
-static mut test_xdp: bool = false;
+// C's _Bool tests compile to different byte compares per site (jne 0 in
+// the tc program, jne 1 in the xdp program; tcp_skc is jne 1 in both) —
+// store as u8 and mirror each site's compare exactly.
+static mut test_xdp: u8 = 0;
 #[no_mangle]
-static mut tcp_skc: bool = false;
+static mut tcp_skc: u8 = 0;
 
 #[inline(always)]
 fn socket_lookup(ctx: *const c_void, data_end: *const u8, data: *const u8) {
@@ -100,7 +103,7 @@ fn socket_lookup(ctx: *const c_void, data_end: *const u8, data: *const u8) {
 
     let protocol = unsafe { (*iph).protocol };
     let sk = if protocol == IPPROTO_TCP {
-        if unsafe { tcp_skc } {
+        if unsafe { tcp_skc } == 1 {
             bpf_skc_lookup_tcp(ctx, tp, tplen, BPF_F_CURRENT_NETNS, 0)
         } else {
             bpf_sk_lookup_tcp(ctx, tp, tplen, BPF_F_CURRENT_NETNS, 0)
@@ -125,7 +128,7 @@ extern "C" fn tc_socket_lookup(skb: *const __sk_buff) -> i32 {
     let data_end = vload!((*skb).data_end) as usize as *const u8;
     let data = vload!((*skb).data) as usize as *const u8;
 
-    if unsafe { test_xdp } {
+    if unsafe { test_xdp } != 0 {
         return TC_ACT_UNSPEC;
     }
 
@@ -139,7 +142,7 @@ extern "C" fn xdp_socket_lookup(xdp: *const xdp_md) -> i32 {
     let data_end = vload!((*xdp).data_end) as usize as *const u8;
     let data = vload!((*xdp).data) as usize as *const u8;
 
-    if !unsafe { test_xdp } {
+    if unsafe { test_xdp } != 1 {
         return XDP_PASS;
     }
 

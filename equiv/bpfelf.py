@@ -23,15 +23,21 @@ STT_SECTION = 3
 
 
 def normalize_name(name):
-    """Map Rust v0-mangled static names to their source identifier, so the
-    same logical global gets the same region in both objects
-    (_RNvCs..._13modify_return8sequence.0 -> sequence)."""
+    """Map both compilers' decorated static names to the source identifier,
+    so the same logical global gets the same region in both objects:
+    - Rust v0 mangling: _RNvCs..._13modify_return8sequence.0 -> sequence
+    - function-local statics: clang emits <func>.<var>, rustc (demoted)
+      emits <var>.<n> -> both reduce to <var>."""
     base = name.split(".", 1)[0]
-    if not base.startswith("_R"):
+    if base.startswith("_R"):
+        m = re.match(r".*(\d+)([A-Za-z_][A-Za-z0-9_]*)$", base)
+        if m and int(m.group(1)) == len(m.group(2)):
+            return m.group(2)
         return name
-    m = re.match(r".*(\d+)([A-Za-z_][A-Za-z0-9_]*)$", base)
-    if m and int(m.group(1)) == len(m.group(2)):
-        return m.group(2)
+    if "." in name:
+        parts = [p for p in name.split(".") if not p.isdigit()]
+        if parts:
+            return parts[-1]
     return name
 
 

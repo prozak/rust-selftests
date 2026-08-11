@@ -19,6 +19,8 @@ a pointer into a named memory region. Regions:
 Unsupported constructs raise Bail — the driver reports the program as
 out-of-scope rather than guessing.
 """
+import re
+
 import z3
 
 from bpfelf import (SHF_ALLOC, SHF_EXECINSTR, SHT_NOBITS, STT_FUNC,
@@ -30,6 +32,7 @@ MAX_PATHS = 4096
 FEAS_TIMEOUT_MS = 200
 MAX_COPY = 512  # largest concrete probe_read size we'll expand byte-wise
 MAX_ARG = 8192  # largest key/value/data arg we'll byte-compare in an event
+STR_CAP = 64    # symbolic-contents window captured for string kfunc args
 
 # Argument-free helpers whose return value is environment-determined: modeled
 # as a shared oracle stream — the nth call in the C program and the nth call
@@ -47,6 +50,11 @@ PURE_ORACLE_HELPERS = {
     158: 64,  # get_current_task_btf
     160: 64,  # ktime_get_coarse_ns
     208: 64,  # ktime_get_tai_ns
+    # tier 5: attachment-determined constants and frame geometry
+    173: 64,  # get_func_ip
+    174: 64,  # get_attach_cookie
+    185: 64,  # get_func_arg_cnt
+    188: 64,  # xdp_get_buff_len
 }
 PROBE_READ_HELPERS = {4, 112, 113}       # probe_read, _kernel, _user
 PROBE_READ_STR_HELPERS = {45, 114, 115}  # probe_read_str, _kernel_str, _user_str
@@ -84,11 +92,80 @@ H_SPIN_LOCK, H_SPIN_UNLOCK = 93, 94
 H_TAIL_CALL = 12
 MAX_CALL_DEPTH = 8  # verifier limit on bpf2bpf nesting
 
+MAP_IN_MAP_TYPES = {12, 13}  # ARRAY_OF_MAPS, HASH_OF_MAPS
+
+# Tier 5: socket-object helpers. sk_lookup_* return a nullable pointer to a
+# per-call-index socket-state region (tier-3 pattern, question in the trace);
+# sk_fullsock/tcp_sock derive a view from an existing socket pointer.
+H_SK_LOOKUP_TCP, H_SK_LOOKUP_UDP, H_SKC_LOOKUP_TCP = 84, 85, 99
+H_SK_FULLSOCK, H_TCP_SOCK = 95, 96
+H_SK_RELEASE = 86
+
 PTR_FORK_HELPERS = {H_MAP_LOOKUP, H_MAP_LOOKUP_PERCPU, H_SK_STORAGE_GET,
                     H_INODE_STORAGE_GET, H_TASK_STORAGE_GET,
-                    H_CGRP_STORAGE_GET, H_RINGBUF_RESERVE}
+                    H_CGRP_STORAGE_GET, H_RINGBUF_RESERVE,
+                    H_SK_LOOKUP_TCP, H_SK_LOOKUP_UDP, H_SKC_LOOKUP_TCP,
+                    H_SK_FULLSOCK, H_TCP_SOCK}
 PTR_HELPERS = PTR_FORK_HELPERS | {H_GET_LOCAL_STORAGE}
-MAP_IN_MAP_TYPES = {12, 13}  # ARRAY_OF_MAPS, HASH_OF_MAPS
+
+# Tier 5: generically-captured side-effecting helpers — trace event + shared
+# errno oracle, per the tier-2 rationale. Event arg specs:
+#   ("val", i)     register i as an 8-byte value
+#   ("mem", i, j)  bytes pointed to by register i, concrete length in reg j
+#   ("map", i)     map name from register i
+#   ("arg", i)     pointer-or-scalar identity (region tag + offset)
+SIDE_EFFECT_HELPERS = {
+    23:  [("val", 1), ("val", 2)],                 # redirect
+    39:  [("val", 2)],                             # skb_pull_data
+    43:  [("val", 2), ("val", 3)],                 # skb_change_head
+    49:  [("val", 2), ("val", 3), ("mem", 4, 5)],  # setsockopt
+    50:  [("val", 2), ("val", 3), ("val", 4)],     # skb_adjust_room
+    21:  [("mem", 2, 3), ("val", 4)],              # skb_set_tunnel_key
+    51:  [("map", 1), ("val", 2), ("val", 3)],     # redirect_map
+    52:  [("map", 2), ("val", 3), ("val", 4)],     # sk_redirect_map
+    64:  [("mem", 2, 3)],                          # bind
+    73:  [("val", 2), ("mem", 3, 4)],              # lwt_push_encap
+    86:  [("arg", 1)],                             # sk_release
+    124: [("arg", 2), ("val", 3)],                 # sk_assign
+    108: [("map", 1), ("arg", 2)],                 # sk_storage_delete
+    146: [("map", 1), ("arg", 2)],                 # inode_storage_delete
+    157: [("map", 1), ("arg", 2)],                 # task_storage_delete
+    211: [("map", 1), ("arg", 2)],                 # cgrp_storage_delete
+}
+H_GET_STACK = 67
+H_SKB_GET_TUNNEL_KEY = 20
+H_GETSOCKOPT = 57
+H_CHECK_MTU = 163
+H_COPY_FROM_USER = 148
+H_GET_SOCKET_COOKIE = 46
+H_SEQ_PRINTF, H_SEQ_WRITE = 126, 127
+
+# Tier 5: kfunc calls (call insns whose relocation names an undefined
+# symbol — a kernel function in both objects). Dispatch is by name; each
+# class reuses a tier-2/3 pattern. Unknown kfuncs still bail.
+KFUNC_EVENT_ID = 255  # single trace id; the kfunc name is in the payload
+KFUNC_NOOP = {"bpf_rcu_read_lock", "bpf_rcu_read_unlock",
+              "bpf_preempt_disable", "bpf_preempt_enable"}
+KFUNC_RELEASE = {"bpf_task_release", "bpf_cgroup_release",
+                 "bpf_cpumask_release", "bpf_kfunc_call_test_release",
+                 "bpf_key_put"}
+KFUNC_IDENTITY = {"bpf_cast_to_kern_ctx"}
+# acquire-style: nullable pointer to a kernel object; the returned address
+# is a shared per-index oracle scalar, so derefs read the shared kmem and
+# the program's own NULL check is the fork
+KFUNC_ACQUIRE = {"bpf_task_from_pid", "bpf_cgroup_from_id",
+                 "bpf_task_get_cgroup1", "bpf_kfunc_call_test_acquire",
+                 "bpf_cpumask_create", "bpf_cpumask_acquire",
+                 "bpf_task_acquire", "bpf_cgroup_acquire",
+                 "bpf_cgroup_ancestor", "bpf_lookup_user_key",
+                 "bpf_lookup_system_key"}
+# pure functions of their (string) arguments: the trace pins the actual
+# contents, the result is a shared per-index errno-width oracle
+KFUNC_STR = {"bpf_strcmp", "bpf_strcasecmp", "bpf_strncmp",
+             "bpf_strncasecmp", "bpf_strchr", "bpf_strchrnul",
+             "bpf_strnchr", "bpf_strrchr", "bpf_strlen", "bpf_strnlen",
+             "bpf_strspn", "bpf_strcspn", "bpf_strstr", "bpf_strcasestr",
+             "bpf_strnstr", "bpf_strncasestr"}
 
 # Environment refinement: values the kernel can actually produce.
 # pid_tgid packs tgid<<32|pid, both bounded by PID_MAX_LIMIT (< 2^31) —
@@ -216,6 +293,12 @@ class Executor:
             mem[region] = self.shared.setdefault(
                 region, z3.Array("init_" + region.replace(":", "_"),
                                  BV64S, BV8S))
+        elif region.startswith("arenapg:"):
+            # freshly allocated arena pages are zeroed by the kernel; the
+            # zero init is identical for both runs and writes are arena
+            # state, visible to userspace (observable)
+            mem[region] = self.shared.setdefault(
+                region, z3.K(BV64S, z3.BitVecVal(0, 8)))
         else:
             raise Bail(f"load/store in unmodeled region {region}")
         return mem[region]
@@ -262,9 +345,15 @@ class Executor:
             raise Bail(f"store into read-only region {region}")
         if is_ptr(val):
             # pointer spill: kept in a per-region shadow keyed by concrete
-            # offset; the byte array is left alone, so any byte-wise read of
-            # the slot bails instead of seeing garbage
-            if not region.startswith("stack:") or size != 8:
+            # offset. On the (non-observable) stack the byte array is left
+            # alone, so any byte-wise read of the slot bails instead of
+            # seeing garbage. In observable regions (globals, map values,
+            # arena pages — where arena data structures keep their link
+            # pointers) a canonical identity encoding is also written into
+            # the byte array, so storing different abstract pointers stays
+            # distinguishable to the observable comparison.
+            if size != 8 or not region.startswith(
+                    ("stack:", "g:", "mapval:", "arenapg:")):
                 raise Bail(f"spilled pointer store into {region}")
             a = self._concrete_addr(addr, region)
             sh = dict(mem.get(("shadow", region), {}))
@@ -272,6 +361,15 @@ class Executor:
                 del sh[o]
             sh[a] = val
             mem[("shadow", region)] = sh
+            if not region.startswith("stack:"):
+                import zlib
+                cname = self._canon_region(val.region)
+                canon = bv64(zlib.crc32(cname.encode()) << 32) + val.off
+                arr = self._region_array(mem, region)
+                for k in range(8):
+                    arr = z3.Store(arr, addr + bv64(k),
+                                   z3.Extract(8 * k + 7, 8 * k, canon))
+                mem[region] = arr
             return
         sh = mem.get(("shadow", region))
         if sh:
@@ -321,6 +419,11 @@ class Executor:
 
     def _alu(self, code, is64, dst, src_val, soff, what):
         if code == 11:  # MOV
+            if is64 and soff == 1:
+                # addr_space_cast (arena <-> kernel view of the same
+                # address): provenance-preserving identity in this model —
+                # both programs cast the same abstract arena addresses
+                return src_val
             if soff in (8, 16, 32) and not is_ptr(src_val):  # MOVSX
                 s = z3.SignExt(64 - soff, z3.Extract(soff - 1, 0, src_val))
                 return s if is64 else zext64(lo32(s))
@@ -542,6 +645,93 @@ class Executor:
             out.append(b.as_long())
         return out
 
+    def _canon_region(self, region):
+        """Region name with the per-run tag neutralized, so the same logical
+        pointer (own stack, own rodata) encodes identically in both runs."""
+        parts = region.split(":")
+        if len(parts) > 1 and parts[1] == self.tag:
+            parts[1] = "T"
+        return ":".join(parts)
+
+    def _arg_id_bytes(self, v, what):
+        """Identity of a pointer-or-scalar argument for event payloads.
+        Pointers encode as (canonical region name, offset) — shared regions
+        keep their names and per-run regions have the tag neutralized, so
+        identity compares across the two objects; scalars encode as their
+        value."""
+        if is_ptr(v):
+            return ([1] + self._name_bytes(self._canon_region(v.region))
+                    + self._val_bytes(v.off, 8, what))
+        return [0] + self._val_bytes(v, 8, what)
+
+    def _cstr_bytes(self, mem, ptr, what):
+        """String-argument contents for pure string kfuncs: the trace must
+        carry the bytes, not the pointer identity (the same literal usually
+        lives at different rodata offsets in the two objects).
+
+        Concrete contents (rodata, concretely-built stack buffers) are
+        captured exactly up to the NUL. Symbolic contents (globals, map
+        values — regions that are SHARED between the two runs) are captured
+        as a fixed window of symbolic bytes: identical args produce
+        identical terms, different args leave the solver free to
+        distinguish, so the capture stays honest either way."""
+        out = [1]  # mode byte: concrete
+        for k in range(MAX_COPY):
+            b = z3.simplify(z3.Extract(7, 0,
+                                       self._load(mem, self._addr_add(ptr, k), 1)))
+            if not z3.is_bv_value(b):
+                return [2] + self._mem_bytes(mem, ptr, STR_CAP, what)
+            out.append(b.as_long())
+            if out[-1] == 0:
+                return out
+        raise Bail(f"unterminated string arg in {what}")
+
+    def _exception_cb(self, what):
+        """(section name, insn idx) of the entry program's exception
+        callback, from its BTF decl tag 'exception_callback:<fn>'; None if
+        the program is untagged (bpf_throw then returns the cookie)."""
+        self._kfunc_proto("")  # ensure self._btf_full
+        b = self._btf_full
+        if b is None or not getattr(self, "entry_func", None):
+            return None
+        cb_name = None
+        for t in b.types.values():
+            if t.kind == 17 and t.name.startswith("exception_callback:"):
+                tagged = b.types.get(t.type)
+                if tagged is not None and tagged.name == self.entry_func:
+                    cb_name = t.name.split(":", 1)[1]
+                    break
+        if cb_name is None:
+            return None
+        for sym in self.elf.symbols:
+            if sym.name == cb_name and sym.type == STT_FUNC:
+                return self.elf.sections[sym.shndx].name, sym.value // 8
+        raise Bail(f"exception callback {cb_name} not found in {what}")
+
+    def _kfunc_proto(self, name):
+        """Per-parameter is-pointer flags from the object's own BTF FUNC
+        declaration of the kfunc, or None if undeclared."""
+        if not hasattr(self, "_kf_protos"):
+            self._kf_protos = {}
+            sec = self.elf.section_by_name(".BTF")
+            self._btf_full = None
+            if sec is not None:
+                import bpfcore
+                self._btf_full = bpfcore.Btf(sec.data)
+        if name in self._kf_protos:
+            return self._kf_protos[name]
+        flags = None
+        b = self._btf_full
+        if b is not None:
+            for t in b.types.values():
+                if t.kind == 12 and t.name == name:  # FUNC
+                    proto = b.resolve(t.type)
+                    if proto.kind == 13:  # FUNC_PROTO
+                        flags = [b.resolve(p).kind == 2 for p in proto.proto[1]]
+                    break
+        self._kf_protos[name] = flags
+        return flags
+
     def _printk_arg_widths(self, fmt, what):
         """Byte widths of the args a bpf_printk format consumes."""
         widths, i = [], 0
@@ -751,6 +941,133 @@ class Executor:
             self._store(mem, Ptr("sysret", bv64(0)), 4, need_data(regs[1], what))
             err = z3.Function("oracle_setretval_err", BV32S, BV32S)
             ret = z3.SignExt(32, err(lo32(need_data(regs[1], what))))
+        elif hid in SIDE_EFFECT_HELPERS:
+            payload = []
+            for spec in SIDE_EFFECT_HELPERS[hid]:
+                if spec[0] == "val":
+                    payload += self._val_bytes(regs[spec[1]], 8, what)
+                elif spec[0] == "map":
+                    payload += self._name_bytes(self._map_name(regs[spec[1]], what))
+                elif spec[0] == "arg":
+                    payload += self._arg_id_bytes(regs[spec[1]], what)
+                else:  # ("mem", ptr reg, len reg)
+                    n = self._concrete_u64(regs[spec[2]], what) & 0xFFFFFFFF
+                    payload += list(n.to_bytes(4, "little"))
+                    payload += self._mem_bytes(mem, regs[spec[1]], n, what)
+            self._emit_event(mem, counters, hid, payload)
+            ret = self._errno_oracle(hid, idx)
+        elif hid == H_GET_SOCKET_COOKIE:
+            # pure function of the socket identity: oracle keyed by the arg
+            a = regs[1]
+            if is_ptr(a):
+                f = z3.Function(f"oracle_sock_cookie_{a.region}".replace(":", "_"),
+                                BV64S, BV64S)
+                ret = f(a.off)
+            else:
+                f = z3.Function("oracle_sock_cookie", BV64S, BV64S)
+                ret = f(need_data(a, what))
+        elif hid == H_GET_STACK:
+            # env-determined stack dump: event pins (size, flags); return is
+            # a shared per-index length clamped into [-err, n]; buffer bytes
+            # are a shared oracle written only on success
+            n = self._concrete_u64(regs[3], what) & 0xFFFFFFFF
+            if n > MAX_COPY:
+                raise Bail(f"get_stack size {n} > {MAX_COPY} in {what}")
+            self._emit_event(mem, counters, hid,
+                             self._val_bytes(regs[3], 8, what)
+                             + self._val_bytes(regs[4], 8, what))
+            raw = self._errno_oracle(hid, idx)
+            ret = z3.If(z3.And(raw >= bv64(0), z3.UGT(raw, bv64(n))),
+                        bv64(n), raw)
+            f = z3.Function("oracle_stackbuf", BV64S, BV64S, BV8S)
+            for k in range(n):
+                old = z3.Extract(7, 0, self._load(mem, self._addr_add(regs[2], k), 1))
+                self._store(mem, self._addr_add(regs[2], k), 1,
+                            z3.If(ret >= bv64(0), f(bv64(idx), bv64(k)), old))
+        elif hid in (H_SKB_GET_TUNNEL_KEY, H_GETSOCKOPT):
+            # env reads into a caller buffer: event pins the question, bytes
+            # are a shared per-index oracle written on success (on error the
+            # buffer keeps its prior — shared-residue — contents)
+            if hid == H_SKB_GET_TUNNEL_KEY:
+                bufp, n = regs[2], self._concrete_u64(regs[3], what) & 0xFFFFFFFF
+                payload = (self._val_bytes(regs[3], 8, what)
+                           + self._val_bytes(regs[4], 8, what))
+            else:
+                bufp, n = regs[4], self._concrete_u64(regs[5], what) & 0xFFFFFFFF
+                payload = (self._val_bytes(regs[2], 8, what)
+                           + self._val_bytes(regs[3], 8, what)
+                           + self._val_bytes(regs[5], 8, what))
+            if n > MAX_COPY:
+                raise Bail(f"helper {hid} buf size {n} > {MAX_COPY} in {what}")
+            self._emit_event(mem, counters, hid, payload)
+            # Both helpers contractually return 0 or -errno, never positive;
+            # fold the oracle's positive range away so "ret >= 0" (the branch
+            # programs take) coincides with "buffer was written". Without
+            # this, an impossible ret > 0 execution leaves the buffer holding
+            # its prior residue — uninit C stack vs a zero-initialized Rust
+            # local at different frame offsets — a spurious INEQUIV for
+            # programs that print the buffer afterwards (test_tunnel_kern
+            # *_get_tunnel).
+            err = self._errno_oracle(hid, idx)
+            err = z3.If(err > bv64(0), -err, err)
+            f = z3.Function(f"oracle_buf_h{hid}", BV64S, BV64S, BV8S)
+            for k in range(n):
+                old = z3.Extract(7, 0, self._load(mem, self._addr_add(bufp, k), 1))
+                self._store(mem, self._addr_add(bufp, k), 1,
+                            z3.If(err == bv64(0), f(bv64(idx), bv64(k)), old))
+            ret = err
+        elif hid == H_CHECK_MTU:
+            # mtu_len is in/out: current value pinned in the event, result is
+            # a shared per-index 32-bit oracle written on success
+            payload = (self._val_bytes(regs[2], 8, what)
+                       + self._mem_bytes(mem, regs[3], 4, what)
+                       + self._val_bytes(regs[4], 8, what)
+                       + self._val_bytes(regs[5], 8, what))
+            self._emit_event(mem, counters, hid, payload)
+            err = self._errno_oracle(hid, idx)
+            mtu = z3.Function("oracle_mtu", BV64S, BV32S)(bv64(idx))
+            for k in range(4):
+                old = z3.Extract(7, 0, self._load(mem, self._addr_add(regs[3], k), 1))
+                self._store(mem, self._addr_add(regs[3], k), 1,
+                            z3.If(err == bv64(0),
+                                  z3.Extract(8 * k + 7, 8 * k, mtu), old))
+            ret = err
+        elif hid == H_COPY_FROM_USER:
+            # like probe_read_user, but fallible: success is an oracle keyed
+            # by (addr, len) — the environment answers the same question the
+            # same way — and the kernel zero-fills the buffer on failure
+            n = self._concrete_u64(regs[2], what) & 0xFFFFFFFF
+            if n > MAX_COPY:
+                raise Bail(f"copy_from_user size {n} > {MAX_COPY} in {what}")
+            src = need_data(regs[3], what)
+            err = z3.SignExt(32, z3.Function("oracle_cfu_err", BV64S, BV64S,
+                                             BV32S)(src, bv64(n)))
+            for k in range(n):
+                byte = z3.Extract(7, 0, self._load(mem, src + bv64(k), 1))
+                self._store(mem, self._addr_add(regs[1], k), 1,
+                            z3.If(err == bv64(0), byte, z3.BitVecVal(0, 8)))
+            ret = err
+        elif hid == H_SEQ_WRITE:
+            n = self._concrete_u64(regs[3], what) & 0xFFFFFFFF
+            payload = (list(n.to_bytes(4, "little"))
+                       + self._mem_bytes(mem, regs[2], n, what))
+            self._emit_event(mem, counters, hid, payload)
+            ret = self._errno_oracle(hid, idx)
+        elif hid == H_SEQ_PRINTF:
+            # seq output is the bpf_iter observable: format + raw data array
+            # bytes (numeric args only — a %s pointer arg sits in the data
+            # array as a spilled pointer and bails in _mem_bytes)
+            fsz = self._concrete_u64(regs[3], what) & 0xFFFFFFFF
+            if fsz > MAX_COPY:
+                raise Bail(f"seq_printf fmt size {fsz} > {MAX_COPY} in {what}")
+            fmt = self._concrete_bytes(mem, regs[2], fsz, what)
+            n = self._concrete_u64(regs[5], what) & 0xFFFFFFFF
+            payload = [fsz & 0xFF, (fsz >> 8) & 0xFF] + fmt \
+                + list(n.to_bytes(4, "little"))
+            if n:
+                payload += self._mem_bytes(mem, regs[4], n, what)
+            self._emit_event(mem, counters, hid, payload)
+            ret = self._errno_oracle(hid, idx)
         else:
             raise Bail(f"helper {hid} in {what}")
 
@@ -796,6 +1113,19 @@ class Executor:
                 raise Bail(f"ringbuf_reserve size {n} > {MAX_COPY} in {what}")
             payload = (self._name_bytes(mname) + list(n.to_bytes(8, "little"))
                        + self._val_bytes(regs[3], 8, what))
+        elif hid in (H_SK_LOOKUP_TCP, H_SK_LOOKUP_UDP, H_SKC_LOOKUP_TCP):
+            # sk_lookup(ctx, tuple, tuple_size, netns, flags): the tuple
+            # bytes are the question; the found socket's state is a fresh
+            # per-index region with shared contents
+            n = self._concrete_u64(regs[3], what) & 0xFFFFFFFF
+            payload = (list(n.to_bytes(4, "little"))
+                       + self._mem_bytes(mem, regs[2], n, what)
+                       + self._val_bytes(regs[4], 8, what)
+                       + self._val_bytes(regs[5], 8, what))
+        elif hid in (H_SK_FULLSOCK, H_TCP_SOCK):
+            # views derived from an existing socket pointer; the source
+            # socket's identity is the question
+            payload = self._arg_id_bytes(regs[1], what)
         else:  # sk/inode/task/cgrp storage_get(map, obj, value, flags)
             mname = self._map_name(regs[1], what)
             payload = (self._name_bytes(mname) + self._val_bytes(regs[2], 8, what)
@@ -815,15 +1145,179 @@ class Executor:
         elif hid == H_RINGBUF_RESERVE:
             region = f"rbuf:{idx}"
             counters[("rbufsz", region)] = n
+        elif hid in (H_SK_LOOKUP_TCP, H_SK_LOOKUP_UDP, H_SKC_LOOKUP_TCP,
+                     H_TCP_SOCK):
+            region = f"mapval:{hid}:sk:{idx}"
+        elif hid == H_SK_FULLSOCK:
+            region = None  # returns its own argument (full-socket view)
         else:
             region = f"mapval:{hid}:{mname}:{idx}"
-        ptr_regs = self._ret_clobbered(regs, Ptr(region, bv64(0)))
+        ret_ptr = regs[1] if region is None else Ptr(region, bv64(0))
+        ptr_regs = self._ret_clobbered(regs, ret_ptr)
         if hid == H_GET_LOCAL_STORAGE:  # never NULL, no fork
             return [(None, ptr_regs, mem, counters)]
         isnull = z3.Function(f"oracle_null_h{hid}", BV64S, z3.BoolSort())(bv64(idx))
         null_regs = self._ret_clobbered(regs, bv64(0))
         return [(z3.Not(isnull), ptr_regs, mem, counters),
                 (isnull, null_regs, dict(mem), dict(counters))]
+
+    # ---------- tier-5: kfunc calls ----------
+
+    def _kfunc_name(self, ins):
+        """Kernel-function name if this call insn relocates against an
+        undefined symbol (how kfunc calls appear in both objects: clang
+        emits src=2, rustc extern-"C" declarations emit src=1)."""
+        rel = ins["reloc"]
+        if rel is not None and rel.sym.shndx == 0 and rel.sym.name:
+            return rel.sym.name
+        return None
+
+    def _kfunc_call(self, name, regs, mem, counters, conds, what):
+        """Model one kfunc call. Returns continuations like _ptr_helper
+        ([] when the path terminates, i.e. bpf_throw)."""
+        key = ("kf", name)
+        idx = counters.get(key, 0)
+        counters[key] = idx + 1
+
+        def event(payload):
+            self._emit_event(mem, counters, KFUNC_EVENT_ID,
+                             self._name_bytes(name) + payload)
+
+        def err():
+            f = z3.Function(f"oracle_kf_err_{name}", BV64S, BV32S)
+            return z3.SignExt(32, f(bv64(idx)))
+
+        def one(ret):
+            return [(None, self._ret_clobbered(regs, ret), mem, counters)]
+
+        if name in KFUNC_NOOP:
+            event([])
+            return one(err())
+        if name in KFUNC_RELEASE:
+            event(self._arg_id_bytes(regs[1], what))
+            return one(err())
+        if name in KFUNC_IDENTITY:
+            return one(regs[1])
+        if name == "bpf_local_irq_save":
+            # writes the saved flags word; a shared oracle, restore reads it
+            # back through the event so save/restore pairing must match
+            event(self._arg_id_bytes(regs[1], what))
+            self._store(mem, regs[1], 8,
+                        z3.Function("oracle_kf_irqflags", BV64S, BV64S)(bv64(idx)))
+            return one(err())
+        if name == "bpf_local_irq_restore":
+            event(self._arg_id_bytes(regs[1], what)
+                  + self._mem_bytes(mem, regs[1], 8, what))
+            return one(err())
+        if name in KFUNC_STR:
+            flags = self._kfunc_proto(name)
+            if flags is None:
+                raise Bail(f"kfunc {name} lacks a BTF proto in {what}")
+            payload = []
+            for i, isptr in enumerate(flags):
+                if isptr:
+                    cb = self._cstr_bytes(mem, regs[1 + i], what)
+                    payload += list(len(cb).to_bytes(2, "little")) + cb
+                else:
+                    payload += self._val_bytes(regs[1 + i], 8, what)
+            event(payload)
+            return one(err())
+        if name in KFUNC_ACQUIRE:
+            flags = self._kfunc_proto(name)
+            if flags is None:
+                raise Bail(f"kfunc {name} lacks a BTF proto in {what}")
+            payload = []
+            for i, isptr in enumerate(flags):
+                payload += (self._arg_id_bytes(regs[1 + i], what) if isptr
+                            else self._val_bytes(regs[1 + i], 8, what))
+            event(payload)
+            # the object's address is the shared oracle; NULL-or-not is the
+            # program's own check on it, so both sides fork identically
+            addr = z3.Function(f"oracle_kf_obj_{name}", BV64S, BV64S)(bv64(idx))
+            return [(addr != bv64(0), self._ret_clobbered(regs, addr),
+                     mem, counters),
+                    (addr == bv64(0), self._ret_clobbered(regs, bv64(0)),
+                     dict(mem), dict(counters))]
+        if name == "bpf_session_is_return":
+            b = z3.Function("oracle_kf_sess_isret", BV64S,
+                            z3.BitVecSort(1))(bv64(idx))
+            return one(z3.ZeroExt(63, b))
+        if name == "bpf_session_cookie":
+            event([])
+            region = f"mapval:kf:cookie:{idx}"
+            isnull = z3.Function("oracle_kf_null_cookie", BV64S,
+                                 z3.BoolSort())(bv64(idx))
+            return [(z3.Not(isnull),
+                     self._ret_clobbered(regs, Ptr(region, bv64(0))),
+                     mem, counters),
+                    (isnull, self._ret_clobbered(regs, bv64(0)),
+                     dict(mem), dict(counters))]
+        if name.startswith("bpf_cpumask_"):
+            # cpumask operations on kfunc-acquired objects: every op (set,
+            # clear, test, and, or, first, empty, ...) is an event pinning
+            # (op, object identities, scalar args) with an oracle result —
+            # equal traces imply equal object state at the nth op, so the
+            # shared per-index result is justified exactly as in tier 2
+            flags = self._kfunc_proto(name)
+            if flags is None:
+                raise Bail(f"kfunc {name} lacks a BTF proto in {what}")
+            payload = []
+            for i, isptr in enumerate(flags):
+                payload += (self._arg_id_bytes(regs[1 + i], what) if isptr
+                            else self._val_bytes(regs[1 + i], 8, what))
+            event(payload)
+            return one(err())
+
+        m = re.fullmatch(r"bpf_iter_(\w+)_(new|next|destroy)", name)
+        if m:
+            kind, op = m.groups()
+            if op == "next":
+                # loop driver: shared per-index NULL oracle; the non-null
+                # side points at a shared per-index element (the environment
+                # hands both programs the same iteration sequence)
+                event(self._arg_id_bytes(regs[1], what))
+                region = f"mapval:kf:iter_{kind}:{idx}"
+                isnull = z3.Function(f"oracle_kf_null_iter_{kind}", BV64S,
+                                     z3.BoolSort())(bv64(idx))
+                return [(z3.Not(isnull),
+                         self._ret_clobbered(regs, Ptr(region, bv64(0))),
+                         mem, counters),
+                        (isnull, self._ret_clobbered(regs, bv64(0)),
+                         dict(mem), dict(counters))]
+            # new/destroy: args pinned in the trace (ptrs by identity,
+            # scalars by value, per the object's own BTF proto)
+            flags = self._kfunc_proto(name)
+            if flags is None:
+                raise Bail(f"kfunc {name} lacks a BTF proto in {what}")
+            payload = []
+            for i, isptr in enumerate(flags):
+                payload += (self._arg_id_bytes(regs[1 + i], what) if isptr
+                            else self._val_bytes(regs[1 + i], 8, what))
+            event(payload)
+            return one(err())
+        # bpf_throw is handled in the run loop (it unwinds the call stack
+        # and transfers to the program's exception callback, if tagged)
+        if name == "bpf_arena_alloc_pages":
+            # (map, addr_hint, page_cnt, numa, flags) -> zeroed pages or NULL
+            event(self._name_bytes(self._map_name(regs[1], what))
+                  + self._arg_id_bytes(regs[2], what)
+                  + self._val_bytes(regs[3], 8, what)
+                  + self._val_bytes(regs[4], 8, what)
+                  + self._val_bytes(regs[5], 8, what))
+            region = f"arenapg:{idx}"
+            isnull = z3.Function("oracle_kf_null_arena", BV64S,
+                                 z3.BoolSort())(bv64(idx))
+            return [(z3.Not(isnull),
+                     self._ret_clobbered(regs, Ptr(region, bv64(0))),
+                     mem, counters),
+                    (isnull, self._ret_clobbered(regs, bv64(0)),
+                     dict(mem), dict(counters))]
+        if name == "bpf_arena_free_pages":
+            event(self._name_bytes(self._map_name(regs[1], what))
+                  + self._arg_id_bytes(regs[2], what)
+                  + self._val_bytes(regs[3], 8, what))
+            return one(err())
+        raise Bail(f"kfunc {name} in {what}")
 
     # ---------- main loop ----------
 
@@ -852,6 +1346,8 @@ class Executor:
                 sym.value // 8 + ins["imm"] + 1)
 
     def run(self, entry_pc=0):
+        entry_sym = self.elf.named_symbol_at(self.sec.idx, entry_pc * 8)
+        self.entry_func = entry_sym.name if entry_sym else None
         regs = [None] * 11
         for i in range(10):
             regs[i] = z3.BitVec(f"uninit_{self.tag}_r{i}", 64)
@@ -952,6 +1448,49 @@ class Executor:
                 if cls in (5, 6):  # JMP / JMP32
                     code = op >> 4
                     if code == 8:
+                        kname = self._kfunc_name(ins) if src in (1, 2) else None
+                        if kname == "bpf_throw":
+                            # unwinds every frame; the exception callback's
+                            # return (or the cookie itself, if untagged)
+                            # becomes the program's return
+                            # no trace event: the throw is modeled exactly
+                            # (cookie + callback), so there is no oracle to
+                            # pin — and a translation that reaches the same
+                            # observable state without throwing (the decl-tag
+                            # gap, see exceptions_ext.rs) is equivalent
+                            mem = dict(mem)
+                            counters = dict(counters)
+                            cookie = need_data(regs[1], what)
+                            cb = self._exception_cb(what)
+                            if cb is None:
+                                self.paths.append(Path(conds, cookie, mem))
+                                break
+                            tsec, tidx = cb
+                            insns = self._insns(tsec, what)
+                            stack = ()
+                            fid = counters.get("frame", 0) + 1
+                            counters["frame"] = fid
+                            regs = self._ret_clobbered(regs, bv64(0))
+                            regs[1] = cookie
+                            regs[10] = Ptr(f"stack:{self.tag}:f{fid}",
+                                           bv64(STACK_SIZE))
+                            cursec, pc = tsec, tidx
+                            continue
+                        if kname is not None:
+                            mem = dict(mem)
+                            counters = dict(counters)
+                            conts = self._kfunc_call(kname, regs, mem,
+                                                     counters, conds, what)
+                            if not conts:
+                                break  # path terminated (bpf_throw)
+                            for cond, r2, m2, k2 in conts[1:]:
+                                work.append((cursec, pc + 1, r2, m2,
+                                             conds + [cond], k2, stack))
+                            cond, regs, mem, counters = conts[0]
+                            if cond is not None:
+                                conds = conds + [cond]
+                            pc += 1
+                            continue
                         if src == 1:  # bpf2bpf call: execute inline
                             if len(stack) >= MAX_CALL_DEPTH:
                                 raise Bail(f"call depth > {MAX_CALL_DEPTH} in {what}")
@@ -967,7 +1506,7 @@ class Executor:
                             cursec, pc, insns = tsec, tidx, tinsns
                             continue
                         if src == 2:
-                            raise Bail(f"kfunc call in {what}")
+                            raise Bail(f"kfunc call without symbol in {what}")
                         mem = dict(mem)
                         if ins["imm"] == H_TAIL_CALL:
                             # success consumes execution: the path ends with
@@ -1018,8 +1557,13 @@ class Executor:
                     if code == 0:  # JA (gotol when JMP32)
                         pc += 1 + (ins["imm"] if cls == 6 else ins["off"])
                         continue
-                    if code == 14:
-                        raise Bail(f"JCOND/may_goto in {what}")
+                    if code == 14:  # JCOND (may_goto)
+                        # the escape branch only fires after ~8M iterations —
+                        # far beyond any path this executor can enumerate —
+                        # so it is modeled as never taken (deliberate
+                        # assumption, documented in the README)
+                        pc += 1
+                        continue
                     srcv = regs[src] if op & 8 else \
                         (bv64(ins["imm"]) if cls == 5
                          else zext64(z3.BitVecVal(ins["imm"] & 0xFFFFFFFF, 32)))

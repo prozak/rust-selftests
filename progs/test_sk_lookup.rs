@@ -17,8 +17,34 @@ use core::ffi::c_void;
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::{
     bpf_map_lookup_elem, bpf_map_update_elem, bpf_sk_assign, bpf_sk_release,
-    bpf_sk_select_reuseport,
+    bpf_sk_select_reuseport, bpf_trace_printk,
 };
+
+// C's bpf_printk sites on sk_assign error paths (kept faithfully).
+static ASSIGN_FMT2: [u8; 36] = *b"sk_assign returned %d, expected %d\n\0";
+static ASSIGN_FMT1: [u8; 35] = *b"sk_assign returned %d, expected 0\n\0";
+
+#[inline(always)]
+fn log_assign2(err: i32, expected: i32) {
+    bpf_trace_printk(
+        ASSIGN_FMT2.as_ptr() as *const c_void,
+        ASSIGN_FMT2.len() as u32,
+        err as i64 as u64,
+        expected as i64 as u64,
+        0,
+    );
+}
+
+#[inline(always)]
+fn log_assign1(err: i32) {
+    bpf_trace_printk(
+        ASSIGN_FMT1.as_ptr() as *const c_void,
+        ASSIGN_FMT1.len() as u32,
+        err as i64 as u64,
+        0,
+        0,
+    );
+}
 use bpf_rs_core::maps::{self, BpfMap};
 use bpf_rs_core::vload;
 
@@ -347,6 +373,7 @@ extern "C" fn sk_assign_eexist(ctx: *const bpf_sk_lookup) -> i32 {
     }
     let err = bpf_sk_assign(ctx as *const c_void, sk_a, 0) as i32;
     if err != -EEXIST {
+        log_assign2(err, -EEXIST);
         bpf_sk_release(sk_a);
         return SK_DROP;
     }
@@ -376,6 +403,7 @@ extern "C" fn sk_assign_replace_flag(ctx: *const bpf_sk_lookup) -> i32 {
     }
     let err = bpf_sk_assign(ctx as *const c_void, sk_b, BPF_SK_LOOKUP_F_REPLACE);
     if err != 0 {
+        log_assign1(err as i32);
         bpf_sk_release(sk_b);
         return SK_DROP;
     }
@@ -390,6 +418,7 @@ extern "C" fn sk_assign_replace_flag(ctx: *const bpf_sk_lookup) -> i32 {
 extern "C" fn sk_assign_null(ctx: *const bpf_sk_lookup) -> i32 {
     let err = bpf_sk_assign(ctx as *const c_void, core::ptr::null_mut::<c_void>(), 0) as i32;
     if err != 0 {
+        log_assign1(err);
         return SK_DROP;
     }
 
@@ -399,6 +428,7 @@ extern "C" fn sk_assign_null(ctx: *const bpf_sk_lookup) -> i32 {
     }
     let err = bpf_sk_assign(ctx as *const c_void, sk, BPF_SK_LOOKUP_F_REPLACE) as i32;
     if err != 0 {
+        log_assign1(err);
         bpf_sk_release(sk);
         return SK_DROP;
     }
@@ -784,6 +814,7 @@ extern "C" fn sk_assign_esocknosupport(ctx: *const bpf_sk_lookup) -> i32 {
 
     let err = bpf_sk_assign(ctx as *const c_void, sk, 0) as i32;
     if err != -ESOCKTNOSUPPORT {
+        log_assign2(err, -ESOCKTNOSUPPORT);
         bpf_sk_release(sk);
         return SK_DROP;
     }

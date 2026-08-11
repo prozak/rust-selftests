@@ -118,7 +118,8 @@ extern "C" fn xdp_redirect_map_multi_prog(ctx: *const xdp_md) -> i32 {
         } else {
             0
         };
-        return bpf_redirect_map(&map_all, if_index as u64, flags) as i32;
+        // C: `int if_index` sign-extends into the helper's u64 key param.
+        return bpf_redirect_map(&map_all, if_index as i32 as i64 as u64, flags) as i32;
     }
     // Default flags for others BPF_F_BROADCAST : 0
     flags = if !flags_from_map.is_null() {

@@ -11,7 +11,10 @@ use bpf_rs_core::helpers::{
 };
 use btf_macros::btf;
 
-const MAGIC_VALUE: i64 = 0xabcd1234;
+// C's 0xabcd1234 literal doesn't fit in int, so it types as UNSIGNED int and
+// `MAGIC_VALUE + cnt` wraps at 32 bits before zero-extending into the long
+// store/compare; mirror that exactly (same class as task_local_storage).
+const MAGIC_VALUE: u32 = 0xabcd1234;
 const BPF_LOCAL_STORAGE_GET_F_CREATE: u64 = 1;
 
 bpf_map! {
@@ -43,7 +46,9 @@ static mut exit_cnt: i32 = 0;
 #[no_mangle]
 static mut target_hid: i32 = 0;
 #[no_mangle]
-static mut is_cgroup1: bool = false;
+// C compares the _Bool byte == 1 (jne 1 in the object); a Rust `if bool`
+// tests != 0 and diverges for out-of-range bytes -- mirror the C compare.
+static mut is_cgroup1: u8 = 0;
 
 #[btf]
 struct cgroup {}
@@ -100,7 +105,7 @@ fn on_enter_inner(cgrp: *mut cgroup) {
         return;
     }
     sync_fetch_and_add_i32(core::ptr::addr_of_mut!(enter_cnt), 1);
-    unsafe { *(ptr as *mut i64) = MAGIC_VALUE + enter_cnt as i64 };
+    unsafe { *(ptr as *mut i64) = MAGIC_VALUE.wrapping_add(enter_cnt as u32) as i64 };
 }
 
 #[inline(never)]
@@ -116,7 +121,9 @@ fn on_exit_inner(cgrp: *mut cgroup) {
     }
 
     sync_fetch_and_add_i32(core::ptr::addr_of_mut!(exit_cnt), 1);
-    if unsafe { *(ptr as *mut i64) } != MAGIC_VALUE + unsafe { exit_cnt } as i64 {
+    if unsafe { *(ptr as *mut i64) }
+        != MAGIC_VALUE.wrapping_add(unsafe { exit_cnt } as u32) as i64
+    {
         sync_fetch_and_add_i32(core::ptr::addr_of_mut!(mismatch_cnt), 1);
     }
 }
@@ -130,7 +137,7 @@ extern "C" fn on_enter(_ctx: *const u64) -> i32 {
         return 0;
     }
 
-    if unsafe { is_cgroup1 } {
+    if unsafe { is_cgroup1 } == 1 {
         let cgrp = unsafe { bpf_task_get_cgroup1(task, target_hid) };
         if cgrp.is_null() {
             return 0;
@@ -156,7 +163,7 @@ extern "C" fn on_exit(_ctx: *const u64) -> i32 {
         return 0;
     }
 
-    if unsafe { is_cgroup1 } {
+    if unsafe { is_cgroup1 } == 1 {
         let cgrp = unsafe { bpf_task_get_cgroup1(task, target_hid) };
         if cgrp.is_null() {
             return 0;

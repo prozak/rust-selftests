@@ -156,6 +156,57 @@ Tier 4 — bpf2bpf calls and tail calls:
   mutates state identically for both programs, so leaving it unmodeled is
   consistent); the failure side continues with an errno oracle.
 
+Tier 5 — kfuncs, arena, may_goto, and the helper tail:
+
+- kfunc calls (call insns whose relocation names an undefined symbol, in
+  both objects) dispatch by name onto the tier-2/3 patterns:
+  rcu_read_lock/unlock and preempt toggles are no-ops with a trace event;
+  release-style kfuncs (task/cgroup/cpumask release, key_put) are events
+  pinning the object identity; acquire-style kfuncs (task_from_pid,
+  cgroup_from_id, cpumask_create, lookup_user_key, ...) return a shared
+  per-index oracle *address* — derefs read the shared kmem and the
+  program's own NULL check is the fork; bpf_cast_to_kern_ctx is identity.
+  Every cpumask operation is an event + shared per-index oracle result
+  (equal traces imply equal object state at the nth op). Iterators
+  (bpf_iter_<kind>_new/next/destroy, generically) put their args in the
+  trace and fork each next() on a shared NULL oracle whose non-null side
+  is a shared per-index element region. Unknown kfuncs still bail.
+- Pure string kfuncs (bpf_strcmp/strstr/strlen family) are functions of
+  their contents: the event captures the actual bytes (exactly up to NUL
+  when concrete; a fixed symbolic window for shared-region contents), and
+  the result is a shared per-index oracle.
+- bpf_throw is modeled exactly, not through an oracle: it unwinds the
+  frame stack and transfers to the program's `exception_callback:` BTF
+  decl-tagged callback with the cookie as argument (or returns the cookie
+  when untagged), so a translation that reaches the same state without
+  throwing (rustc cannot emit decl tags) proves equivalent.
+- Arena: `addr_space_cast` is a provenance-preserving identity; arena
+  globals in `.addr_space.1` are ordinary named observables;
+  bpf_arena_alloc_pages forks NULL/pointer into a per-index zero-
+  initialized observable region (kernel pages are zeroed), free is an
+  event. Pointer values stored into observable regions (arena/global data
+  structures) keep a spill-shadow entry AND write a canonical
+  (region, offset) identity encoding into the byte array, so storing
+  different abstract pointers stays distinguishable.
+- may_goto (JCOND) is modeled as never taken: its escape branch fires
+  after ~8M iterations, far beyond any enumerable path (deliberate,
+  documented assumption).
+- Helper-tail coverage, all on tier-2 rationale: a data-driven
+  side-effect table (redirect family, skb_adjust_room/change_head/
+  pull_data, set_tunnel_key, setsockopt, bind, lwt_push_encap, sk_assign,
+  sk_release, the four *_storage_delete helpers) emits events with
+  value/memory/map/pointer-identity args and an errno oracle;
+  buffer-writing env reads (get_stack, skb_get_tunnel_key, getsockopt,
+  check_mtu) write shared per-index oracle bytes on success;
+  copy_from_user reads shared user memory with an (addr, len)-keyed
+  success oracle and kernel-faithful zero-fill on failure; seq_printf/
+  seq_write events carry the format and raw data bytes (the bpf_iter
+  observable); sk_lookup_tcp/udp fork into per-index socket-state
+  regions; sk_fullsock returns its argument or NULL; tcp_sock derives a
+  per-index view region; get_socket_cookie is an oracle keyed by the
+  socket identity; get_func_ip/arg_cnt, get_attach_cookie and
+  xdp_get_buff_len are per-index oracle streams.
+
 Rust v0-mangled static names are normalized to their source identifier so the
 same logical global maps to the same region in both objects. The C object's
 BTF is ground truth for return contracts: void functions skip the return
@@ -256,22 +307,46 @@ same environment value in both programs.
   very large single programs (bpf_flow _dissect, cls_redirect
   balancer_ingress, cgroup_hierarchical_stats flusher).
 
-Results tables: `results/`. Remaining bail classes after CO-RE: kfunc
-calls (undefined-symbol calls) ×422 program-sites — now the largest;
-unmodeled helper tail ×395 (long flat tail: seq_printf/seq_write,
-timers, get_stack, ringbuf reserve variants, ...); stores through
-kernel-pointer windows ×41; callback-function ld_imm64 (.text) ×31;
-TYPE_ID_LOCAL poison ×17 (incomparable by construction);
-pointer-spill/symbolic-size/ptr-compare tail.
+- tier 5 (2026-08-11; kfuncs + arena + may_goto + helper tail):
+  **1020 EQUIV / 0 INEQUIV / 8 WAIVED / 6 UNKNOWN** (254 objects fully
+  proved; object verdicts 254 EQUIV / 260 BAIL / 21 TIMEOUT /
+  11 NOPROGS / 4 UNKNOWN). Negative controls: a mutated string-kfunc
+  rodata literal and a mutated seq_write length both flag INEQUIV
+  through the trace. **True findings #7–#15, all fixed and
+  QEMU-gated**: the `0xabcd1234` unsigned-int wrap again in
+  cgrp_ls_tp_btf; the `_Bool`-byte compare class (clang emits `!= 0` at
+  some sites and `== 1` at others — even within one file) in three
+  cgrp_ls files and vrf_socket_lookup; a struct-padding residue leak
+  into a map value in lsm_bdev; C pointer-arithmetic scaling kept
+  unfaithfully in test_sk_lookup_kern (`tuple + sizeof *tuple` = +1296
+  bytes; `sk += 1` = +80); a 4-byte store through a `__u64*` value in
+  test_skmsg_load_helpers; an unsigned-promotion compare in
+  test_sockmap_strp; copy_from_user result discarded in
+  test_spin_lock_fail; int sign-extension into a u64 helper arg in
+  xdp_redirect_multi_kern; and 62 dropped bpf_printk error/success-log
+  sites restored across test_tunnel_kern and test_sk_lookup. Model
+  fixes surfaced by the same triage: per-run region tags neutralized in
+  pointer-identity captures, clang/rustc function-local static names
+  canonicalized to one region, and the buffer-helper errno oracle
+  clamped to the kernel's 0-or-negative contract. The TIMEOUT class
+  (21) now also includes fork-heavy iterator/cpumask objects.
+
+Results tables: `results/`. Remaining bail classes after tier 5:
+unmodeled helper tail ×192 program-sites and kfunc tail ×181 (dynptr
+family, timers/wq, fou encap, testmod/struct_ops kfuncs, ...); stores
+through kernel-pointer windows ×60; callback-function ld_imm64 ×70;
+oversized copies (get_stack 2048, probe_read 2880 > MAX_COPY) ×12;
+pointer-compare/symbolic-size/spill tail.
 
 ## Roadmap
 
-1. **Tier 5 candidates**: kfunc oracle models (biggest pool now, 422
-   sites), helper-tail modeling (seq_printf family, timers, get_stack),
-   ctx pointer-field windows (optval/pkt data as regions with shared
-   symbolic bases), callback helpers with concrete trip counts
-   (bpf_loop), symbolic-size copies.
-2. **Path-merging at join points** for the pyperf/strobemeta/loop3
-   TIMEOUT class (14 objects).
-3. **Regression guard**: bytecode-hash fast path; re-prove after
+1. **Rust collections follow-up** (user-requested): arena-backed
+   GlobalAlloc + real `alloc` collections in a separate test folder —
+   new Rust-native programs, outside the equivalence corpus.
+2. **Tier 6 candidates**: dynptr family, timers/wq (needs callback
+   identity), remaining kfunc tail, ctx pointer-field windows
+   (optval/pkt data), larger bounded copies.
+3. **Path-merging at join points** for the pyperf/strobemeta/iterator
+   TIMEOUT class (21 objects).
+4. **Regression guard**: bytecode-hash fast path; re-prove after
    quality-layer edits, alarm on equivalence break.

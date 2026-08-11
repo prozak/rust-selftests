@@ -112,9 +112,24 @@ Helper calls (tier 3) — nullable pointer returns:
 - Pointer spills to the stack live in a per-region shadow keyed by concrete
   offset: 8-byte reloads return the pointer, partial/overlapping reads bail
   rather than see garbage, and data overwrites invalidate the slot.
-- Still bailing → tier 4: subprog calls, packet/ctx-pointer stores
-  (skb data/optval windows), pointer compares across regions (needs shared
-  symbolic region bases), kptr_xchg, tail_call.
+
+Tier 4 — bpf2bpf calls and tail calls:
+
+- Subprog calls are executed inline: the callee's section is decoded on
+  demand (CO-RE-carrying callee sections bail), a per-path return stack
+  tracks (section, pc, caller r10), and each call instance gets a fresh
+  stack frame region. Callee r6-r9 save/restore happens naturally by
+  executing the callee's own code; r1-r5 flow through as real values.
+  Call targets resolve uniformly as `sym.value/8 + imm + 1` for
+  FUNC/SECTION relocs and `pc + 1 + imm` for same-section calls (verified
+  against both compilers' encodings). Depth capped at the verifier's 8.
+  ld_imm64 of a function (callback helpers: bpf_loop, for_each_map_elem,
+  timer callbacks) still bails.
+- tail_call emits a trace event (prog-array map + index), then forks on a
+  shared per-call-index success oracle: the success side ends the path with
+  the target program's return modeled as a shared oracle (the target also
+  mutates state identically for both programs, so leaving it unmodeled is
+  consistent); the failure side continues with an errno oracle.
 
 Rust v0-mangled static names are normalized to their source identifier so the
 same logical global maps to the same region in both objects. The C object's
@@ -169,17 +184,34 @@ same environment value in both programs.
   a 5-minute budget. strobemeta_nounroll1 bails on a symbolic-size
   probe_read (bounded symbolic copies are future work).
 
-Results tables: `results/`.
+- tier 4 (2026-08-10; bpf2bpf inlining + tail_call): **541 EQUIV /
+  0 INEQUIV / 4 WAIVED / 5 UNKNOWN** (157 objects fully proved; object
+  verdicts 157 EQUIV / 207 BAIL / 164 CORESKIP / 11 NOPROGS / 10 TIMEOUT /
+  1 UNKNOWN). Control: a mutated load offset inside a .text subprog
+  propagates through the inlined chain to an INEQUIV with a concrete
+  counterexample (a first control attempt hit genuinely dead code, which
+  the prover rightly called EQUIV). New waivers, both kernel-impossible
+  inputs: test_global_func16 (C returns uninit stack residue by design;
+  Rust zero-inits) and test_tc_dtime/ingress_host (Rust masks
+  skb->protocol to 16 bits; C compares the full 32-bit ctx word the kernel
+  always zero-extends). The TIMEOUT class grew to the whole pyperf family
+  (subprog variants now execute instead of bailing, and blow up the same
+  way).
+
+Results tables: `results/`. Remaining bail classes: packet/ctx-pointer
+window stores ×29, callback helpers (ld_imm64 of a function: bpf_loop,
+for_each_map_elem, timers) ×27, kfunc calls (undefined-symbol calls in
+Rust objects / src=2 in C) , get_stack/timer/cookie/mtu helper tail,
+pointer-compare-across-regions.
 
 ## Roadmap
 
-1. **Tier 4**: subprog inlining (346 bail sites), packet/ctx-pointer
-   window stores (skb->data/optval; needs pointer-field regions), pointer
-   compares across regions / pointer-as-data (needs shared symbolic region
-   bases), kfunc calls, tail_call, symbolic-size copies.
-2. **CO-RE application**: apply `.BTF.ext` relocations against the pinned
+1. **CO-RE application**: apply `.BTF.ext` relocations against the pinned
    vmlinux BTF (like libbpf) before lifting, unlocking the CORESKIP class
-   (504 programs).
+   (504 programs) — now the largest pool by far.
+2. **Tier 5 candidates**: ctx pointer-field windows (optval/pkt data as
+   regions with shared symbolic bases), kfunc oracle models, callback
+   helpers with concrete trip counts (bpf_loop), symbolic-size copies.
 3. **Path-merging at join points** for the pyperf/strobemeta TIMEOUT class.
 4. **Regression guard**: bytecode-hash fast path; re-prove after
    quality-layer edits, alarm on equivalence break.

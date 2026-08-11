@@ -21,8 +21,8 @@ out-of-scope rather than guessing.
 """
 import z3
 
-from bpfelf import (SHF_ALLOC, SHF_EXECINSTR, SHT_NOBITS, STT_SECTION,
-                    normalize_name)
+from bpfelf import (SHF_ALLOC, SHF_EXECINSTR, SHT_NOBITS, STT_FUNC,
+                    STT_SECTION, normalize_name)
 
 STACK_SIZE = 512
 MAX_INSNS_PER_PATH = 50_000
@@ -81,6 +81,8 @@ H_GET_LOCAL_STORAGE = 81                     # verifier-typed non-null
 H_RINGBUF_RESERVE, H_RINGBUF_SUBMIT, H_RINGBUF_DISCARD = 131, 132, 133
 H_RINGBUF_QUERY = 134
 H_SPIN_LOCK, H_SPIN_UNLOCK = 93, 94
+H_TAIL_CALL = 12
+MAX_CALL_DEPTH = 8  # verifier limit on bpf2bpf nesting
 
 PTR_FORK_HELPERS = {H_MAP_LOOKUP, H_MAP_LOOKUP_PERCPU, H_SK_STORAGE_GET,
                     H_INODE_STORAGE_GET, H_TASK_STORAGE_GET,
@@ -152,7 +154,7 @@ class Executor:
         self.sec = sec
         self.shared = shared
         self.tag = tag  # 'A' / 'B', namespaces per-run regions
-        self.insns = self._decode(sec)
+        self.code = {sec.name: self._decode(sec)}  # secname -> insns
         self.dynamic_maps = {}  # inner-map handles from map-in-map lookups
         self.paths = []
         self.nclobber = 0
@@ -821,6 +823,29 @@ class Executor:
 
     # ---------- main loop ----------
 
+    def _insns(self, secname, what):
+        if secname not in self.code:
+            s = self.elf.section_by_name(secname)
+            if s is None or not s.flags & SHF_EXECINSTR:
+                raise Bail(f"call into non-code section {secname} in {what}")
+            if secname in self.elf.core_relo_sections():
+                raise Bail(f"callee section {secname} has CO-RE relocs in {what}")
+            self.code[secname] = self._decode(s)
+        return self.code[secname]
+
+    def _call_target(self, ins, sec, pc, what):
+        """Resolve a src=1 call: (section name, insn index) of the callee."""
+        rel = ins["reloc"]
+        if rel is None:
+            return sec, pc + 1 + ins["imm"]
+        sym = rel.sym
+        if sym.shndx == 0 or sym.shndx >= len(self.elf.sections):
+            raise Bail(f"call to undefined symbol {sym.name} in {what}")
+        if sym.type not in (STT_FUNC, STT_SECTION):
+            raise Bail(f"call reloc to symbol type {sym.type} in {what}")
+        return (self.elf.sections[sym.shndx].name,
+                sym.value // 8 + ins["imm"] + 1)
+
     def run(self, entry_pc=0):
         regs = [None] * 11
         for i in range(10):
@@ -828,22 +853,25 @@ class Executor:
         regs[1] = Ptr("ctx", bv64(0))
         regs[10] = Ptr(f"stack:{self.tag}", bv64(STACK_SIZE))
         self.init_r0 = regs[0]
-        work = [(entry_pc, regs, {}, [], {})]
+        # work item: (sec name, pc, regs, mem, conds, counters, call stack);
+        # call stack = tuple of (return sec, return pc, caller r10)
+        work = [(self.sec.name, entry_pc, regs, {}, [], {}, ())]
         while work:
             if len(self.paths) + len(work) > MAX_PATHS:
                 raise Bail("path explosion (> MAX_PATHS)")
-            pc, regs, mem, conds, counters = work.pop()
+            cursec, pc, regs, mem, conds, counters, stack = work.pop()
+            insns = self._insns(cursec, "resume")
             steps = 0
             while True:
                 steps += 1
                 if steps > MAX_INSNS_PER_PATH:
                     raise Bail("path too long (loop?)")
-                if pc < 0 or pc >= len(self.insns) or self.insns[pc] is None:
-                    raise Bail(f"jump to invalid pc {pc}")
-                ins = self.insns[pc]
+                if pc < 0 or pc >= len(insns) or insns[pc] is None:
+                    raise Bail(f"jump to invalid pc {cursec}@{pc}")
+                ins = insns[pc]
                 op, dst, src = ins["op"], ins["dst"], ins["src"]
                 cls = op & 7
-                what = f"{self.sec.name}@{pc}"
+                what = f"{cursec}@{pc}"
 
                 if op == 0x18:  # ld_imm64
                     if src not in (0,):
@@ -916,17 +944,50 @@ class Executor:
                 if cls in (5, 6):  # JMP / JMP32
                     code = op >> 4
                     if code == 8:
-                        if src == 1:
-                            raise Bail(f"subprog call in {what}")
+                        if src == 1:  # bpf2bpf call: execute inline
+                            if len(stack) >= MAX_CALL_DEPTH:
+                                raise Bail(f"call depth > {MAX_CALL_DEPTH} in {what}")
+                            tsec, tidx = self._call_target(ins, cursec, pc, what)
+                            tinsns = self._insns(tsec, what)
+                            stack = stack + ((cursec, pc + 1, regs[10]),)
+                            fid = counters.get("frame", 0) + 1
+                            counters = dict(counters)
+                            counters["frame"] = fid
+                            regs = regs[:]
+                            regs[10] = Ptr(f"stack:{self.tag}:f{fid}",
+                                           bv64(STACK_SIZE))
+                            cursec, pc, insns = tsec, tidx, tinsns
+                            continue
                         if src == 2:
                             raise Bail(f"kfunc call in {what}")
                         mem = dict(mem)
-                        if ins["imm"] in PTR_HELPERS:
+                        if ins["imm"] == H_TAIL_CALL:
+                            # success consumes execution: the path ends with
+                            # the target program's (shared oracle) return;
+                            # failure continues with an errno oracle
+                            idx = counters.get(H_TAIL_CALL, 0)
+                            counters = dict(counters)
+                            counters[H_TAIL_CALL] = idx + 1
+                            mname = self._map_name(regs[2], what)
+                            self._emit_event(
+                                mem, counters, H_TAIL_CALL,
+                                self._name_bytes(mname)
+                                + self._val_bytes(zext64(lo32(need_data(
+                                    regs[3], what))), 4, what))
+                            succ = z3.Function("oracle_tailcall_succ", BV64S,
+                                               z3.BoolSort())(bv64(idx))
+                            tret = z3.Function("oracle_tailcall_ret", BV64S,
+                                               BV64S)(bv64(idx))
+                            self.paths.append(Path(conds + [succ], tret, mem))
+                            conds = conds + [z3.Not(succ)]
+                            regs = self._ret_clobbered(
+                                regs, self._errno_oracle(H_TAIL_CALL, idx))
+                        elif ins["imm"] in PTR_HELPERS:
                             conts = self._ptr_helper(ins["imm"], regs, mem,
                                                      counters, what)
                             for cond, r2, m2, k2 in conts[1:]:
-                                work.append((pc + 1, r2, m2,
-                                             conds + [cond], k2))
+                                work.append((cursec, pc + 1, r2, m2,
+                                             conds + [cond], k2, stack))
                             cond, regs, mem, counters = conts[0]
                             if cond is not None:
                                 conds = conds + [cond]
@@ -936,6 +997,13 @@ class Executor:
                         pc += 1
                         continue
                     if code == 9:  # EXIT
+                        if stack:  # subprog return
+                            cursec, pc, r10 = stack[-1]
+                            stack = stack[:-1]
+                            insns = self._insns(cursec, what)
+                            regs = regs[:]
+                            regs[10] = r10
+                            continue
                         ret = need_data(regs[0], what)
                         self.paths.append(Path(conds, ret, mem))
                         break
@@ -956,8 +1024,8 @@ class Executor:
                         pc += 1
                         continue
                     if self._feasible(conds + [c]):
-                        work.append((taken, regs[:], dict(mem), conds + [c],
-                                     dict(counters)))
+                        work.append((cursec, taken, regs[:], dict(mem),
+                                     conds + [c], dict(counters), stack))
                     if self._feasible(conds + [z3.Not(c)]):
                         pc += 1
                         conds = conds + [z3.Not(c)]

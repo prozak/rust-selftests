@@ -1,3 +1,5 @@
 # prog<TAB>section:func<TAB>reason — accepted semantic divergences (verdict WAIVED)
 test_stack_var_off	tracepoint/syscalls/sys_enter_nanosleep:probe	C reads uninit stack residue for len>4 (verifier stress test); Rust zero-inits stack_buf — deterministic refinement, test contract only exercises len=4
 bpf_flow	flow_dissector:flow_dissector_4	LLVM folds C source !(data+thoff) null-check to !data (ptr-provenance); Rust checks data+thoff faithfully — diverges only for skb->data==0 && thoff!=0, a NULL packet pointer the kernel never produces
+test_global_func16	cgroup_skb/ingress:global_func16	C deliberately returns uninit stack residue array[9] (verifier-coverage test); Rust zero-inits the array — deterministic refinement, same class as test_stack_var_off
+test_tc_dtime	tc:ingress_host	Rust masks skb->protocol to 16 bits before compare; C switch() compares the full 32-bit ctx word — diverges only when the upper 16 bits of the kernel-zero-extended protocol field are nonzero, impossible from the kernel

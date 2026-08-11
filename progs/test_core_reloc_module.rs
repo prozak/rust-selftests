@@ -92,7 +92,8 @@ struct ModuleOutput {
     buf_exists: bool,
     len_exists: bool,
     off_exists: bool,
-    comm: [u8; 12],
+    // C: char comm[sizeof("test_progs")] — 11 bytes, NOT 12
+    comm: [u8; 11],
     comm_len: i32,
 }
 
@@ -118,7 +119,7 @@ unsafe fn write_common(
 
     let comm_src = unsafe { &*task }.comm().as_ptr() as *const c_void;
     let comm_dst = unsafe { core::ptr::addr_of_mut!((*out).comm) } as *mut c_void;
-    let comm_len = bpf_probe_read_kernel_str(comm_dst, 12, comm_src);
+    let comm_len = bpf_probe_read_kernel_str(comm_dst, 11, comm_src);
     unsafe { (*out).comm_len = comm_len as i32 };
 }
 

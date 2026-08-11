@@ -470,7 +470,7 @@ extern "C" fn read_sk_dst_port(skb: *const __sk_buff) -> i32 {
 
     let sk = vload!((*skb).sk) as *mut bpf_sock;
     if sk.is_null() {
-        return ret_log(linum_idx, 293);
+        return ret_log(linum_idx, 294);
     }
 
     // Ignore everything but the SYN from the client socket

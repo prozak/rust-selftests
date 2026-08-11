@@ -19,18 +19,26 @@ Programs present in only one object are reported UNPAIRED.
 Exit status 0 iff every paired program is EQUIV and nothing is unpaired.
 """
 import argparse
+import glob
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import z3
+import bpfcore
 from bpfelf import (BpfElf, SHF_ALLOC, SHF_EXECINSTR, SHT_NOBITS, STT_FUNC,
                     STT_OBJECT, normalize_name)
 from bpfsym import Bail, Executor
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_C_DIR = os.path.join(REPO, "..", "uml-harness", ".build", "selftests-output-qemu")
+# CO-RE relocation target: the qemu-flavor kernel's BTF. Prefer the raw .BTF
+# dump cached in bld/ (fast); fall back to extracting from vmlinux itself.
+DEFAULT_KERNEL_BTFS = [
+    os.path.join(REPO, "bld", "vmlinux.btf"),
+    os.path.join(REPO, "..", "uml-harness", ".build", "bpf-next-x86", "vmlinux"),
+]
 
 
 def programs(elf):
@@ -159,6 +167,9 @@ def main():
     ap.add_argument("--rust-obj", help="Rust object (default: bld/<prog>.bpf.o)")
     ap.add_argument("--sec", help="check only this (section, func) — match on either name")
     ap.add_argument("--timeout", type=int, default=60_000, help="solver timeout ms per program")
+    ap.add_argument("--kernel-btf",
+                    help="vmlinux BTF (raw .BTF dump or ELF) for CO-RE "
+                         "application; 'none' disables and restores CORESKIP")
     args = ap.parse_args()
 
     c_path = args.c_obj or os.path.join(DEFAULT_C_DIR, f"{args.prog}.bpf.o")
@@ -168,6 +179,38 @@ def main():
             sys.exit(f"missing object: {p}")
 
     elf_c, elf_r = BpfElf(c_path), BpfElf(r_path)
+
+    # Apply CO-RE relocations against the target kernel BTF (both objects
+    # against the same BTF, as libbpf would at load time). Must precede
+    # programs(): section bytes are patched in place.
+    kbtf_path = args.kernel_btf
+    if kbtf_path != "none":
+        if not kbtf_path:
+            kbtf_path = next((p for p in DEFAULT_KERNEL_BTFS
+                              if os.path.exists(p)), None)
+        elif not os.path.exists(kbtf_path):
+            sys.exit(f"missing kernel BTF: {kbtf_path}")
+    else:
+        kbtf_path = None
+    core_applied = False
+    if kbtf_path:
+        kbtf = bpfcore.load_kernel_btf(kbtf_path)
+        # module split BTFs: candidate sources alongside vmlinux, as libbpf
+        # searches /sys/kernel/btf/<module> for loaded modules
+        mod_btfs = []
+        for ko in sorted(glob.glob(os.path.join(DEFAULT_C_DIR, "*.ko"))):
+            try:
+                mod_btfs.append(bpfcore.load_kernel_btf(ko, base=kbtf))
+            except ValueError:
+                pass
+        applier = bpfcore.Applier(kbtf, mod_btfs)
+        for elf in (elf_c, elf_r):
+            poison, notes = applier.apply(elf)
+            elf.core_applied, elf.core_poison = True, poison
+            for line in notes:
+                print(f"  CORE {os.path.basename(elf.path)} {line}")
+        core_applied = True
+
     progs_c, progs_r = programs(elf_c), programs(elf_r)
 
     shared, warnings = global_regions({"A": elf_c, "B": elf_r})
@@ -187,7 +230,8 @@ def main():
         if not keys:
             sys.exit(f"no program matches --sec {args.sec}")
 
-    core_secs = elf_c.core_relo_sections() | elf_r.core_relo_sections()
+    core_secs = (set() if core_applied
+                 else elf_c.core_relo_sections() | elf_r.core_relo_sections())
 
     waivers = {}
     wpath = os.path.join(REPO, "equiv", "waivers.tsv")

@@ -37,7 +37,10 @@ static mut exit_cnt: i32 = 0;
 #[no_mangle]
 static mut update_err: isize = 0;
 
-const MAGIC_VALUE: i64 = 0xabcd1234;
+// C's 0xabcd1234 literal doesn't fit in int, so it types as UNSIGNED int and
+// `MAGIC_VALUE + cnt` wraps at 32 bits before zero-extending into the long
+// store/compare; mirror that exactly.
+const MAGIC_VALUE: u32 = 0xabcd1234;
 const BPF_LOCAL_STORAGE_GET_F_CREATE: u64 = 1;
 const MAX_ERRNO: u64 = 4095;
 
@@ -61,7 +64,7 @@ extern "C" fn on_enter(_ctx: *const u64) -> i32 {
     }
 
     sync_fetch_and_add_i32(core::ptr::addr_of_mut!(enter_cnt), 1);
-    unsafe { *ptr = MAGIC_VALUE + enter_cnt as i64 };
+    unsafe { *ptr = MAGIC_VALUE.wrapping_add(enter_cnt as u32) as i64 };
 
     0
 }
@@ -86,7 +89,7 @@ extern "C" fn on_exit(_ctx: *const u64) -> i32 {
     }
 
     sync_fetch_and_add_i32(core::ptr::addr_of_mut!(exit_cnt), 1);
-    if unsafe { *ptr } != MAGIC_VALUE + unsafe { exit_cnt } as i64 {
+    if unsafe { *ptr } != MAGIC_VALUE.wrapping_add(unsafe { exit_cnt } as u32) as i64 {
         sync_fetch_and_add_i32(core::ptr::addr_of_mut!(mismatch_cnt), 1);
     }
 

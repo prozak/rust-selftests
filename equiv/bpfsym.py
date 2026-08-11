@@ -154,6 +154,10 @@ class Executor:
         self.sec = sec
         self.shared = shared
         self.tag = tag  # 'A' / 'B', namespaces per-run regions
+        # CO-RE state set by check.py after bpfcore.Applier.apply():
+        # poisoned (secname, pc) -> reason; reaching one bails the program
+        self.core_applied = getattr(elf, "core_applied", False)
+        self.core_poison = getattr(elf, "core_poison", {})
         self.code = {sec.name: self._decode(sec)}  # secname -> insns
         self.dynamic_maps = {}  # inner-map handles from map-in-map lookups
         self.paths = []
@@ -828,7 +832,8 @@ class Executor:
             s = self.elf.section_by_name(secname)
             if s is None or not s.flags & SHF_EXECINSTR:
                 raise Bail(f"call into non-code section {secname} in {what}")
-            if secname in self.elf.core_relo_sections():
+            if (not self.core_applied
+                    and secname in self.elf.core_relo_sections()):
                 raise Bail(f"callee section {secname} has CO-RE relocs in {what}")
             self.code[secname] = self._decode(s)
         return self.code[secname]
@@ -868,6 +873,9 @@ class Executor:
                     raise Bail("path too long (loop?)")
                 if pc < 0 or pc >= len(insns) or insns[pc] is None:
                     raise Bail(f"jump to invalid pc {cursec}@{pc}")
+                if (cursec, pc) in self.core_poison:
+                    raise Bail(f"core-poison at {cursec}@{pc}: "
+                               f"{self.core_poison[(cursec, pc)]}")
                 ins = insns[pc]
                 op, dst, src = ins["op"], ins["dst"], ins["src"]
                 cls = op & 7

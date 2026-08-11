@@ -22,6 +22,10 @@ equiv/sweep.sh <names-file> <out-dir> 10
 
 - `bpfelf.py` — standalone ELF64-LE reader: sections, symbols, RELs, and
   `.BTF.ext` CO-RE relocation coverage (per-section).
+- `bpfcore.py` — CO-RE relocation engine: full-fidelity BTF parser
+  (bitfields, enums, split/distilled-base module BTF) plus libbpf's
+  candidate-search / spec-match / patch algorithm (relo_core.c) applied
+  against the target kernel's BTF before lifting.
 - `bpfsym.py` — BPF ISA → Z3 lifter with path-enumerating symbolic execution.
   Anything unmodeled raises `Bail` (never guesses).
 - `check.py` — pairs programs by (section, func) across the two objects,
@@ -41,8 +45,29 @@ equiv/sweep.sh <names-file> <out-dir> 10
   the return-value comparison.
 - `EQUIV32`: return values agree in the low 32 bits only; benign when the BTF
   return type is ≤32 bits (not yet checked automatically).
-- `CORESKIP`: section carries unapplied CO-RE relocations; comparing pre-load
-  bytecode is not meaningful. Needs load-time reloc application (v2).
+- CO-RE relocations are APPLIED before lifting (no more `CORESKIP`): both
+  objects are relocated against the same target BTF — the qemu-flavor
+  kernel's vmlinux (`bld/vmlinux.btf`, extracted from
+  `uml-harness/.build/bpf-next-x86/vmlinux`) plus the split BTFs of the
+  selftest modules (`*.ko`, distilled-base aware) — exactly as libbpf would
+  at load time. All 13 relocation kinds are implemented per relo_core.c:
+  field byte offset/size/exists/signed and the bitfield lshift/rshift pair,
+  type id/exists/size/matches, enumval exists/value. libbpf's failure
+  semantics are preserved: an unresolvable field/enumval-value relocation
+  poisons that instruction (`call 0xbad2310`), and the executor BAILs only
+  if a poisoned instruction is actually reachable — EXISTS-guarded dead
+  branches (kernel-version flavors like `kernfs_node___52`) stay provable.
+  `TYPE_ID_LOCAL` values are patched faithfully but marked
+  poison-for-equivalence: they are each object's own BTF id, incomparable
+  across objects by construction. `--kernel-btf none` restores the old
+  CORESKIP behavior.
+- The implementation is validated instruction-for-instruction against
+  libbpf itself: a `bpf_object__prepare()` harness runs in the qemu guest
+  (same kernel, modules insmoded) and dumps every program's relocated
+  stream; across 550 objects (2975 programs, 296 relo-carrying objects)
+  our patched sections are byte-identical to libbpf's on every instruction
+  that doesn't carry an ELF relocation (map fds / subprog offsets / kfunc
+  ids, which the lifter resolves symbolically instead).
 
 Helper calls (tier 1):
 
@@ -137,11 +162,18 @@ BTF is ground truth for return contracts: void functions skip the return
 comparison, ≤32-bit return types compare low 32 bits.
 
 `equiv/waivers.tsv` records accepted semantic divergences (verdict WAIVED,
-non-failing, reason required). Entries: test_stack_var_off — the C program
-deliberately reads uninitialized stack residue; the Rust translation
-zero-initializes, a deterministic refinement. bpf_flow/flow_dissector_4 —
-LLVM compiles the C source's `!(data + thoff)` to `!data` via pointer
-provenance; divergence needs a NULL skb->data, kernel-impossible.
+non-failing, reason required). Two classes: kernel-impossible-input
+divergences (test_stack_var_off, test_global_func16 — C deliberately reads
+uninit stack residue where Rust zero-inits; bpf_flow/flow_dissector_4 —
+LLVM folds `!(data + thoff)` to `!data`; test_tc_dtime — Rust masks
+skb->protocol to 16 bits) and deliberate, documented translation
+divergences (lru_bug — Rust reconstructs the kernel's LRU node-reuse race
+by probe-reading stale bytes instead of relying on allocator internals;
+test_xdp_devmap_tailcall — Rust establishes PROG_ARRAY ownership with a
+never-taken tail_call because the C `.values` flexible-array reloc isn't
+expressible; test_core_reloc_type_based — the translation is the C
+source's own no-builtin `#else` skip branch, since rustc has no
+`__builtin_preserve_type_info`).
 
 Soundness stance: unsupported constructs BAIL rather than being approximated,
 so EQUIV verdicts only rest on modeled semantics. Known deliberate
@@ -198,20 +230,48 @@ same environment value in both programs.
   (subprog variants now execute instead of bailing, and blow up the same
   way).
 
-Results tables: `results/`. Remaining bail classes: packet/ctx-pointer
-window stores ×29, callback helpers (ld_imm64 of a function: bpf_loop,
-for_each_map_elem, timers) ×27, kfunc calls (undefined-symbol calls in
-Rust objects / src=2 in C) , get_stack/timer/cookie/mtu helper tail,
-pointer-compare-across-regions.
+- CO-RE application (2026-08-11): **665 EQUIV / 0 INEQUIV / 7 WAIVED /
+  3 UNKNOWN** (197 objects fully proved; object verdicts 197 EQUIV /
+  327 BAIL / 14 TIMEOUT / 11 NOPROGS / 1 UNKNOWN). The CORESKIP class
+  (164 objects / 504 programs) is gone: both objects are relocated
+  against the qemu kernel's vmlinux + module BTFs before lifting, with
+  the implementation validated byte-for-byte against libbpf's own
+  `bpf_object__prepare()` output across the whole corpus (the validation
+  itself caught four bugs: typedef-rooted candidate search, type-relos
+  resolving to 0 when the target type is absent, TYPE_MATCHES offset
+  over-strictness, and distilled-base module split BTF). Negative
+  control: skewing the Rust side's applied field offsets by +8 flips
+  kfree_skb to INEQUIV. **True findings #3–#6, all fixed and
+  QEMU-verified**: bpf_smc returned the raw `default_ip_strat_value`
+  byte where C's `bool` return normalizes to 0/1;
+  task_local_storage did 64-bit arithmetic where C's unsigned-int
+  `0xabcd1234 + cnt` wraps at 32 bits before widening; test_overhead
+  stubbed prog1–3 returns that C computes from pt_regs/raw_tp args;
+  test_sock_fields logged line 293 where C's RET_LOG() records 294;
+  test_core_reloc_module read task comm with size 12 where C uses
+  `sizeof("test_progs")` = 11. The TIMEOUT class (pyperf/strobemeta ×9,
+  rhash, access_map_in_map, and now the newly-unlocked loop3,
+  test_verif_scale2, test_core_reloc_kernel, test_parse_tcp_hdr_opt)
+  still needs join-point path merging; 3 UNKNOWNs are Z3 giving up on
+  very large single programs (bpf_flow _dissect, cls_redirect
+  balancer_ingress, cgroup_hierarchical_stats flusher).
+
+Results tables: `results/`. Remaining bail classes after CO-RE: kfunc
+calls (undefined-symbol calls) ×422 program-sites — now the largest;
+unmodeled helper tail ×395 (long flat tail: seq_printf/seq_write,
+timers, get_stack, ringbuf reserve variants, ...); stores through
+kernel-pointer windows ×41; callback-function ld_imm64 (.text) ×31;
+TYPE_ID_LOCAL poison ×17 (incomparable by construction);
+pointer-spill/symbolic-size/ptr-compare tail.
 
 ## Roadmap
 
-1. **CO-RE application**: apply `.BTF.ext` relocations against the pinned
-   vmlinux BTF (like libbpf) before lifting, unlocking the CORESKIP class
-   (504 programs) — now the largest pool by far.
-2. **Tier 5 candidates**: ctx pointer-field windows (optval/pkt data as
-   regions with shared symbolic bases), kfunc oracle models, callback
-   helpers with concrete trip counts (bpf_loop), symbolic-size copies.
-3. **Path-merging at join points** for the pyperf/strobemeta TIMEOUT class.
-4. **Regression guard**: bytecode-hash fast path; re-prove after
+1. **Tier 5 candidates**: kfunc oracle models (biggest pool now, 422
+   sites), helper-tail modeling (seq_printf family, timers, get_stack),
+   ctx pointer-field windows (optval/pkt data as regions with shared
+   symbolic bases), callback helpers with concrete trip counts
+   (bpf_loop), symbolic-size copies.
+2. **Path-merging at join points** for the pyperf/strobemeta/loop3
+   TIMEOUT class (14 objects).
+3. **Regression guard**: bytecode-hash fast path; re-prove after
    quality-layer edits, alarm on equivalence break.

@@ -133,8 +133,13 @@ static mut smc_cnt: i32 = 0;
 #[no_mangle]
 static mut fallback_cnt: i32 = 0;
 
+// C declares this `bool`, but clang widens bool->int with a `!= 0`
+// normalization when smc_check() returns it, so any byte value written into
+// the global reads back as 0/1. Store it as u8 and normalize explicitly:
+// `bool as i32` in Rust emits the raw byte (rustc trusts the 0/1 invariant),
+// which diverges from the C object for out-of-range bytes.
 #[no_mangle]
-static mut default_ip_strat_value: bool = true;
+static mut default_ip_strat_value: u8 = 1;
 
 // ------------------------------------------------------------------ maps --
 
@@ -167,7 +172,7 @@ fn smc_check(src: u32, dst: u32) -> i32 {
     if !value.is_null() {
         (unsafe { (*value).mode } != 0) as i32
     } else {
-        unsafe { default_ip_strat_value as i32 }
+        (unsafe { default_ip_strat_value } != 0) as i32
     }
 }
 

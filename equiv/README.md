@@ -31,6 +31,12 @@ equiv/sweep.sh <names-file> <out-dir> 10
 - `check.py` — pairs programs by (section, func) across the two objects,
   builds ITE path summaries, asks Z3 for a distinguishing input.
 - `sweep.sh` — parallel driver + verdict histogram.
+- `guard.py` — hash-gated regression guard (see below); `testkit.py` —
+  synthetic in-memory objects for hermetic tests and docs; `gendoc.py` —
+  regenerates `SEMANTICS.md`, an example-by-example record of how each
+  BPF construct becomes a Z3 term, produced by running the real lifter
+  (`make semantics`; CI fails if it is stale, so an encoding change shows
+  up as a reviewable diff).
 
 ## Model
 

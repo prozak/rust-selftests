@@ -33,6 +33,9 @@ jobs:
       - name: Python syntax check
         run: python -m compileall -q equiv scripts
 
+      - name: Semantics doc is up to date
+        run: python equiv/gendoc.py --check
+
       - name: Waivers file is well-formed
         run: |
           python - <<'PY'

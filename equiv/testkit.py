@@ -20,7 +20,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import z3
 
 import check as _check
-from bpfelf import Section, Symbol, SHF_ALLOC, SHF_EXECINSTR, STT_FUNC
+from bpfelf import (Reloc, Section, Symbol, SHF_ALLOC, SHF_EXECINSTR,
+                    STT_FUNC, STT_OBJECT, STT_SECTION)
 
 SEC_NAME = "socket"
 FUNC_NAME = "prog"
@@ -109,6 +110,9 @@ class FakeElf:
 
     def __init__(self, code, path="synthetic.bpf.o", globals_=None,
                  rodata=None, maps=None, relocs=None, ret_bits=None):
+        """relocs: {insn byte offset -> symbol name}. Symbols for maps,
+        globals and .rodata are created automatically, so a caller just
+        names the thing an ld_imm64 should resolve to."""
         self.path = path
         self.core_applied, self.core_poison = True, {}
         self._map_defs = maps or {}
@@ -131,10 +135,22 @@ class FakeElf:
                 gidx = add_section(".bss." + gname, gbytes, SHF_ALLOC)
                 self.symbols.append(Symbol(len(self.symbols), gname, 0,
                                            len(gbytes), 1, 1, gidx))
-        if rodata:
-            add_section(".rodata", rodata, SHF_ALLOC)
+        if maps:
+            maps_idx = add_section(".maps", b"\x00" * (8 * len(maps)),
+                                   SHF_ALLOC)
+            for mname in maps:
+                self.symbols.append(Symbol(len(self.symbols), mname, 0, 8,
+                                           1, STT_OBJECT, maps_idx))
+        if rodata is not None:
+            ro_idx = add_section(".rodata", rodata, SHF_ALLOC)
+            self.symbols.append(Symbol(len(self.symbols), ".rodata", 0,
+                                       len(rodata), 1, STT_SECTION, ro_idx))
         if relocs:
-            self.relocs[code_idx] = relocs
+            table = {}
+            for off, symname in relocs.items():
+                sym = next(s for s in self.symbols if s.name == symname)
+                table[off] = Reloc(off, sym, 1)
+            self.relocs[code_idx] = table
 
     def section_by_name(self, name):
         return next((s for s in self.sections if s.name == name), None)

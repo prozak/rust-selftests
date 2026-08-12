@@ -60,9 +60,8 @@ def test_differing_store_width_is_detected():
                       asm.mov64_imm(R0, 0), asm.exit_())
     store4 = asm.prog(asm.ld_imm64(R1, 0), asm.st_imm(4, R1, 0, 5),
                       asm.mov64_imm(R0, 0), asm.exit_())
-    rel = {0: type("R", (), {"sym": type("S", (), {
-        "name": "out", "shndx": 2, "type": 1, "value": 0})()})()}
-    assert verdict(store8, store4, globals_=g, relocs=rel) == "INEQUIV"
+    assert verdict(store8, store4, globals_=g,
+                   relocs={0: "out"}) == "INEQUIV"
 
 
 def test_signed_vs_unsigned_compare_is_detected():
@@ -105,10 +104,8 @@ def test_dropped_helper_call_is_detected():
     with_call = asm.prog(asm.ld_imm64(R1, 0), asm.mov64_imm(R2, 4),
                          asm.call(6), asm.mov64_imm(R0, 0), asm.exit_())
     without = asm.prog(asm.mov64_imm(R0, 0), asm.exit_())
-    rodata = b"hi\x00\x00"
-    rel = {0: type("R", (), {"sym": type("S", (), {
-        "name": ".rodata", "shndx": 2, "type": 3, "value": 0})()})()}
-    assert verdict(with_call, without, rodata=rodata, relocs=rel) == "INEQUIV"
+    assert verdict(with_call, without, rodata=b"hi\x00\x00",
+                   relocs={0: ".rodata"}) == "INEQUIV"
 
 
 def test_equivalent_helper_sequences_prove():

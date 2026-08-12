@@ -207,3 +207,19 @@ restore-all:
 	done; echo "restored $$n C object(s)"
 
 .PHONY: restore-all
+
+# --- CI ---
+# ci-fast: the hermetic tier, identical to what GitHub Actions runs.
+ci-fast:
+	$(PYZ3) -m pytest equiv/tests -q
+	python3 -m compileall -q equiv scripts
+	@echo "hermetic checks OK"
+
+# ci-local: everything that needs the pinned kernel tree and built objects.
+# Order matters — undo any swapped-in objects BEFORE proving, or the
+# comparison is Rust-vs-Rust.
+ci-local: restore-all ci-fast
+	python3 scripts/translint.py || true
+	$(PYZ3) equiv/guard.py
+
+.PHONY: ci-fast ci-local

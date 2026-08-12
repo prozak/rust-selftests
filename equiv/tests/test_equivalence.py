@@ -160,3 +160,37 @@ def test_stack_roundtrip_is_equivalent(width):
                  asm.ldx(width, R0, R10, -8),
                  asm.exit_())
     assert verdict(p, p) == "EQUIV"
+
+
+# ---------------------------------------------- bpf2bpf frame semantics
+
+def test_subprog_call_preserves_the_caller_frame():
+    """A bpf2bpf call gives the callee its OWN frame: the verifier keeps
+    the caller's whole register file and copies back only r0
+    (prepare_func_exit). A callee that clobbers r6 must NOT disturb the
+    caller's r6 — modelling this wrong made a saved ctx pointer come back
+    as a packet-derived scalar (the test_tc_dtime divergence)."""
+    # caller: r6 = ctx; call subprog (which clobbers r6); return *(r6+0)
+    caller = asm.prog(
+        asm.mov64_reg(R6, R1),
+        asm.raw(0x85, src=1, imm=2),      # call -> insn 4 (the subprog)
+        asm.ldx(8, R0, R6, 0),
+        asm.exit_(),
+        # subprog: clobber r6 and return
+        asm.mov64_imm(R6, 0x1234),
+        asm.mov64_imm(R0, 0),
+        asm.exit_())
+    # equivalent program that simply reads the ctx without any call
+    inlined = asm.prog(asm.ldx(8, R0, R1, 0), asm.exit_())
+    assert verdict(caller, inlined) == "EQUIV"
+
+
+def test_subprog_return_value_flows_back():
+    """r0 IS copied back from the callee."""
+    with_call = asm.prog(
+        asm.raw(0x85, src=1, imm=1),      # call +1
+        asm.exit_(),
+        asm.mov64_imm(R0, 77),
+        asm.exit_())
+    direct = asm.prog(asm.mov64_imm(R0, 77), asm.exit_())
+    assert verdict(with_call, direct) == "EQUIV"

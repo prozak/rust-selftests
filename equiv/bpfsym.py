@@ -1843,7 +1843,11 @@ class Executor:
                                 raise Bail(f"call depth > {MAX_CALL_DEPTH} in {what}")
                             tsec, tidx = self._call_target(ins, cursec, pc, what)
                             tinsns = self._insns(tsec, what)
-                            stack = stack + ((cursec, pc + 1, regs[10]),)
+                            # a subprogram gets its OWN frame: the verifier
+                            # keeps the caller's whole register file and
+                            # copies back only r0 (prepare_func_exit), so
+                            # save the caller's registers, not just r10
+                            stack = stack + ((cursec, pc + 1, regs[:]),)
                             fid = counters.get("frame", 0) + 1
                             counters = dict(counters)
                             counters["frame"] = fid
@@ -1888,7 +1892,7 @@ class Executor:
                                 pc += 1
                                 continue
                             frame, cbregs, csec, cidx = started
-                            frame = frame[:6] + (cursec, pc + 1, regs[10]) \
+                            frame = frame[:6] + (cursec, pc + 1, regs[:]) \
                                 + frame[9:]
                             n = frame[5]
                             enter_c = z3.simplify(z3.UGT(n, bv64(0)))
@@ -1929,15 +1933,18 @@ class Executor:
                             frame = stack[-1]
                             csec, cidx = frame[2], frame[3]
                             i, n = frame[4], frame[5]
-                            retsec, retpc, r10caller = \
+                            retsec, retpc, caller_regs = \
                                 frame[6], frame[7], frame[8]
                             r0 = need_data(regs[0], what)
                             next_i = i + 1
                             base_stack = stack[:-1]
 
                             def stop_item(cond):
-                                rr = self._ret_clobbered(regs, bv64(next_i))
-                                rr[10] = r10caller
+                                # the callback helper returns to its caller:
+                                # caller frame intact, r0 = iterations done,
+                                # r1-r5 clobbered as for any helper
+                                rr = self._ret_clobbered(caller_regs,
+                                                         bv64(next_i))
                                 return (retsec, retpc, rr, dict(mem),
                                         conds + ([cond] if cond is not None
                                                  else []), dict(counters),
@@ -1967,11 +1974,12 @@ class Executor:
                             insns = self._insns(cursec, what)
                             continue
                         if stack:  # subprog return
-                            cursec, pc, r10 = stack[-1]
+                            cursec, pc, caller_regs = stack[-1]
                             stack = stack[:-1]
                             insns = self._insns(cursec, what)
-                            regs = regs[:]
-                            regs[10] = r10
+                            ret_r0 = regs[0]
+                            regs = caller_regs[:]   # caller's frame is intact
+                            regs[0] = ret_r0        # only r0 comes back
                             continue
                         ret = need_data(regs[0], what)
                         self.paths.append(Path(conds, ret, mem))

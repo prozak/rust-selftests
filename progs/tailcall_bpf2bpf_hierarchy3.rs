@@ -38,12 +38,43 @@
 // (and BTF/keep-list ABI) matching the C original as closely as possible.
 
 use bpf_rs_core::ctx::__sk_buff;
-use bpf_rs_core::helpers::bpf_tail_call;
+use bpf_rs_core::helpers::{bpf_strtoul, bpf_tail_call};
 use bpf_rs_core::{bpf_object, maps};
 use core::ffi::c_void;
 
 #[no_mangle]
 static mut count: i32 = 0;
+
+// A fixed-size array-literal copy here gets MemCpyOpt-recognized and
+// rewritten to an unresolvable bpf_arena_memcpy kfunc call; a volatile-byte
+// loop is the one pattern the optimizer can't merge into a memcpy.
+#[inline(always)]
+unsafe fn vcopy(dst: *mut u8, src: *const u8, len: usize) {
+    let mut i = 0usize;
+    while i < len {
+        core::ptr::write_volatile(dst.add(i), core::ptr::read_volatile(src.add(i)));
+        i += 1;
+    }
+}
+
+// C's clobber_regs_stack(): clobber as many native registers and stack
+// slots as possible via a real helper call over a stack buffer.
+#[inline(always)]
+fn clobber_regs_stack() {
+    const SRC: [u8; 10] = *b"123456789\0";
+    let mut tmp_str = [0u8; 10];
+    unsafe { vcopy(tmp_str.as_mut_ptr(), SRC.as_ptr(), tmp_str.len()) };
+    let mut tmp: u64 = 0;
+    bpf_strtoul(
+        tmp_str.as_ptr() as *const c_void,
+        tmp_str.len() as u64,
+        0,
+        &mut tmp as *mut u64 as *mut c_void,
+    );
+    unsafe {
+        core::arch::asm!("{0} = {0}", inout(reg) tmp, options(nostack, preserves_flags));
+    }
+}
 
 // A zero-insn `sink_val`-style barrier collapses its .BTF.ext line_info
 // onto the next real insn's offset and the kernel rejects the duplicate
@@ -115,6 +146,7 @@ extern "C" fn classifier_0(skb: *const __sk_buff) -> i32 {
 #[no_mangle]
 extern "C" fn tailcall_bpf2bpf_hierarchy_3(skb: *const __sk_buff) -> i32 {
     let ret: i32 = 0;
+    clobber_regs_stack();
     bpf_tail_call(skb as *const c_void, &jmp_table0, 0);
     barrier_i32(ret)
 }

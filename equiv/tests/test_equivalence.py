@@ -13,9 +13,10 @@ import pytest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
+from bpfsym import Bail  # noqa: E402
 from testkit import asm, compare  # noqa: E402
 
-R0, R1, R2, R6, R10 = 0, 1, 2, 6, 10
+R0, R1, R2, R3, R4, R6, R10 = 0, 1, 2, 3, 4, 6, 10
 MAP = {"m": {"key_size": 4, "value_size": 8, "map_type": 1,
              "max_entries": 4, "inner": None}}
 
@@ -194,3 +195,123 @@ def test_subprog_return_value_flows_back():
         asm.exit_())
     direct = asm.prog(asm.mov64_imm(R0, 77), asm.exit_())
     assert verdict(with_call, direct) == "EQUIV"
+
+
+# ------------------------------------------- generic (prototype-driven) helpers
+
+# check.helper_sigs()'s shape: id -> (name, [(is_ptr, pointee size,
+# scalar width | length-argument index)], return width). Given literally so
+# these tests need no kernel BTF.
+HSIGS = {
+    118: ("bpf_jiffies64", [], 8),
+    44: ("bpf_xdp_adjust_head", [(True, 56, None), (False, None, 4)], 4),
+    120: ("bpf_get_ns_current_pid_tgid",
+          [(False, None, 8), (False, None, 8), (True, 8, None),
+           (False, None, 4)], 4),
+    # bpf_ima_inode_hash(struct inode *, void *dst, u32 size): dst's extent
+    # is argument 2
+    161: ("bpf_ima_inode_hash", [(True, 1088, None), (True, None, 2),
+                                 (False, None, 4)], 4),
+    # bpf_user_ringbuf_drain(struct bpf_map *, void *callback_fn,
+    # void *ctx, u64 flags): the two `void *` have no length partner
+    209: ("bpf_user_ringbuf_drain",
+          [(True, 488, None), (True, None, None), (True, None, None),
+           (False, None, 8)], 4),
+}
+
+
+def hverdict(a, b):
+    return compare(a, b, hsigs=HSIGS)[0]
+
+
+def test_generic_helper_same_call_is_equivalent():
+    p = asm.prog(asm.call(118), asm.exit_())
+    assert hverdict(p, p) == "EQUIV"
+
+
+def test_generic_helper_extra_call_is_detected():
+    """The call is pinned in the observable trace, so calling a helper an
+    extra time diverges even when the return value is discarded."""
+    once = asm.prog(asm.call(118), asm.mov64_imm(R0, 0), asm.exit_())
+    twice = asm.prog(asm.call(118), asm.call(118),
+                     asm.mov64_imm(R0, 0), asm.exit_())
+    assert hverdict(once, twice) == "INEQUIV"
+
+
+def test_generic_helper_differing_scalar_arg_is_detected():
+    a = asm.prog(asm.mov64_imm(R2, 4), asm.call(44), asm.exit_())
+    b = asm.prog(asm.mov64_imm(R2, 8), asm.call(44), asm.exit_())
+    assert hverdict(a, b) == "INEQUIV"
+
+
+def test_generic_helper_compares_scalar_at_declared_width():
+    """`int delta` is read as 32 bits: a difference confined to the upper
+    half of the register is invisible to the kernel and must not diverge."""
+    a = asm.prog(asm.mov64_imm(R2, 5), asm.call(44), asm.exit_())
+    b = asm.prog(asm.ld_imm64(R2, (1 << 32) | 5), asm.call(44), asm.exit_())
+    assert hverdict(a, b) == "EQUIV"
+
+
+def test_generic_helper_captures_stack_buffer_contents():
+    """A pointer into private memory has its bytes captured, so passing a
+    differently-filled buffer diverges."""
+    def prog(fill):
+        return asm.prog(asm.st_imm(8, R10, -8, fill),
+                        asm.mov64_imm(R1, 0), asm.mov64_imm(R2, 0),
+                        asm.mov64_reg(R3, R10), asm.add64_imm(R3, -8),
+                        asm.mov64_imm(R4, 8),
+                        asm.call(120), asm.mov64_imm(R0, 0), asm.exit_())
+    assert hverdict(prog(1), prog(1)) == "EQUIV"
+    assert hverdict(prog(1), prog(2)) == "INEQUIV"
+
+
+def test_generic_helper_output_buffer_is_havocked():
+    """The prototype does not say which pointers are outputs, so a written
+    buffer is havocked with a shared per-call value. Two objects that place
+    the buffer at DIFFERENT frame offsets must still agree on what they
+    read back — otherwise each would read its own stack residue."""
+    def prog(slot):
+        return asm.prog(asm.mov64_imm(R1, 0), asm.mov64_imm(R2, 0),
+                        asm.mov64_reg(R3, R10), asm.add64_imm(R3, slot),
+                        asm.mov64_imm(R4, 8),
+                        asm.call(120),
+                        asm.ldx(8, R0, R10, slot), asm.exit_())
+    assert hverdict(prog(-8), prog(-16)) == "EQUIV"
+
+
+def _ima(fill, nbytes):
+    """bpf_ima_inode_hash(inode, dst, size) with dst a filled stack buffer."""
+    return asm.prog(asm.mov64_imm(R1, 0),
+                    asm.st_imm(8, R10, -8, fill),
+                    asm.mov64_reg(R2, R10), asm.add64_imm(R2, -8),
+                    asm.mov64_imm(R3, nbytes),
+                    asm.call(161), asm.mov64_imm(R0, 0), asm.exit_())
+
+
+def test_generic_helper_length_paired_buffer_is_captured():
+    """`void *dst, u32 size`: the prototype states the extent positionally,
+    so the model captures exactly the bytes the kernel reads."""
+    assert hverdict(_ima(1, 8), _ima(1, 8)) == "EQUIV"
+    assert hverdict(_ima(1, 8), _ima(2, 8)) == "INEQUIV"
+
+
+def test_generic_helper_symbolic_length_bails():
+    """An extent the model cannot pin down is a bail, not a guess."""
+    p = asm.prog(asm.mov64_imm(R1, 0),
+                 asm.mov64_reg(R2, R10), asm.add64_imm(R2, -8),
+                 asm.ldx(4, R3, R1, 0),          # size from the context
+                 asm.call(161), asm.mov64_imm(R0, 0), asm.exit_())
+    with pytest.raises(Bail, match="symbolic size"):
+        compare(p, p, hsigs=HSIGS)
+
+
+def test_generic_helper_unsized_pointee_bails():
+    """A `void *` with no length partner has no extent to capture: bail
+    rather than pick a number."""
+    p = asm.prog(asm.mov64_imm(R1, 0),
+                 asm.mov64_reg(R2, R10), asm.add64_imm(R2, -16),
+                 asm.mov64_reg(R3, R10), asm.add64_imm(R3, -8),
+                 asm.mov64_imm(R4, 0),
+                 asm.call(209), asm.mov64_imm(R0, 0), asm.exit_())
+    with pytest.raises(Bail, match="unsized"):
+        compare(p, p, hsigs=HSIGS)

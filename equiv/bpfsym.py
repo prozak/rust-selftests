@@ -274,13 +274,19 @@ class Path:
 
 
 class Executor:
-    def __init__(self, elf, sec, shared, tag, kfunc_sigs=None):
+    def __init__(self, elf, sec, shared, tag, kfunc_sigs=None,
+                 helper_sigs=None):
         """shared: dict of region name -> z3 array, common to both programs.
         kfunc_sigs: optional {name: (params, void_ret)} that OVERRIDES this
         object's own BTF — check.py passes the signatures both objects
         agree on, so a declaration difference (one side declaring a kernel
-        struct opaque) can never manufacture a divergence."""
+        struct opaque) can never manufacture a divergence.
+        helper_sigs: {hid: (name, [(is_ptr, pointee size, scalar width)],
+        return width)} for helpers with no bespoke model; check.py builds it
+        from the UAPI header and the target kernel's BTF, so it is identical
+        for both objects by construction."""
         self.kfunc_sig_override = kfunc_sigs or {}
+        self.helper_sigs = helper_sigs or {}
         self.elf = elf
         self.sec = sec
         self.shared = shared
@@ -422,6 +428,7 @@ class Executor:
                 del sh[o]
             sh[a] = val
             mem[("shadow", region)] = sh
+            self._note_write(mem, region, addr, 8)
             if not region.startswith("stack:"):
                 import zlib
                 cname = self._canon_region(val.region)
@@ -445,6 +452,26 @@ class Executor:
         for k in range(size):
             arr = z3.Store(arr, addr + bv64(k), z3.Extract(8 * k + 7, 8 * k, val))
         mem[region] = arr
+        self._note_write(mem, region, addr, size)
+
+    def _note_write(self, mem, region, addr, size):
+        """Record which bytes of a private region the program has stored to.
+
+        Only _written_bytes uses this, to tell a byte the program supplied
+        from untouched residue. Copy-on-write, like the spill shadow, so a
+        path fork's `dict(mem)` stays independent."""
+        if not region.startswith("stack:"):
+            return
+        a = z3.simplify(addr)
+        key = ("wrote", region)
+        if not z3.is_bv_value(a):
+            mem[key] = None  # symbolic store: extent unknown from here on
+            return
+        prev = mem.get(key, frozenset())
+        if prev is None:
+            return
+        a = a.as_long()
+        mem[key] = prev | frozenset(range(a, a + size))
 
     # ---------- relocation resolution ----------
 
@@ -1355,10 +1382,155 @@ class Executor:
                 payload += self._mem_bytes(mem, regs[4], n, what)
             self._emit_event(mem, counters, hid, payload)
             ret = self._errno_oracle(hid, idx)
+        elif hid in self.helper_sigs:
+            ret = self._helper_generic(hid, regs, mem, counters, idx, what)
         else:
             raise Bail(f"helper {hid} in {what}")
 
         return self._ret_clobbered(regs, ret)
+
+    def _helper_generic(self, hid, regs, mem, counters, idx, what):
+        """Fallback for helpers with no bespoke model, driven by the
+        prototype in the kernel's own UAPI header (see bpfhelpers.py).
+
+        Same footing as every other trace-event helper: the call is pinned
+        in the observable trace with each argument compared the way the
+        KERNEL reads it — scalars at their declared width, pointers by
+        canonical identity, plus pointed-to bytes when the prototype names
+        a sizable pointee. The return is a shared per-(id, index) oracle at
+        the declared width. Equal traces therefore mean both objects made
+        the same call, so the environment answers identically.
+
+        A pointer into an OBSERVABLE region is compared by identity alone:
+        its contents are already compared globally, and the prototype's
+        pointee type is often not the layout the program sees anyway (the
+        context arg is declared `struct xdp_buff *` where the program holds
+        an `xdp_md`). A pointer into private memory — a stack buffer — must
+        have its bytes captured, so an unsizable pointee bails rather than
+        being silently skipped.
+
+        Those bytes are captured as WRITTEN-OR-NOT rather than raw: the
+        prototype does not say which pointers are outputs, and an output
+        buffer holds nothing but uninitialized residue at call time. Since
+        the two objects put their buffers at different frame offsets, that
+        residue reads as two different symbolic values and comparing it
+        would manufacture a divergence over bytes the kernel never looks
+        at. A byte still equal to its entry value contributes a marker
+        instead; every byte the program actually stored is compared for
+        real, which is what soundness needs.
+
+        Private buffers are then HAVOCKED with a shared per-call value, so
+        an output the kernel fills reads back equal on both sides instead
+        of each side seeing its own residue. Havoc after capture is sound:
+        a genuine difference in what was passed IN is already pinned in the
+        trace event."""
+        name, params, ret_kind = self.helper_sigs[hid]
+        if len(params) > 5:
+            raise Bail(f"helper {hid} ({name}) takes {len(params)} args "
+                       f"in {what}")
+        payload, buffers, priv = self._name_bytes(name), [], []
+        for i, (is_pointer, size, extra) in enumerate(params):
+            a = regs[1 + i]
+            if not is_pointer:
+                payload += self._val_bytes(a, extra or 8, what)
+                continue
+            if size is None and extra is not None:
+                # buffer whose length is a later argument: that argument
+                # says how much the kernel reads, so a symbolic one leaves
+                # us with no extent to capture
+                size = self._concrete_u64(need_data(regs[1 + extra], what),
+                                          what)
+            if not is_ptr(a) or self._is_observable(a.region):
+                payload += self._arg_id_bytes(a, what)
+                continue
+            # A private buffer's ADDRESS is not an observable: the two
+            # objects place their locals at different frame offsets, and
+            # even in different FRAMES — one compiler inlines the helper
+            # that owns the buffer, the other leaves it a bpf2bpf callee,
+            # so the same local is `stack:T` in one and `stack:T:f1` in the
+            # other. What is observable is the aliasing structure — whether
+            # this argument is the same buffer as an earlier one — plus the
+            # bytes below.
+            payload += self._name_bytes(self._private_kind(a.region))
+            payload += [z3.If(a.off == p.off, z3.BitVecVal(1, 8),
+                              z3.BitVecVal(0, 8))
+                        if a.region == p.region else z3.BitVecVal(0, 8)
+                        for p in priv]
+            priv.append(a)
+            if size is None:
+                raise Bail(f"helper {hid} ({name}) arg{i} points to an "
+                           f"unsized type in {what}")
+            if size > MAX_COPY:
+                raise Bail(f"helper {hid} ({name}) arg{i} pointee {size}B "
+                           f"> {MAX_COPY} in {what}")
+            payload += self._written_bytes(mem, a, size, what)
+            buffers.append((i, a, size))
+        self._emit_event(mem, counters, hid, payload)
+        f = z3.Function(f"oracle_hbuf{hid}", BV64S, BV64S, BV64S, BV8S)
+        for argno, ptr, size in buffers:
+            for k in range(size):
+                self._store(mem, self._addr_add(ptr, k), 1,
+                            f(bv64(idx), bv64(argno), bv64(k)))
+        if ret_kind == 8:
+            return z3.Function(f"oracle_h{hid}_ret", BV64S, BV64S)(bv64(idx))
+        return self._errno_oracle(hid, idx)
+
+    def _written_bytes(self, mem, ptr, n, what):
+        """`n` bytes at `ptr`, with bytes the program never stored to
+        reported as zero rather than as their residue. See _helper_generic.
+
+        Untouched residue must not be compared: the two objects lay their
+        frames out differently, so the same untouched byte reads as two
+        unrelated symbolic values. Zero also makes an uninitialized C local
+        agree with the `[0u8; N]` its translation declares — and for an
+        OUTPUT buffer (bpf_xdp_load_bytes' `meta_have`) neither the kernel
+        nor the program ever looks at those bytes.
+
+        Writtenness comes from the recorded store set, not from comparing
+        against the entry value: residue is symbolic, so `cur == init` is
+        satisfiable for a byte that WAS written, and a solver picking that
+        model on one side only would invent a divergence between two
+        buffers holding identical data.
+
+        The cost is that a byte stored as zero reads the same as one never
+        stored, so a translation that left an INPUT byte uninitialized
+        where C writes zero would slip through. That is the one imprecision
+        here; every other difference in what the program hands the kernel
+        is compared exactly."""
+        if not ptr.region.startswith("stack:"):
+            # Only the stack carries residue. Other private regions (rodata,
+            # a ringbuf reservation) hold values that are equal by
+            # construction across the two runs, so capture them as they are.
+            return self._mem_bytes(mem, ptr, n, what)
+        wrote = mem.get(("wrote", ptr.region), frozenset())
+        if wrote is None:
+            raise Bail(f"buffer arg after a symbolically-addressed store "
+                       f"in {what}")
+        base = z3.simplify(ptr.off)
+        if not z3.is_bv_value(base):
+            raise Bail(f"symbolic buffer address in {what}")
+        base = base.as_long()
+        out = []
+        for k in range(n):
+            if base + k not in wrote:
+                out.append(z3.BitVecVal(0, 8))
+                continue
+            out.append(z3.Extract(
+                7, 0, self._load(mem, self._addr_add(ptr, k), 1)))
+        return out
+
+    def _private_kind(self, region):
+        """What KIND of private memory a pointer refers to, with the frame
+        it happens to live in dropped — see _helper_generic."""
+        if region.startswith("stack:"):
+            return "stack"
+        return self._canon_region(region)
+
+    def _is_observable(self, region):
+        """Regions compared in their own right by check.py, so a pointer
+        into one needs no content capture (kept in sync with obs_regions)."""
+        return (region in ("ctx", "kmem", "trace", "sysret", "skbdata")
+                or region.startswith(("g:", "mapval:", "arenapg:")))
 
     def _ret_clobbered(self, regs, ret):
         regs = regs[:]

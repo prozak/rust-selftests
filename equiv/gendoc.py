@@ -30,8 +30,21 @@ MAP1 = {"m": {"key_size": 4, "value_size": 8, "map_type": 1,
               "max_entries": 2, "inner": None}}
 
 
-def E(name, category, code, note, **kw):
-    return dict(name=name, category=category, code=code, note=note, kw=kw)
+def E(name, category, code, note, hsigs=None, **kw):
+    return dict(name=name, category=category, code=code, note=note,
+                hsigs=hsigs, kw=kw)
+
+
+# generic (prototype-driven) helper signatures, in check.helper_sigs()'s
+# shape — spelled out so the doc builds without a kernel BTF
+HSIGS = {
+    44: ("bpf_xdp_adjust_head", [(True, 56, None), (False, None, 4)], 4),
+    120: ("bpf_get_ns_current_pid_tgid",
+          [(False, None, 8), (False, None, 8), (True, 8, None),
+           (False, None, 4)], 4),
+    161: ("bpf_ima_inode_hash", [(True, 1088, None), (True, None, 2),
+                                 (False, None, 4)], 4),
+}
 
 
 ENTRIES = [
@@ -115,6 +128,40 @@ ENTRIES = [
       "nth lookup takes the same branch. The non-null side points into a "
       "per-index `mapval:` region whose final contents are observable.",
       maps=MAP1, relocs={0: "m"}),
+    E("Generic helper, prototype-driven", "Helpers",
+      asm.prog(asm.mov64_imm(R2, 4), asm.call(44),
+               asm.mov64_imm(R0, 0), asm.exit_()),
+      "A helper with no bespoke model is driven by its prototype in the "
+      "kernel's UAPI header. Each argument enters the trace event the way "
+      "the KERNEL reads it: `int delta` is compared as 32 bits, so a "
+      "difference confined to the upper half of the register — which the "
+      "helper never sees — does not count as one. The context pointer is "
+      "compared by identity, its contents already being an observable.",
+      hsigs=HSIGS),
+    E("Generic helper with a private buffer", "Helpers",
+      asm.prog(asm.mov64_imm(R1, 0), asm.mov64_imm(R2, 0),
+               asm.mov64_reg(R3, R10), asm.add64_imm(R3, -8),
+               asm.mov64_imm(R4, 8), asm.call(120),
+               asm.ldx(8, R0, R10, -8), asm.exit_()),
+      "A pointer into private memory has its bytes captured, but as "
+      "(written?, value) pairs: an output buffer holds only uninitialized "
+      "residue at call time, and the two objects place their locals at "
+      "different frame offsets, so comparing that residue would invent a "
+      "divergence. The buffer is then havocked with a shared per-call "
+      "value, which is why the load afterwards reads an oracle term "
+      "rather than each object's own stack.",
+      hsigs=HSIGS),
+    E("Generic helper with a length-paired buffer", "Helpers",
+      asm.prog(asm.mov64_imm(R1, 0), asm.st_imm(8, R10, -8, 1),
+               asm.mov64_reg(R2, R10), asm.add64_imm(R2, -8),
+               asm.mov64_imm(R3, 8), asm.call(161),
+               asm.mov64_imm(R0, 0), asm.exit_()),
+      "`bpf_ima_inode_hash(struct inode *, void *dst, u32 size)`: a `void "
+      "*` has no extent of its own, but the prototype states it "
+      "positionally in the next argument. That argument is what the model "
+      "captures — a symbolic one bails, since guessing how much the kernel "
+      "reads is exactly the kind of assumption this checker refuses.",
+      hsigs=HSIGS),
 ]
 
 
@@ -125,7 +172,8 @@ def render_entry(e):
                     ("trace", "trace_init"), ("skbdata", "skbdata"),
                     ("sysret", "sysret")):
         shared[nm] = z3.Array(arr, z3.BitVecSort(64), z3.BitVecSort(8))
-    ex = Executor(elf, elf.section_by_name(SEC_NAME), shared, "A")
+    ex = Executor(elf, elf.section_by_name(SEC_NAME), shared, "A",
+                  helper_sigs=e["hsigs"])
     paths = ex.run(0)
     baseline = dict(shared)
 

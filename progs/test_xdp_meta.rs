@@ -188,14 +188,16 @@ fn check_skb_metadata(skb: *const __sk_buff) -> bool {
 
 #[inline(always)]
 fn is_test_packet_xdp(ctx: *const xdp_md) -> bool {
-    let len = bpf_xdp_get_buff_len(ctx as *mut xdp_md);
-    if len < META_SIZE as u64 {
+    // C: `__u32 len = bpf_xdp_get_buff_len(ctx);` — the helper returns u64
+    // and the assignment narrows it, which the comparison below then sees.
+    let len = bpf_xdp_get_buff_len(ctx as *mut xdp_md) as u32;
+    if len < META_SIZE as u32 {
         return false;
     }
     let mut meta_have = [0u8; META_SIZE];
     if bpf_xdp_load_bytes(
         ctx as *mut xdp_md,
-        (len - META_SIZE as u64) as u32,
+        len - META_SIZE as u32,
         meta_have.as_mut_ptr() as *mut c_void,
         META_SIZE as u32,
     ) != 0

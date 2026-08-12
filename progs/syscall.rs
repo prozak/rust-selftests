@@ -1,6 +1,10 @@
 #![no_std]
 #![no_main]
 #![feature(asm_experimental_arch)]
+// Function-local statics keep the C source's identifiers: the equivalence
+// checker pairs globals BY NAME across the two objects, so SCREAMING_CASE
+// here would leave each object's copy unpaired.
+#![allow(non_upper_case_globals)]
 
 // Direct translation of tools/testing/selftests/bpf/progs/syscall.c
 // (bpf-rs-core idiom).
@@ -247,7 +251,7 @@ unsafe fn map_id(p: *const c_void) -> u32 {
 }
 
 fn btf_load() -> i32 {
-    static RAW_BTF: BtfBlob = BtfBlob {
+    static raw_btf: BtfBlob = BtfBlob {
         hdr: BtfHeader {
             magic: 0xeb9f, // BTF_MAGIC
             version: 1,    // BTF_VERSION
@@ -268,17 +272,17 @@ fn btf_load() -> i32 {
         ],
         str: 0,
     };
-    static mut BTF_LOAD_ATTR: BtfLoadAttr = BtfLoadAttr {
+    static mut btf_load_attr: BtfLoadAttr = BtfLoadAttr {
         btf: 0,
         btf_log_buf: 0,
         btf_size: 68, // sizeof(raw_btf) == sizeof(BtfBlob)
     };
 
     unsafe {
-        BTF_LOAD_ATTR.btf = core::ptr::addr_of!(RAW_BTF) as u64;
+        btf_load_attr.btf = core::ptr::addr_of!(raw_btf) as u64;
         bpf_sys_bpf(
             BPF_BTF_LOAD,
-            core::ptr::addr_of_mut!(BTF_LOAD_ATTR) as *mut c_void,
+            core::ptr::addr_of_mut!(btf_load_attr) as *mut c_void,
             core::mem::size_of::<BtfLoadAttr>() as u32,
         ) as i32
     }
@@ -287,8 +291,8 @@ fn btf_load() -> i32 {
 #[link_section = "syscall"]
 #[no_mangle]
 extern "C" fn load_prog(ctx: *mut Args) -> i32 {
-    static LICENSE: [u8; 4] = *b"GPL\0";
-    static mut INSNS: [BpfInsn; 8] = [
+    static license: [u8; 4] = *b"GPL\0";
+    static mut insns: [BpfInsn; 8] = [
         BpfInsn { code: 0x7a, regs: regs(10, 0), off: -8, imm: 0 }, // BPF_ST_MEM(DW, R10, -8, 0)
         BpfInsn { code: 0xbf, regs: regs(2, 10), off: 0, imm: 0 },  // BPF_MOV64_REG(R2, R10)
         BpfInsn { code: 0x07, regs: regs(2, 0), off: 0, imm: -8 },  // BPF_ALU64_IMM(ADD, R2, -8)
@@ -298,7 +302,7 @@ extern "C" fn load_prog(ctx: *mut Args) -> i32 {
         BpfInsn { code: 0xb7, regs: regs(0, 0), off: 0, imm: 0 },   // BPF_MOV64_IMM(R0, 0)
         BpfInsn { code: 0x95, regs: regs(0, 0), off: 0, imm: 0 },   // BPF_EXIT_INSN()
     ];
-    static mut MAP_CREATE_ATTR: MapCreateAttr = MapCreateAttr {
+    static mut map_create_attr: MapCreateAttr = MapCreateAttr {
         map_type: BPF_MAP_TYPE_HASH,
         key_size: 8,
         value_size: 8,
@@ -312,10 +316,10 @@ extern "C" fn load_prog(ctx: *mut Args) -> i32 {
         btf_key_type_id: 1,
         btf_value_type_id: 2,
     };
-    static mut MAP_UPDATE_ATTR: ElemView = ElemView { map_fd: 1, key: 0, value: 0 };
-    static KEY: u64 = 12;
-    static VALUE: u64 = 34;
-    static mut PROG_LOAD_ATTR: ProgLoadAttr = ProgLoadAttr {
+    static mut map_update_attr: ElemView = ElemView { map_fd: 1, key: 0, value: 0 };
+    static key: u64 = 12;
+    static value: u64 = 34;
+    static mut prog_load_attr: ProgLoadAttr = ProgLoadAttr {
         prog_type: BPF_PROG_TYPE_XDP,
         insn_cnt: 8,
         insns: 0,
@@ -332,32 +336,32 @@ extern "C" fn load_prog(ctx: *mut Args) -> i32 {
 
     unsafe {
         (*ctx).btf_fd = ret;
-        MAP_CREATE_ATTR.max_entries = (*ctx).max_entries as u32;
-        MAP_CREATE_ATTR.btf_fd = ret as u32;
+        map_create_attr.max_entries = (*ctx).max_entries as u32;
+        map_create_attr.btf_fd = ret as u32;
 
-        PROG_LOAD_ATTR.license = core::ptr::addr_of!(LICENSE) as u64;
-        PROG_LOAD_ATTR.insns = core::ptr::addr_of_mut!(INSNS) as u64;
-        PROG_LOAD_ATTR.log_buf = (*ctx).log_buf;
-        PROG_LOAD_ATTR.log_size = (*ctx).log_size;
-        PROG_LOAD_ATTR.log_level = 1;
+        prog_load_attr.license = core::ptr::addr_of!(license) as u64;
+        prog_load_attr.insns = core::ptr::addr_of_mut!(insns) as u64;
+        prog_load_attr.log_buf = (*ctx).log_buf;
+        prog_load_attr.log_size = (*ctx).log_size;
+        prog_load_attr.log_level = 1;
 
         ret = bpf_sys_bpf(
             BPF_MAP_CREATE,
-            core::ptr::addr_of_mut!(MAP_CREATE_ATTR) as *mut c_void,
+            core::ptr::addr_of_mut!(map_create_attr) as *mut c_void,
             core::mem::size_of::<MapCreateAttr>() as u32,
         ) as i32;
         if ret <= 0 {
             return ret;
         }
         (*ctx).map_fd = ret;
-        INSNS[3].imm = ret;
+        insns[3].imm = ret;
 
-        MAP_UPDATE_ATTR.map_fd = ret as u32;
-        MAP_UPDATE_ATTR.key = core::ptr::addr_of!(KEY) as u64;
-        MAP_UPDATE_ATTR.value = core::ptr::addr_of!(VALUE) as u64;
+        map_update_attr.map_fd = ret as u32;
+        map_update_attr.key = core::ptr::addr_of!(key) as u64;
+        map_update_attr.value = core::ptr::addr_of!(value) as u64;
         ret = bpf_sys_bpf(
             BPF_MAP_UPDATE_ELEM,
-            core::ptr::addr_of_mut!(MAP_UPDATE_ATTR) as *mut c_void,
+            core::ptr::addr_of_mut!(map_update_attr) as *mut c_void,
             core::mem::size_of::<ElemView>() as u32,
         ) as i32;
         if ret < 0 {
@@ -366,7 +370,7 @@ extern "C" fn load_prog(ctx: *mut Args) -> i32 {
 
         ret = bpf_sys_bpf(
             BPF_PROG_LOAD,
-            core::ptr::addr_of_mut!(PROG_LOAD_ATTR) as *mut c_void,
+            core::ptr::addr_of_mut!(prog_load_attr) as *mut c_void,
             core::mem::size_of::<ProgLoadAttr>() as u32,
         ) as i32;
         if ret <= 0 {

@@ -144,11 +144,13 @@ fn is_remote_ep_v6(skb: *const __sk_buff, addr: &[u8; 16]) -> bool {
 
 #[inline(always)]
 fn tc_redir(skb: *const __sk_buff, v4_addr: u32, v6_addr: &[u8; 16], ifindex: u32) -> i32 {
-    let protocol = vload!((*skb).protocol) as u16;
+    // C switches on the full `__u32 skb->protocol`; narrowing to u16 here
+    // would match on the low half alone.
+    let protocol = vload!((*skb).protocol);
 
-    let redirect = if protocol == htons(ETH_P_IP) {
+    let redirect = if protocol == htons(ETH_P_IP) as u32 {
         is_remote_ep_v4(skb, htonl(v4_addr))
-    } else if protocol == htons(ETH_P_IPV6) {
+    } else if protocol == htons(ETH_P_IPV6) as u32 {
         is_remote_ep_v6(skb, v6_addr)
     } else {
         false

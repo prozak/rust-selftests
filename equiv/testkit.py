@@ -185,8 +185,11 @@ class FakeElf:
 
 # -------------------------------------------------------------- comparison
 
-def compare(code_a, code_b, timeout_ms=20_000, **kw):
-    """Prove two synthetic programs equivalent. Returns (verdict, detail)."""
+def compare(code_a, code_b, timeout_ms=20_000, hsigs=None, **kw):
+    """Prove two synthetic programs equivalent. Returns (verdict, detail).
+
+    hsigs: generic helper signatures, in check.helper_sigs()'s shape. Given
+    explicitly here so the tests need no kernel BTF."""
     elf_a = FakeElf(code_a, path="a.bpf.o", **kw)
     elf_b = FakeElf(code_b, path="b.bpf.o", **kw)
     shared, _ = _check.global_regions({"A": elf_a, "B": elf_b})
@@ -199,4 +202,4 @@ def compare(code_a, code_b, timeout_ms=20_000, **kw):
     return _check.check_program(FUNC_NAME, FUNC_NAME,
                                 {"A": (elf_a, sec_a, 0),
                                  "B": (elf_b, sec_b, 0)},
-                                shared, timeout_ms)
+                                shared, timeout_ms, hsigs=hsigs)

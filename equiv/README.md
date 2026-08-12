@@ -28,6 +28,10 @@ equiv/sweep.sh <names-file> <out-dir> 10
   against the target kernel's BTF before lifting.
 - `bpfsym.py` — BPF ISA → Z3 lifter with path-enumerating symbolic execution.
   Anything unmodeled raises `Bail` (never guesses).
+- `bpfhelpers.py` — helper prototypes parsed out of the kernel's own UAPI
+  header (the doc comments above the `FN()` list), so the generic helper
+  model is driven by the kernel's declaration of what each helper reads
+  rather than a hand-maintained table.
 - `check.py` — pairs programs by (section, func) across the two objects,
   builds ITE path summaries, asks Z3 for a distinguishing input.
 - `sweep.sh` — parallel driver + verdict histogram.
@@ -491,13 +495,64 @@ would not be distinguished.
   way — they are already executed inline at their call site with the real
   map and per-iteration arguments.
 
-Results tables: `results/`. Remaining bail classes after tier 6:
-unmodeled helper tail ×180 program-sites and kfunc tail ×183 (dynptr
-family, obj_new/wq, timers, fou encap, testmod/struct_ops kfuncs, ...);
-stores through kernel-pointer windows ×60 (ctx/packet data pointers);
-oversized copies (get_stack 2048, probe_read 2880 > MAX_COPY) ×15;
-`__kconfig` externs ×17 (build constants, unadjudicable);
-pointer-compare/symbolic-size/spill tail.
+- tier 9 (2026-08-12; generic helper model):
+  **1274 EQUIV / 0 INEQUIV / 17 WAIVED** (356 objects fully proved, from
+  322). The helper tail was the same shape as tier 8's kfunc tail — ~106
+  sites over ~30 helpers with no dominant member — so it gets the same
+  treatment: one generic model instead of thirty bespoke ones, driven by
+  the prototypes in the kernel's OWN uapi header (`bpfhelpers.py` parses
+  the doc comments above the `FN()` list, 184 signatures). Each argument
+  enters the trace event the way the kernel reads it: scalars at their
+  declared width, pointers into observable regions by identity (their
+  contents are compared in their own right, and the prototype's pointee is
+  often not the layout the program sees — the context argument is declared
+  `struct xdp_buff *` where the program holds an `xdp_md`), private
+  buffers by their bytes. Buffer extents come from the prototype too:
+  struct pointees sized against the same kernel BTF used for CO-RE, and
+  `void *dst, u32 size` pairs sized from the paired argument, which the
+  header states positionally and by name. A `void *` with no length
+  partner, and a symbolic length, still bail — the extent is precisely
+  what is not worth guessing. 6 helper bail-sites remain, from 106.
+
+  Three model refinements fell out of triage, each now a hermetic test.
+  (1) A private buffer's ADDRESS is not an observable: the two objects
+  place their locals at different frame offsets, and even in different
+  FRAMES (clang inlined `clobber_regs_stack` where rustc left it a bpf2bpf
+  callee, making the same local `stack:T` in one object and `stack:T:f1`
+  in the other). Identity is now the aliasing structure — is this argument
+  the same buffer as an earlier one — and nothing else. (2) Bytes the
+  program never stored to are reported as zero rather than as residue,
+  since an output buffer holds nothing else at call time and each object
+  would otherwise read its own. (3) Writtenness is recorded at store time,
+  NOT inferred by comparing against the entry value: residue is symbolic,
+  so `cur == init` is satisfiable for a byte that WAS written, and a
+  solver picking that model on one side only invented a divergence between
+  two buffers holding identical data. The one imprecision left is that a
+  byte stored as zero reads the same as one never stored.
+
+  Five real translation bugs, all QEMU-gated: `test_xdp_meta` kept
+  `bpf_xdp_get_buff_len()`'s u64 where C narrows to `__u32 len` before the
+  guard; `test_tc_neigh` narrowed `skb->protocol` to u16 where C switches
+  on the full `__u32`; `ima` narrowed a `bool` ctx argument to its low byte
+  where C's bool conversion tests all 64 bits, and used a Rust `bool` for
+  four globals clang compiles three different ways in this one file
+  (`!= 0`, `!= 1`, and `(x & 1) != 0`) — the sharpest bool-global case
+  after test_sockmap_listen; `tailcall_bpf2bpf_hierarchy3` was missing the
+  `clobber_regs_stack()` call outright; and `syscall` named its
+  function-local statics in SCREAMING_CASE, so they never paired with C's
+  by name. Three waived with diagnosis: `bpf_iter_task_btf` and
+  `rcu_read_lock` both take the C source's own fallback path (no rustc
+  equivalent for `__builtin_btf_type_id`; the other path is
+  verifier-rejected before it can run), and `syscall`'s remainder is the
+  right-sized prefix structs its header documents against C's full
+  168-byte `union bpf_attr` statics.
+
+Results tables: `results/`. Remaining bail classes after tier 9:
+kfunc tail ×~90 (mostly unsized pointees: dynptr family, wq, testmod and
+struct_ops kfuncs); `__kconfig` externs ×18 (build constants,
+unadjudicable); `get_stack` sizes over MAX_COPY ×15; core-type-id-local
+poison ×15; `pointer used as data` ×9; symbolic-size, pointer-compare and
+spill tail; 6 helper sites (unsized `void *` with no length partner).
 
 ## Roadmap
 

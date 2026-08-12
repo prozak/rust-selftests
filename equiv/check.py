@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import z3
 import bpfcore
+import bpfhelpers
 from bpfelf import (BpfElf, SHF_ALLOC, SHF_EXECINSTR, SHT_NOBITS, STT_FUNC,
                     STT_OBJECT, normalize_name)
 from bpfsym import Bail, Executor
@@ -178,11 +179,63 @@ def agreed_kfunc_sigs(elves):
     return out
 
 
-def check_program(name, func, elves, shared, timeout_ms, callback=False):
+def helper_sigs(kbtf):
+    """Generic-model signatures for helpers, from the UAPI header.
+
+    {hid: (name, [(is_pointer, pointee size or None, scalar width or
+    length-argument index)], return width)}. Struct pointees are sized
+    against the target kernel's BTF — the same BTF CO-RE relocated
+    against — so the model captures exactly the bytes the kernel would
+    read. A buffer whose length rides in the next argument carries that
+    argument's index instead. Anything still unsizable keeps size None and
+    makes the model bail rather than skip an argument.
+
+    Both objects get this identical table, so unlike kfunc signatures
+    (which come from each object's own BTF) it cannot manufacture a
+    divergence."""
+    out = {}
+    for hid, (name, ret, params) in bpfhelpers.signatures().items():
+        entry = []
+        for i, (p, _pname) in enumerate(params):
+            pt = bpfhelpers.pointee(p)
+            if pt is None:
+                entry.append((False, None, bpfhelpers.arg_width(p)))
+                continue
+            # A scalar pointee (char *buf, void *data) is a buffer, not one
+            # element: its width is NOT how much the kernel reads. Take the
+            # length from the paired size argument when the prototype has
+            # one, and only size a pointee outright when it is a struct.
+            size = None
+            if kbtf is not None and pt.startswith("struct "):
+                ids = kbtf.by_name(pt.split(None, 1)[1])
+                sizes = {kbtf.type_size(i) for i in ids}
+                sizes.discard(None)
+                # ambiguous name => no single layout to read
+                size = sizes.pop() if len(sizes) == 1 else None
+            lenarg = bpfhelpers.length_param(params, i) if size is None else None
+            if size is None and lenarg is None:
+                # No length partner: a pointer to a WIDE scalar is a single
+                # out-parameter (`unsigned long *res`) and is sized by its
+                # type. `void *` and byte pointers stay unsized — those are
+                # arrays by convention, and guessing one element would
+                # under-capture.
+                w = bpfhelpers.arg_width(pt)
+                size = w if w and w >= 2 else None
+            entry.append((True, size, lenarg))
+        # `long`/`int` returns are the errno convention the bespoke models
+        # already use (sign-extended 32-bit); u64/s64 are true 64-bit values.
+        rw = 8 if bpfhelpers._norm(ret) in ("u64", "__u64", "s64", "__s64") else 4
+        out[hid] = (name, entry, rw)
+    return out
+
+
+def check_program(name, func, elves, shared, timeout_ms, callback=False,
+                  hsigs=None):
     paths, void = {}, {}
     sigs = agreed_kfunc_sigs(elves)
     for tag, (elf, sec, entry) in elves.items():
-        ex = Executor(elf, sec, shared, tag, kfunc_sigs=sigs)
+        ex = Executor(elf, sec, shared, tag, kfunc_sigs=sigs,
+                      helper_sigs=hsigs)
         paths[tag] = ex.run(entry, callback=callback)
         # r0 never assigned on any path => BTF-void return (verifier-enforced)
         void[tag] = all(z3.eq(p.ret, ex.init_r0) for p in paths[tag])
@@ -283,6 +336,7 @@ def main():
     else:
         kbtf_path = None
     core_applied = False
+    kbtf = None
     if kbtf_path:
         kbtf = bpfcore.load_kernel_btf(kbtf_path)
         # module split BTFs: candidate sources alongside vmlinux, as libbpf
@@ -301,6 +355,7 @@ def main():
                 print(f"  CORE {os.path.basename(elf.path)} {line}")
         core_applied = True
 
+    hsigs = helper_sigs(kbtf)
     progs_c, progs_r = programs(elf_c), programs(elf_r)
 
     shared, warnings = global_regions({"A": elf_c, "B": elf_r})
@@ -356,7 +411,8 @@ def main():
             verdict, detail = check_program(
                 label, func,
                 {"A": (elf_c,) + progs_c[key], "B": (elf_r,) + progs_r[key]},
-                shared, args.timeout, callback=(key in callbacks))
+                shared, args.timeout, callback=(key in callbacks),
+                hsigs=hsigs)
         except Bail as e:
             verdict, detail = "BAIL", str(e)
         if verdict == "INEQUIV" and label in waivers:

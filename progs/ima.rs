@@ -33,14 +33,21 @@ bpf_map! {
 #[no_mangle]
 static mut monitored_pid: u32 = 0;
 
+// These four are `bool` in the C source, but clang compiles a `_Bool`
+// truthiness test differently per site — even inside this one file it
+// emits `!= 0` for use_ima_file_hash/test_deny, `!= 1` for
+// enable_bprm_creds_for_exec, and `(x & 1) != 0` for
+// enable_kernel_read_file. A Rust `bool` gets one fixed encoding, so the
+// globals are u8 here and each branch below mirrors the compare the C
+// object actually made (see TRANSLATING.md, bool-global).
 #[no_mangle]
-static mut use_ima_file_hash: bool = false;
+static mut use_ima_file_hash: u8 = 0;
 #[no_mangle]
-static mut enable_bprm_creds_for_exec: bool = false;
+static mut enable_bprm_creds_for_exec: u8 = 0;
 #[no_mangle]
-static mut enable_kernel_read_file: bool = false;
+static mut enable_kernel_read_file: u8 = 0;
 #[no_mangle]
-static mut test_deny: bool = false;
+static mut test_deny: u8 = 0;
 
 #[btf]
 struct inode {}
@@ -63,7 +70,7 @@ fn ima_test_common(file_ptr: *mut file) {
     }
 
     let mut ima_hash: u64 = 0;
-    let ret = if !unsafe { use_ima_file_hash } {
+    let ret = if unsafe { use_ima_file_hash } == 0 {
         let inode_ptr = *unsafe { &*file_ptr }.f_inode().get().unwrap();
         bpf_ima_inode_hash(inode_ptr, &mut ima_hash as *mut u64 as *mut c_void, 8)
     } else {
@@ -86,7 +93,7 @@ fn ima_test_common(file_ptr: *mut file) {
 #[inline(never)]
 fn ima_test_deny() -> i32 {
     let pid = (bpf_get_current_pid_tgid() >> 32) as u32;
-    if pid == unsafe { monitored_pid } && unsafe { test_deny } {
+    if pid == unsafe { monitored_pid } && unsafe { test_deny } != 0 {
         return -EPERM;
     }
     0
@@ -103,7 +110,7 @@ extern "C" fn bprm_committed_creds(ctx: *const u64) -> i32 {
 
 #[inline(never)]
 fn do_bprm_creds_for_exec(ctx: *const u64) -> i32 {
-    if !unsafe { enable_bprm_creds_for_exec } {
+    if unsafe { enable_bprm_creds_for_exec } != 1 {
         return 0;
     }
 
@@ -121,11 +128,14 @@ extern "C" fn bprm_creds_for_exec(ctx: *const u64) -> i32 {
 
 #[inline(never)]
 fn do_kernel_read_file(ctx: *const u64) -> i32 {
-    if !unsafe { enable_kernel_read_file } {
+    if unsafe { enable_kernel_read_file } & 1 == 0 {
         return 0;
     }
 
-    let contents = fentry_arg(ctx, 2) as u8;
+    // C's parameter is `bool contents`, and converting an integer to bool
+    // tests the WHOLE value — narrowing to u8 first would take the
+    // `return 0` branch for any argument whose low byte alone is zero.
+    let contents = fentry_arg(ctx, 2);
     if contents == 0 {
         return 0;
     }

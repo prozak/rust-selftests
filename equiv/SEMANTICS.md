@@ -216,3 +216,62 @@ map_lookup emits its question as a trace event and then forks on a shared per-in
 - path 1: `oracle_null_h1(0)`
   - returns `0`
   - writes: stack:A, trace
+
+### Generic helper, prototype-driven
+
+A helper with no bespoke model is driven by its prototype in the kernel's UAPI header. Each argument enters the trace event the way the KERNEL reads it: `int delta` is compared as 32 bits, so a difference confined to the upper half of the register — which the helper never sees — does not count as one. The context pointer is compared by identity, its contents already being an observable.
+
+```
+   0  mov64 r2, 4
+   1  call 44
+   2  mov64 r0, 0
+   3  exit
+```
+
+*1 path(s):*
+
+- path 0: `(none)`
+  - returns `0`
+  - writes: trace
+
+### Generic helper with a private buffer
+
+A pointer into private memory has its bytes captured, but as (written?, value) pairs: an output buffer holds only uninitialized residue at call time, and the two objects place their locals at different frame offsets, so comparing that residue would invent a divergence. The buffer is then havocked with a shared per-call value, which is why the load afterwards reads an oracle term rather than each object's own stack.
+
+```
+   0  mov64 r1, 0
+   1  mov64 r2, 0
+   2  mov64 r3, r10
+   3  add64 r3, -8
+   4  mov64 r4, 8
+   5  call 120
+   6  ldxdw r0, [r10-8]
+   7  exit
+```
+
+*1 path(s):*
+
+- path 0: `(none)`
+  - returns `Concat(oracle_hbuf120(0, 2, 7), oracle_hbuf120(0, 2, 6), oracle_hbuf120(0, 2, 5), oracle_hbuf120(0, 2, 4), oracle_hbuf120(0, 2, 3), oracle_hbuf120(0, 2, 2), oracle_hbuf120(0, 2, 1), oracle_hbuf120(0, 2, 0))`
+  - writes: stack:A, trace
+
+### Generic helper with a length-paired buffer
+
+`bpf_ima_inode_hash(struct inode *, void *dst, u32 size)`: a `void *` has no extent of its own, but the prototype states it positionally in the next argument. That argument is what the model captures — a symbolic one bails, since guessing how much the kernel reads is exactly the kind of assumption this checker refuses.
+
+```
+   0  mov64 r1, 0
+   1  stdw [r10-8], 1
+   2  mov64 r2, r10
+   3  add64 r2, -8
+   4  mov64 r3, 8
+   5  call 161
+   6  mov64 r0, 0
+   7  exit
+```
+
+*1 path(s):*
+
+- path 0: `(none)`
+  - returns `0`
+  - writes: stack:A, trace

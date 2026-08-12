@@ -274,8 +274,13 @@ class Path:
 
 
 class Executor:
-    def __init__(self, elf, sec, shared, tag):
-        """shared: dict of region name -> z3 array, common to both programs."""
+    def __init__(self, elf, sec, shared, tag, kfunc_sigs=None):
+        """shared: dict of region name -> z3 array, common to both programs.
+        kfunc_sigs: optional {name: (params, void_ret)} that OVERRIDES this
+        object's own BTF — check.py passes the signatures both objects
+        agree on, so a declaration difference (one side declaring a kernel
+        struct opaque) can never manufacture a divergence."""
+        self.kfunc_sig_override = kfunc_sigs or {}
         self.elf = elf
         self.sec = sec
         self.shared = shared
@@ -796,6 +801,42 @@ class Executor:
     def _kfunc_proto(self, name):
         """Per-parameter is-pointer flags from the object's own BTF FUNC
         declaration of the kfunc, or None if undeclared."""
+        sig = self._kfunc_sig(name)
+        return None if sig is None else [p[0] for p in sig[0]]
+
+    @staticmethod
+    def kfunc_sigs_of(elf):
+        """{kfunc name: (params, void_ret)} for every FUNC in an object's
+        BTF that is only declared (a kfunc), in the same shape as
+        _kfunc_sig. Used by check.py to intersect the two objects."""
+        import bpfcore
+        sec = elf.section_by_name(".BTF")
+        if sec is None:
+            return {}
+        b = bpfcore.Btf(sec.data)
+        out = {}
+        for t in b.types.values():
+            if t.kind != 12 or not t.name:      # FUNC
+                continue
+            proto = b.resolve(t.type)
+            if proto.kind != 13:                # FUNC_PROTO
+                continue
+            rett, params = proto.proto
+            ps = []
+            for p in params:
+                pt = b.resolve(p)
+                ps.append((True, b.type_size(pt.type)) if pt.kind == 2
+                          else (False, b.type_size(p)))
+            out[t.name] = (ps, b.resolve(rett).kind == 0)
+        return out
+
+    def _kfunc_sig(self, name):
+        """(params, returns_void) for a kfunc, from the object's own BTF.
+
+        params is a list of (is_pointer, pointee_size) — pointee_size is
+        None when the pointee has no size (void*, a forward declaration, a
+        function pointer), which is what forces a bail in the generic
+        model: we cannot capture the argument's contents."""
         if not hasattr(self, "_kf_protos"):
             self._kf_protos = {}
             sec = self.elf.section_by_name(".BTF")
@@ -803,19 +844,77 @@ class Executor:
             if sec is not None:
                 import bpfcore
                 self._btf_full = bpfcore.Btf(sec.data)
+        if name in self.kfunc_sig_override:
+            return self.kfunc_sig_override[name]
         if name in self._kf_protos:
             return self._kf_protos[name]
-        flags = None
+        sig = None
         b = self._btf_full
         if b is not None:
             for t in b.types.values():
                 if t.kind == 12 and t.name == name:  # FUNC
                     proto = b.resolve(t.type)
                     if proto.kind == 13:  # FUNC_PROTO
-                        flags = [b.resolve(p).kind == 2 for p in proto.proto[1]]
+                        rett, params = proto.proto
+                        out = []
+                        for p in params:
+                            pt = b.resolve(p)
+                            if pt.kind == 2:  # PTR
+                                out.append((True, b.type_size(pt.type)))
+                            else:
+                                out.append((False, b.type_size(p)))
+                        sig = (out, b.resolve(rett).kind == 0)
                     break
-        self._kf_protos[name] = flags
-        return flags
+        self._kf_protos[name] = sig
+        return sig
+
+    def _kfunc_generic(self, name, regs, mem, counters, what, event, err):
+        """Fallback for kfuncs with no bespoke model.
+
+        Sound on the same footing as the tier-2 helper events: the call is
+        pinned in the observable trace with EVERY argument — scalars by
+        value, pointers by canonical identity AND pointed-to contents (so
+        two calls that look alike but read different memory are still
+        distinguished) — and the return is a shared per-(name, index)
+        oracle. Both objects therefore ask the kernel the same question at
+        the same point and get the same answer; any difference in what
+        they ask shows up in the trace.
+
+        Bails rather than guessing when an argument's contents cannot be
+        captured (an unsized pointee), when the kfunc returns a pointer
+        (its provenance would be unmodeled), or when the object carries no
+        BTF prototype for it."""
+        sig = self._kfunc_sig(name)
+        if sig is None:
+            raise Bail(f"kfunc {name} has no BTF proto in {what}")
+        params, void_ret = sig
+        if len(params) > 5:
+            raise Bail(f"kfunc {name} takes {len(params)} args in {what}")
+        payload = []
+        for i, (ptr_param, size) in enumerate(params):
+            a = regs[1 + i]
+            if not ptr_param:
+                # compare a scalar argument at the width the KERNEL reads
+                # (its declared type), not the full register: a u8 param
+                # ignores the upper 56 bits, so a caller that leaves an
+                # un-truncated product there is not making a different call
+                w = size if size in (1, 2, 4, 8) else 8
+                payload += self._val_bytes(a, w, what)
+                continue
+            # identity pins WHICH object is passed; contents pin what the
+            # kfunc would read out of it
+            payload += self._arg_id_bytes(a, what)
+            if not is_ptr(a):
+                continue          # a scalar in a pointer slot (NULL, ksym)
+            if size is None:
+                raise Bail(f"kfunc {name} arg{i} points to an unsized type "
+                           f"in {what}")
+            if size > MAX_ARG:
+                raise Bail(f"kfunc {name} arg{i} pointee {size}B too large "
+                           f"in {what}")
+            payload += self._mem_bytes(mem, a, size, what)
+        event(payload)
+        return err()
 
     def _printk_arg_widths(self, fmt, what):
         """Byte widths of the args a bpf_printk format consumes."""
@@ -1532,6 +1631,22 @@ class Executor:
                   + self._arg_id_bytes(regs[2], what)
                   + self._val_bytes(regs[3], 8, what))
             return one(err())
+
+        # No bespoke model: fall back to the generic one, but only when the
+        # kfunc returns a scalar. A pointer return would need provenance we
+        # do not have (which region does it point into? is it nullable?),
+        # so those still bail rather than guess.
+        sig = self._kfunc_sig(name)
+        if sig is not None:
+            b = self._btf_full
+            rett = None
+            for t in b.types.values():
+                if t.kind == 12 and t.name == name:
+                    rett = b.resolve(b.resolve(t.type).proto[0])
+                    break
+            if rett is not None and rett.kind != 2:   # not a PTR return
+                return one(self._kfunc_generic(name, regs, mem, counters,
+                                               what, event, err))
         raise Bail(f"kfunc {name} in {what}")
 
     # ---------- tier-6: callback helpers ----------
@@ -1692,13 +1807,27 @@ class Executor:
         return (self.elf.sections[sym.shndx].name,
                 sym.value // 8 + ins["imm"] + 1)
 
-    def run(self, entry_pc=0):
+    def run(self, entry_pc=0, callback=False):
         entry_sym = self.elf.named_symbol_at(self.sec.idx, entry_pc * 8)
         self.entry_func = entry_sym.name if entry_sym else None
         regs = [None] * 11
         for i in range(10):
             regs[i] = z3.BitVec(f"uninit_{self.tag}_r{i}", 64)
-        regs[1] = Ptr("ctx", bv64(0))
+        if callback:
+            # A registered callback is entered with helper-supplied
+            # arguments rather than a ctx: (map, key, value) for timers and
+            # for_each, (index, ctx) for bpf_loop. Their exact roles differ
+            # per helper, so give r1-r5 SHARED regions named by position —
+            # both objects' callbacks then run over identical inputs and
+            # their observable effects are directly comparable.
+            for i in range(1, 6):
+                reg = f"cbarg:{i}"
+                self.shared.setdefault(
+                    reg, z3.Array("init_" + reg.replace(":", "_"),
+                                  BV64S, BV8S))
+                regs[i] = Ptr(reg, bv64(0))
+        else:
+            regs[1] = Ptr("ctx", bv64(0))
         regs[10] = Ptr(f"stack:{self.tag}", bv64(STACK_SIZE))
         self.init_r0 = regs[0]
         # work item: (sec name, pc, regs, mem, conds, counters, call stack);

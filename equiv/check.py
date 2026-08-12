@@ -56,6 +56,52 @@ def programs(elf):
     return out
 
 
+def callback_programs(elf):
+    """(".text", func) -> (section, entry) for every .text function whose
+    address is taken by an ld_imm64 — i.e. registered as a callback
+    (bpf_timer_set_callback, bpf_loop, for_each_map_elem, ...).
+
+    for_each/loop callbacks are executed inline where they are invoked, so
+    their bodies are already compared; a TIMER callback runs
+    asynchronously and is not, which would leave a same-named callback
+    with a divergent body undetected. Proving these as paired programs in
+    their own right closes that hole: both objects' callbacks are run over
+    identical symbolic arguments and their observables compared."""
+    H_TIMER_SET_CALLBACK = 170
+    taken = set()
+    for sec in elf.exec_sections():
+        data = sec.data
+        relocs = elf.relocs.get(sec.idx, {})
+        for i in range(len(data) // 8):
+            # only callbacks registered with bpf_timer_set_callback: those
+            # run asynchronously and are never executed inline. for_each /
+            # bpf_loop callbacks ARE run inline at their call site (with the
+            # real map and per-iteration arguments), so proving them again
+            # standalone would only add bails for context we don't have.
+            if (data[i * 8] != 0x85
+                    or int.from_bytes(data[i * 8 + 4:i * 8 + 8], "little",
+                                      signed=True) != H_TIMER_SET_CALLBACK):
+                continue
+            for j in range(max(0, i - 6), i):        # find ld_imm64 -> r2
+                off = j * 8
+                if data[off] != 0x18 or (data[off + 1] & 0xF) != 2:
+                    continue
+                rel = relocs.get(off)
+                if rel is None or rel.sym.shndx == 0:
+                    continue
+                target = elf.sections[rel.sym.shndx]
+                if not target.flags & SHF_EXECINSTR:
+                    continue
+                addend = int.from_bytes(data[off + 4:off + 8], "little",
+                                        signed=True)
+                named = elf.named_symbol_at(rel.sym.shndx,
+                                            rel.sym.value + addend)
+                if named is not None and named.name:
+                    taken.add((target, named))
+    return {(".text", normalize_name(sym.name)): (sec, sym.value // 8)
+            for sec, sym in taken}
+
+
 def global_regions(elves):
     """Union of named writable globals across both objects -> shared arrays.
 
@@ -103,11 +149,41 @@ def summarize_ret(paths):
     return expr
 
 
-def check_program(name, func, elves, shared, timeout_ms):
+def agreed_kfunc_sigs(elves):
+    """Kfunc signatures the two objects AGREE on.
+
+    Each object declares the kfuncs it calls in its own BTF, and the
+    declarations can differ in ways that say nothing about behaviour — a
+    translation may declare a kernel struct opaque (size 0) where the C
+    object has the full definition. Capturing an argument's contents at
+    two different lengths would then look like a divergence. Where the
+    objects disagree, drop the size so the model bails instead."""
+    per = [Executor.kfunc_sigs_of(elf) for elf, _, _ in elves.values()]
+    if len(per) != 2:
+        return {}
+    a, b = per
+    out = {}
+    for name in set(a) & set(b):
+        pa, pb = a[name], b[name]
+        if pa is None or pb is None or len(pa[0]) != len(pb[0]):
+            continue
+        params = []
+        for (ap, asz), (bp, bsz) in zip(pa[0], pb[0]):
+            if ap != bp:
+                params = None
+                break
+            params.append((ap, asz if asz == bsz else None))
+        if params is not None:
+            out[name] = (params, pa[1])
+    return out
+
+
+def check_program(name, func, elves, shared, timeout_ms, callback=False):
     paths, void = {}, {}
+    sigs = agreed_kfunc_sigs(elves)
     for tag, (elf, sec, entry) in elves.items():
-        ex = Executor(elf, sec, shared, tag)
-        paths[tag] = ex.run(entry)
+        ex = Executor(elf, sec, shared, tag, kfunc_sigs=sigs)
+        paths[tag] = ex.run(entry, callback=callback)
         # r0 never assigned on any path => BTF-void return (verifier-enforced)
         void[tag] = all(z3.eq(p.ret, ex.init_r0) for p in paths[tag])
 
@@ -238,6 +314,13 @@ def main():
     for w in warnings:
         print(f"  WARN {w}")
 
+    # registered callbacks are proved too (see callback_programs): a timer
+    # callback runs asynchronously, so its body is never executed inline
+    cbs_c, cbs_r = callback_programs(elf_c), callback_programs(elf_r)
+    callbacks = set(cbs_c) & set(cbs_r)
+    progs_c.update({k: v for k, v in cbs_c.items() if k in callbacks})
+    progs_r.update({k: v for k, v in cbs_r.items() if k in callbacks})
+
     keys = sorted(set(progs_c) | set(progs_r))
     if args.sec:
         keys = [k for k in keys if args.sec in k]
@@ -273,7 +356,7 @@ def main():
             verdict, detail = check_program(
                 label, func,
                 {"A": (elf_c,) + progs_c[key], "B": (elf_r,) + progs_r[key]},
-                shared, args.timeout)
+                shared, args.timeout, callback=(key in callbacks))
         except Bail as e:
             verdict, detail = "BAIL", str(e)
         if verdict == "INEQUIV" and label in waivers:

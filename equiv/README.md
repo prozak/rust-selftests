@@ -467,6 +467,30 @@ would not be distinguished.
   than replicated. Open: 3 test_tc_dtime programs still diverge (traced
   to a one-increment difference in `errs[]`, not yet isolated).
 
+- tier 8 (2026-08-12; generic kfunc model, callback bodies):
+  **1228 EQUIV / 0 INEQUIV / 16 WAIVED** (322 objects fully proved, from
+  310). Three pieces. (1) The kfunc tail was 88 distinct names over 177
+  sites with no dominant member, so instead of 88 bespoke models there is
+  one GENERIC one: the call is pinned in the trace with every argument —
+  scalars at the width the KERNEL reads them (the declared parameter
+  type, so an un-truncated product passed to a `u8` parameter is not a
+  different call), pointers by canonical identity AND pointed-to contents
+  — and the return is a shared per-(name, index) oracle. It still bails
+  on pointer RETURNS (unmodeled provenance) and on unsized pointees.
+  (2) Kfunc signatures are intersected across the two objects before use:
+  each declares the kfuncs it calls in its own BTF and the declarations
+  differ in ways that say nothing about behaviour (the C object has
+  `bpf_timer` at 16 bytes, the translation declares it opaque), which
+  would otherwise capture two different payload lengths and read as a
+  divergence. (3) Timer callback bodies are now PROVED, closing the gap
+  tier 7 documented: callbacks registered via `bpf_timer_set_callback`
+  run asynchronously and were never executed inline, so a same-named
+  callback with a divergent body went unchecked. They are paired by
+  source symbol name and entered with shared per-position argument
+  regions. for_each/bpf_loop callbacks are deliberately NOT proved this
+  way — they are already executed inline at their call site with the real
+  map and per-iteration arguments.
+
 Results tables: `results/`. Remaining bail classes after tier 6:
 unmodeled helper tail ×180 program-sites and kfunc tail ×183 (dynptr
 family, obj_new/wq, timers, fou encap, testmod/struct_ops kfuncs, ...);

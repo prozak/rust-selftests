@@ -207,6 +207,39 @@ Tier 5 — kfuncs, arena, may_goto, and the helper tail:
   socket identity; get_func_ip/arg_cnt, get_attach_cookie and
   xdp_get_buff_len are per-index oracle streams.
 
+Tier 6 — callback helpers, packet writes, ksym addresses:
+
+- Callback helpers (`bpf_for_each_map_elem`, `bpf_loop`) execute the
+  callback — a function pointer materialized by `ld_imm64` of a `.text`
+  symbol — inline, once per iteration, extending the tier-4 frame stack
+  with a callback frame. `bpf_loop`'s trip count is `nr_loops` (concrete
+  or symbolic: the loop forks on `i < n` per iteration); for_each's bound
+  is the map's `max_entries`. Each iteration gets shared per-index inputs
+  (loop: the index; for_each: a shared key region and an observable
+  per-index `mapval:cb:` value region), so both objects run their own
+  callback against the same environment and equal observables prove the
+  callbacks equivalent. A nonzero callback return stops the loop (forked
+  when symbolic); the unroll is capped at 8 iterations (larger loops
+  bail rather than explode). A trace event pins the helper + map + bound.
+- `skb_store_bytes` writes `from` bytes into the packet: `skbdata` (the
+  same shared array `skb_load_bytes` reads) is now an observable region,
+  so a divergent packet write surfaces; the write is guarded by a shared
+  (offset, len)-keyed success oracle and leaves the packet unchanged on
+  error.
+- `ld_imm64` of an undefined symbol is a kernel address (ksym — a
+  function or variable resolved at load, e.g. `ip == &bpf_fentry_test1`
+  in get_func_ip checks): each `(symbol, addend)` gets a DISTINCT fixed
+  constant (both objects resolve a given symbol identically, and distinct
+  kernel symbols get distinct addresses). A free oracle would let two
+  symbols alias, which breaks clang's switch-lowering of a chain of
+  address compares — it assumes distinct addresses — against an
+  unoptimized translation's independent compares (this precise imprecision
+  produced a spurious kprobe_multi INEQUIV, and fixing it then surfaced a
+  genuine `test_cookie` bool-compare bug). `__kconfig` externs
+  (LINUX_HAS_SYSCALL_WRAPPER, LINUX_KERNEL_VERSION) are build constants the
+  translations hardcode; they bail rather than compare, since the prover
+  can't adjudicate them without the target config.
+
 Rust v0-mangled static names are normalized to their source identifier so the
 same logical global maps to the same region in both objects. The C object's
 BTF is ground truth for return contracts: void functions skip the return
@@ -331,23 +364,40 @@ same environment value in both programs.
   clamped to the kernel's 0-or-negative contract. The TIMEOUT class
   (21) now also includes fork-heavy iterator/cpumask objects.
 
-Results tables: `results/`. Remaining bail classes after tier 5:
-unmodeled helper tail ×192 program-sites and kfunc tail ×181 (dynptr
-family, timers/wq, fou encap, testmod/struct_ops kfuncs, ...); stores
-through kernel-pointer windows ×60; callback-function ld_imm64 ×70;
-oversized copies (get_stack 2048, probe_read 2880 > MAX_COPY) ×12;
+- tier 6 (2026-08-11; callbacks + skb_store_bytes + ksym addresses):
+  **1063 EQUIV / 0 INEQUIV / 8 WAIVED / 6 UNKNOWN** (268 objects fully
+  proved; object verdicts 268 EQUIV / 242 BAIL / 25 TIMEOUT /
+  11 NOPROGS / 4 UNKNOWN). Newly proved include the whole for_each_*
+  cluster, test_tc_tunnel (19 programs), kprobe_multi/_session, and
+  several packet-rewriting TC tests. Controls: a mutated callback body
+  flips to INEQUIV via the accumulated global; skb_store_bytes and the
+  callback trace event are both distinguishing. **True finding #16**:
+  the distinct-address ksym refinement (see the ksym note above)
+  unmasked a `test_cookie` bool-compare bug in kprobe_multi — clang
+  compiles every `test_cookie` test as `!= 1`, so the `bool` translation
+  diverged for out-of-range bytes; fixed with u8 + `== 1`, re-proved
+  7/7 and QEMU-gated. The linter had already flagged `test_cookie` in
+  its backlog — the guard/linter/prover loop closing.
+
+Results tables: `results/`. Remaining bail classes after tier 6:
+unmodeled helper tail ×180 program-sites and kfunc tail ×183 (dynptr
+family, obj_new/wq, timers, fou encap, testmod/struct_ops kfuncs, ...);
+stores through kernel-pointer windows ×60 (ctx/packet data pointers);
+oversized copies (get_stack 2048, probe_read 2880 > MAX_COPY) ×15;
+`__kconfig` externs ×17 (build constants, unadjudicable);
 pointer-compare/symbolic-size/spill tail.
 
 ## Roadmap
 
-1. **Rust collections follow-up** (user-requested): arena-backed
-   GlobalAlloc + real `alloc` collections in a separate test folder —
-   new Rust-native programs, outside the equivalence corpus.
-2. **Tier 6 candidates**: dynptr family, timers/wq (needs callback
-   identity), remaining kfunc tail, ctx pointer-field windows
-   (optval/pkt data), larger bounded copies.
-3. **Path-merging at join points** for the pyperf/strobemeta/iterator
-   TIMEOUT class (21 objects).
+1. **Tier 7 candidates**: dynptr family (16-byte stack dynptr state +
+   slice provenance), timers/wq (needs callback identity), ctx
+   pointer-field windows (skb/xdp `data`/`data_end` as a shared packet
+   region — the 60 "store through data-valued pointer" bails), larger
+   bounded copies, remaining kfunc tail (obj_new, testmod).
+2. **Path-merging at join points** for the pyperf/strobemeta/iterator
+   TIMEOUT class (25 objects).
+3. **Rust collections extensions** (collections/): BTreeMap/nested
+   collections need a rustc BPF arena address space.
 4. ~~Regression guard~~ DONE: `equiv/guard.py` — hash-gated re-proving
    against a committed baseline (results/baseline.tsv); the full corpus
    checks in under a second when nothing changed, alarms on INEQUIV and

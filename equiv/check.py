@@ -117,7 +117,7 @@ def check_program(name, func, elves, shared, timeout_ms):
     # buffer's scribbles are invisible to userspace.
     obs_regions = [r for r in shared
                    if r.startswith(("g:", "mapval:", "arenapg:"))] \
-        + ["ctx", "trace", "sysret"]
+        + ["ctx", "trace", "sysret", "skbdata"]
     ret_a, ret_b = summarize_ret(paths["A"]), summarize_ret(paths["B"])
     mem_eq = [summarize(paths["A"], shared, r) == summarize(paths["B"], shared, r)
               for r in obs_regions]

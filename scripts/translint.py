@@ -35,6 +35,11 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 C_PROGS = os.path.join(REPO, "..", "uml-harness", ".build", "bpf-next",
                        "tools", "testing", "selftests", "bpf", "progs")
+C_OBJ_DIR = os.path.join(REPO, "..", "uml-harness", ".build",
+                         "selftests-output-qemu")
+
+sys.path.insert(0, os.path.join(REPO, "equiv"))
+from bpfelf import BpfElf, SHF_EXECINSTR
 
 SIZES = {"u8": 1, "i8": 1, "u16": 2, "i16": 2, "u32": 4, "i32": 4,
          "u64": 8, "i64": 8, "usize": 8, "isize": 8, "bool": 1, "f32": 4,
@@ -83,29 +88,41 @@ def check_padding(src):
             yield p
 
 
-def count_logs_c(src):
-    src = re.sub(r"#define\s+\w+\([^)]*\)[^\n]*(\\\n[^\n]*)*", "", src)
-    return len(re.findall(r"\b(?:bpf_printk|log_err|bpf_trace_printk)\s*\(",
-                          src))
-
-
-def count_logs_rs(src):
+def count_trace_printk(obj_path):
+    """Count bpf_trace_printk (helper 6) / trace_vprintk (177) call sites in
+    a compiled .bpf.o — exact, unlike source counting which includes
+    #ifdef'd-out debug prints."""
+    if not os.path.exists(obj_path):
+        return None
+    try:
+        elf = BpfElf(obj_path)
+    except Exception:
+        return None
     n = 0
-    for line in src.splitlines():
-        if re.match(r"\s*(?:pub\s+)?fn\s", line):
-            continue  # helper definitions aren't call sites
-        if re.search(r"\b(?:bpf_trace_printk\d?|log_err|log_assign\d?)\s*\(",
-                     line):
-            n += 1
+    for s in elf.sections:
+        if not (s.flags & SHF_EXECINSTR) or not s.data:
+            continue
+        d = s.data
+        for i in range(len(d) // 8):
+            if d[i * 8] == 0x85 and d[i * 8 + 1] == 0:  # call helper
+                imm = int.from_bytes(d[i * 8 + 4:i * 8 + 8], "little",
+                                     signed=True)
+                if imm in (6, 177):
+                    n += 1
     return n
 
 
 def lint(name):
     rs_path = os.path.join(REPO, "progs", f"{name}.rs")
     c_path = os.path.join(C_PROGS, f"{name}.c")
-    rs = open(rs_path).read()
+    rs_raw = open(rs_path).read()
+    allowed = set(re.findall(r"//\s*translint:\s*allow\((\S+)\)", rs_raw))
+    # blank out comments (preserving newlines so line numbers stay valid)
+    # so a `==` or field name in prose can't count as a code use
+    rs = re.sub(r"//[^\n]*", "", rs_raw)
+    rs = re.sub(r"/\*.*?\*/", lambda m: re.sub(r"[^\n]", " ", m.group(0)),
+                rs, flags=re.DOTALL)
     c = open(c_path).read() if os.path.exists(c_path) else None
-    allowed = set(re.findall(r"//\s*translint:\s*allow\((\S+)\)", rs))
     msgs = []
 
     def emit(level, cls, text):
@@ -155,17 +172,18 @@ def lint(name):
              f"the C pointee width matches (u32 store via __u64* class)")
 
     if c is not None:
-        # printk-count: DROPPED logging is the proven-bug direction; a
-        # higher Rust count is usually wrapper-helper double counting
-        nc, nr = count_logs_c(c), count_logs_rs(rs)
-        if nr < nc:
-            emit("ERROR", "printk-count",
-                 f"C has {nc} trace-log call site(s), Rust has {nr} — "
-                 f"dropped logging diverges the trace observable")
-        elif nr > nc:
-            emit("NOTE", "printk-count",
-                 f"Rust log-call count ({nr}) exceeds C ({nc}) — verify "
-                 f"no extra sites (may be wrapper counting)")
+        # printk-count from the COMPILED objects (exact; source counting
+        # would include #ifdef DEBUG prints absent from the build). A
+        # dropped trace_printk diverges the trace observable.
+        c_obj = os.path.join(C_OBJ_DIR, f"{name}.bpf.o")
+        r_obj = os.path.join(REPO, "bld", f"{name}.bpf.o")
+        nc, nr = count_trace_printk(c_obj), count_trace_printk(r_obj)
+        if nc is not None and nr is not None and nc != nr:
+            level = "ERROR" if nr < nc else "NOTE"
+            emit(level, "printk-count",
+                 f"compiled C object has {nc} bpf_trace_printk call(s), "
+                 f"Rust has {nr} — {'dropped' if nr < nc else 'extra'} "
+                 f"logging changes the trace observable")
         # ptr-scaling
         hits = [ln + 1 for ln, line in enumerate(c.splitlines())
                 if re.search(r"\+\s*sizeof\b|\bsizeof\s*\*|\w+\s*\+=\s*1\s*;",

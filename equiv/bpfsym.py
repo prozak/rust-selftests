@@ -20,6 +20,7 @@ Unsupported constructs raise Bail — the driver reports the program as
 out-of-scope rather than guessing.
 """
 import re
+import zlib
 
 import z3
 
@@ -74,6 +75,7 @@ H_GET_STACKID = 27
 H_TRACE_PRINTK = 6
 H_GET_CURRENT_COMM = 16
 H_SKB_LOAD_BYTES = 26
+H_SKB_STORE_BYTES = 9
 H_GET_RETVAL, H_SET_RETVAL = 186, 187  # 4-byte shared "sysret" state region
 
 # Tier 3: helpers returning a nullable pointer fork the path on a shared
@@ -91,6 +93,16 @@ H_RINGBUF_QUERY = 134
 H_SPIN_LOCK, H_SPIN_UNLOCK = 93, 94
 H_TAIL_CALL = 12
 MAX_CALL_DEPTH = 8  # verifier limit on bpf2bpf nesting
+
+# Tier 6: callback helpers. The callback is a function pointer (ld_imm64 of
+# a .text symbol); the helper invokes it a bounded, environment-shared
+# number of times with per-iteration inputs. Both objects run their own
+# callback against the same shared environment, so equal observables prove
+# the callbacks equivalent.
+H_FOR_EACH_MAP_ELEM = 164
+H_LOOP = 181
+CALLBACK_HELPERS = {H_FOR_EACH_MAP_ELEM, H_LOOP}
+MAX_CB_ITERS = 8  # unroll cap for callback loops
 
 MAP_IN_MAP_TYPES = {12, 13}  # ARRAY_OF_MAPS, HASH_OF_MAPS
 
@@ -393,6 +405,27 @@ class Executor:
         if rel is None:
             return bv64(addend)
         sym = rel.sym
+        if sym.shndx == 0:
+            # __kconfig externs (LINUX_HAS_SYSCALL_WRAPPER, LINUX_KERNEL_-
+            # VERSION, ...) are build constants libbpf resolves at load;
+            # rustc can't emit them, so translations hardcode the target
+            # value. A free oracle would let the C side explore config
+            # branches the target kernel never takes (spurious INEQUIV vs a
+            # correctly-hardcoded translation) — bail, as this is a known
+            # translation divergence the prover can't adjudicate.
+            if sym.name in self.elf.kconfig_externs():
+                raise Bail(f"__kconfig extern {sym.name} in ld_imm64")
+            # otherwise it's a ksym address (a kernel function/variable, e.g.
+            # get_func_ip comparisons `ip == &bpf_fentry_test1`). Assign each
+            # (symbol, addend) a DISTINCT fixed constant rather than a free
+            # oracle: these values are only ever compared for equality, both
+            # objects resolve a given symbol to the same constant, and —
+            # crucially — distinct kernel symbols get distinct addresses.
+            # A free oracle would let two symbols alias, breaking clang's
+            # switch-lowering (which assumes distinct function addresses)
+            # against an unoptimized translation's independent compares.
+            key = f"{sym.name}\x00{addend}"
+            return bv64(0x1000_0000_0000 + (zlib.crc32(key.encode()) << 8))
         if sym.type == STT_SECTION:
             secname = self.elf.sections[sym.shndx].name
             named = self.elf.named_symbol_at(sym.shndx, addend)
@@ -404,7 +437,15 @@ class Executor:
         if secname == ".maps":
             return Ptr(f"map:{normalize_name(sym.name)}", bv64(addend))
         sec = self.elf.sections[sym.shndx]
-        if not sec.flags & SHF_ALLOC or sec.flags & SHF_EXECINSTR:
+        if sec.flags & SHF_EXECINSTR:
+            # function pointer (callback for bpf_loop / for_each_map_elem /
+            # timers): the region carries its (section, insn index) so a
+            # callback helper can execute it inline
+            if sym.type in (STT_FUNC, STT_SECTION):
+                idx = (sym.value + addend) // 8
+                return Ptr(f"func:{secname}:{idx}", bv64(0))
+            raise Bail(f"reloc into unsupported section {secname}")
+        if not sec.flags & SHF_ALLOC:
             raise Bail(f"reloc into unsupported section {secname}")
         if secname.startswith(".rodata"):
             return Ptr(f"ro:{self.tag}:{secname}", bv64(sym.value + addend))
@@ -901,6 +942,29 @@ class Executor:
                             z3.If(err == bv64(0), z3.Select(skb, off + bv64(k)),
                                   z3.BitVecVal(0, 8)))
             ret = err
+        elif hid == H_SKB_STORE_BYTES:
+            # writes `from` bytes into the packet at `offset`. The packet
+            # (skbdata) is an observable region, so a divergent write shows
+            # up; on error (shared oracle keyed by offset+len) it's unchanged.
+            if not is_ptr(regs[1]) or regs[1].region != "ctx":
+                raise Bail(f"skb_store_bytes on non-ctx skb in {what}")
+            if "skbdata" not in self.shared:
+                raise Bail(f"no skbdata region provided in {what}")
+            off = zext64(lo32(need_data(regs[2], what)))
+            n = self._concrete_u64(regs[4], what) & 0xFFFFFFFF
+            if n > MAX_COPY:
+                raise Bail(f"skb_store_bytes len {n} > {MAX_COPY} in {what}")
+            skb = self._region_array(mem, "skbdata")
+            err = z3.SignExt(32, z3.Function("oracle_skbstore_err", BV64S,
+                                             BV64S, BV32S)(off, bv64(n)))
+            for k in range(n):
+                src = z3.Extract(7, 0,
+                                 self._load(mem, self._addr_add(regs[3], k), 1))
+                old = z3.Select(skb, off + bv64(k))
+                skb = z3.Store(skb, off + bv64(k),
+                               z3.If(err == bv64(0), src, old))
+            mem["skbdata"] = skb
+            ret = err
         elif hid in (H_SPIN_LOCK, H_SPIN_UNLOCK):
             # no-ops under sequential semantics, but lock identity stays
             # observable so lock placement must match across programs
@@ -1319,6 +1383,89 @@ class Executor:
             return one(err())
         raise Bail(f"kfunc {name} in {what}")
 
+    # ---------- tier-6: callback helpers ----------
+
+    def _cb_target(self, ptr, what):
+        """(section, insn idx) of a callback function pointer arg."""
+        if not is_ptr(ptr) or not ptr.region.startswith("func:"):
+            raise Bail(f"callback arg is not a function pointer in {what}")
+        _, secname, idx = ptr.region.split(":", 2)
+        return secname, int(idx)
+
+    def _cb_iter_regs(self, frame, i, mem, counters):
+        """Registers r1..r5 for callback iteration i, plus a fresh callee
+        frame r10. frame = the ('__cb', ...) tuple."""
+        (_tag, hid, csec, cidx, _i, n, _rs, _rp, _r10c, cbfid,
+         arg_ctx, arg_map, mapname) = frame
+        regs = [None] * 11
+        for k in range(11):
+            regs[k] = z3.BitVec(f"cbclobber_{self.tag}_{cbfid}_{i}_{k}", 64)
+        regs[10] = Ptr(f"stack:{self.tag}:cb{cbfid}", bv64(STACK_SIZE))
+        if hid == H_LOOP:
+            regs[1] = zext64(z3.BitVecVal(i, 32))  # u32 index
+            regs[2] = arg_ctx
+            regs[3] = bv64(0)
+            regs[4] = bv64(0)
+        else:  # for_each_map_elem: (map, key, value, ctx)
+            regs[1] = arg_map
+            # key: shared per-(map,call,iter) region — both programs see the
+            # same key sequence (same map, same environment)
+            kreg = f"cbkey:{mapname}:{cbfid}:{i}"
+            self._region_array(mem, kreg) if kreg in self.shared else \
+                self.shared.setdefault(
+                    kreg, z3.Array("init_" + kreg.replace(":", "_"),
+                                   BV64S, BV8S))
+            regs[2] = Ptr(kreg, bv64(0))
+            # value: observable per-iteration map region, like a lookup
+            regs[3] = Ptr(f"mapval:cb:{mapname}:{cbfid}:{i}", bv64(0))
+            regs[4] = arg_ctx
+        return regs
+
+    def _cb_start(self, hid, regs, mem, counters, what):
+        """Set up the first callback iteration. n is a symbolic upper bound
+        (concrete for for_each's max_entries; possibly symbolic for
+        bpf_loop's nr_loops); the run loop forks on `i < n` per iteration
+        and bails past MAX_CB_ITERS. Returns (frame, new_regs, csec, cidx)
+        or None when the bound is a concrete zero."""
+        csec, cidx = self._cb_target(regs[2], what)
+        cbfid = counters.get("cbframe", 0) + 1
+        counters["cbframe"] = cbfid
+        arg_ctx = regs[3]
+        if hid == H_LOOP:
+            nr = regs[1]
+            if is_ptr(nr):
+                raise Bail(f"bpf_loop nr is a pointer in {what}")
+            nr = z3.simplify(nr)
+            n = z3.Extract(31, 0, nr)  # u32 nr_loops
+            n = z3.ZeroExt(32, n)
+            arg_map, mapname = None, None
+            if z3.is_bv_value(n) and n.as_long() == 0:
+                self._emit_event(mem, counters, hid, [0, 0, 0, 0, 0])
+                return None
+            trace_n = n.as_long() if z3.is_bv_value(n) else 0xFFFFFFFF
+        else:
+            mapname = self._map_name(regs[1], what)
+            d = self._map_def(mapname, what)
+            me = d.get("max_entries")
+            if me is None:
+                raise Bail(f"for_each map {mapname} has no max_entries in {what}")
+            if me == 0:
+                return None
+            if me > MAX_CB_ITERS:
+                raise Bail(f"for_each trip bound {me} > {MAX_CB_ITERS} in {what}")
+            n = bv64(me)
+            trace_n = me
+            arg_map = regs[1]
+        # a trace event records the call so the two objects must issue the
+        # same callback helper against the same map with the same trip bound
+        self._emit_event(mem, counters, hid,
+                         (self._name_bytes(mapname) if mapname else [0])
+                         + list((trace_n & 0xFFFFFFFF).to_bytes(4, "little")))
+        frame = ("__cb", hid, csec, cidx, 0, n, None, None, regs[10], cbfid,
+                 arg_ctx, arg_map, mapname)
+        new_regs = self._cb_iter_regs(frame, 0, mem, counters)
+        return frame, new_regs, csec, cidx
+
     # ---------- main loop ----------
 
     def _insns(self, secname, what):
@@ -1529,6 +1676,38 @@ class Executor:
                             conds = conds + [z3.Not(succ)]
                             regs = self._ret_clobbered(
                                 regs, self._errno_oracle(H_TAIL_CALL, idx))
+                        elif ins["imm"] in CALLBACK_HELPERS:
+                            if len(stack) >= MAX_CALL_DEPTH:
+                                raise Bail(f"callback depth > {MAX_CALL_DEPTH} "
+                                           f"in {what}")
+                            counters = dict(counters)
+                            started = self._cb_start(ins["imm"], regs, mem,
+                                                     counters, what)
+                            if started is None:  # zero iterations
+                                regs = self._ret_clobbered(regs, bv64(0))
+                                pc += 1
+                                continue
+                            frame, cbregs, csec, cidx = started
+                            frame = frame[:6] + (cursec, pc + 1, regs[10]) \
+                                + frame[9:]
+                            n = frame[5]
+                            enter_c = z3.simplify(z3.UGT(n, bv64(0)))
+                            skip_c = z3.simplify(n == bv64(0))
+                            if not z3.is_false(skip_c) and \
+                                    self._feasible(conds + [skip_c]):
+                                rr = self._ret_clobbered(regs, bv64(0))
+                                work.append((cursec, pc + 1, rr, dict(mem),
+                                             conds + [skip_c], dict(counters),
+                                             stack))
+                            if not self._feasible(conds + [enter_c]):
+                                break
+                            if not z3.is_true(enter_c):
+                                conds = conds + [enter_c]
+                            stack = stack + (frame,)
+                            regs = cbregs
+                            cursec, pc, insns = csec, cidx, \
+                                self._insns(csec, what)
+                            continue
                         elif ins["imm"] in PTR_HELPERS:
                             conts = self._ptr_helper(ins["imm"], regs, mem,
                                                      counters, what)
@@ -1544,6 +1723,49 @@ class Executor:
                         pc += 1
                         continue
                     if code == 9:  # EXIT
+                        if stack and stack[-1][0] == "__cb":
+                            # callback iteration finished; decide continue vs
+                            # stop (nonzero return stops for_each/loop)
+                            frame = stack[-1]
+                            csec, cidx = frame[2], frame[3]
+                            i, n = frame[4], frame[5]
+                            retsec, retpc, r10caller = \
+                                frame[6], frame[7], frame[8]
+                            r0 = need_data(regs[0], what)
+                            next_i = i + 1
+                            base_stack = stack[:-1]
+
+                            def stop_item(cond):
+                                rr = self._ret_clobbered(regs, bv64(next_i))
+                                rr[10] = r10caller
+                                return (retsec, retpc, rr, dict(mem),
+                                        conds + ([cond] if cond is not None
+                                                 else []), dict(counters),
+                                        base_stack)
+
+                            # more iterations available iff next_i < n;
+                            # callback also stops the loop by returning != 0
+                            more_c = z3.simplify(z3.UGT(n, bv64(next_i)))
+                            cont_c = z3.simplify(z3.And(more_c, r0 == bv64(0)))
+                            stop_c = z3.simplify(
+                                z3.Or(z3.ULE(n, bv64(next_i)), r0 != bv64(0)))
+                            if not z3.is_false(stop_c) and \
+                                    self._feasible(conds + [stop_c]):
+                                work.append(stop_item(stop_c))
+                            if z3.is_false(cont_c) or \
+                                    not self._feasible(conds + [cont_c]):
+                                break  # only the stop side was feasible
+                            if next_i >= MAX_CB_ITERS:
+                                raise Bail(f"callback exceeded {MAX_CB_ITERS} "
+                                           f"iterations in {what}")
+                            frame2 = frame[:4] + (next_i,) + frame[5:]
+                            regs = self._cb_iter_regs(frame2, next_i, mem,
+                                                      counters)
+                            stack = base_stack + (frame2,)
+                            conds = conds + [cont_c]
+                            cursec, pc = csec, cidx
+                            insns = self._insns(cursec, what)
+                            continue
                         if stack:  # subprog return
                             cursec, pc, r10 = stack[-1]
                             stack = stack[:-1]

@@ -189,7 +189,7 @@ class BpfElf:
         if st is None or st[0] not in (4, 5):
             return None
         d = {"key_size": None, "value_size": None, "map_type": None,
-             "inner": None}
+             "max_entries": None, "inner": None}
         for memb_name, memb_tid in st[4]:
             mt = types.get(memb_tid)
             if mt is None:
@@ -212,6 +212,8 @@ class BpfElf:
                     d["value_size"] = n
                 elif memb_name == "type":
                     d["map_type"] = n
+                elif memb_name == "max_entries":
+                    d["max_entries"] = n
         return d
 
     def map_defs(self):
@@ -232,6 +234,23 @@ class BpfElf:
                 if d is not None:
                     self._map_defs[normalize_name(var[1])] = d
         return self._map_defs
+
+    def kconfig_externs(self):
+        """Names of __kconfig extern variables (members of the .kconfig
+        DATASEC). These are build constants libbpf resolves at load time;
+        rustc can't emit them, so translations hardcode the target value —
+        a divergence the prover can't adjudicate without the target config."""
+        if hasattr(self, "_kconfig"):
+            return self._kconfig
+        types = self.btf_types()
+        self._kconfig = set()
+        for kind, name, _st, _vlen, extra in types.values():
+            if kind == 15 and name == ".kconfig":  # DATASEC
+                for var_id in extra:
+                    var = types.get(var_id)
+                    if var is not None and var[0] == 14:  # VAR
+                        self._kconfig.add(var[1])
+        return self._kconfig
 
     def func_ret_bits(self, func_name):
         """Return width in bits of a BTF FUNC's return type: 0 = void,

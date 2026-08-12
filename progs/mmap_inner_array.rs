@@ -60,6 +60,8 @@ static mut pid: i32 = 0;
 #[no_mangle]
 static mut match_value: u64 = 0x13572468;
 #[no_mangle]
+// translint: allow(bool-global) — equivalence prover confirms EQUIV: the C
+// object compiles `if (done)` as `jne 0`, matching Rust's `if done`.
 static mut done: bool = false;
 #[no_mangle]
 static mut pid_match: bool = false;

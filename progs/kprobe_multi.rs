@@ -39,7 +39,11 @@ extern "C" {
 #[no_mangle]
 static mut pid: i32 = 0;
 #[no_mangle]
-static mut test_cookie: bool = false;
+// C declares this `bool`; clang compiles every `test_cookie`/`!test_cookie`
+// test as `!= 1` (jne 1), so it's true only for the byte value 1. Mirror
+// that with u8 + explicit `== 1` compares (a Rust `if bool` would test
+// `!= 0` and diverge for out-of-range bytes).
+static mut test_cookie: u8 = 0;
 
 #[no_mangle]
 static mut kprobe_test1_result: u64 = 0;
@@ -91,7 +95,7 @@ static mut kretprobe_testmod_test3_result: u64 = 0;
 
 #[inline(always)]
 fn matches(addr: u64, target: u64, cookie: u64, want_cookie: u64) -> bool {
-    addr == target && (!unsafe { test_cookie } || cookie == want_cookie)
+    addr == target && (unsafe { test_cookie } != 1 || cookie == want_cookie)
 }
 
 #[inline(never)]
@@ -100,7 +104,7 @@ fn kprobe_multi_check(ctx: *const c_void, is_return: bool) {
         return;
     }
 
-    let cookie = if unsafe { test_cookie } {
+    let cookie = if unsafe { test_cookie } == 1 {
         bpf_get_attach_cookie(ctx)
     } else {
         0

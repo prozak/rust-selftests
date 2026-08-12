@@ -311,6 +311,8 @@ static mut transport_hdr: u16 = 0;
 #[no_mangle]
 static mut network_hdr: u16 = 0;
 #[no_mangle]
+// translint: allow(bool-global) — equivalence prover confirms EQUIV: the C
+// object compiles `if (fexit_triggered)` as `jne 0`, matching Rust.
 static mut fexit_triggered: bool = false;
 
 #[link_section = "?fexit/bpf_lwt_push_ip_encap"]

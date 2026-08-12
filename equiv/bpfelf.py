@@ -30,9 +30,16 @@ def normalize_name(name):
       emits <var>.<n> -> both reduce to <var>."""
     base = name.split(".", 1)[0]
     if base.startswith("_R"):
-        m = re.match(r".*(\d+)([A-Za-z_][A-Za-z0-9_]*)$", base)
-        if m and int(m.group(1)) == len(m.group(2)):
-            return m.group(2)
+        # v0 mangling encodes each path segment as <len><ident>; the final
+        # segment is the item name. Scan every digit run and take the one
+        # whose value equals the length of the rest (a greedy regex picks
+        # only the LAST digit of a multi-digit length, so names of 10+
+        # characters never demangled).
+        for m in re.finditer(r"\d+", base):
+            tail = base[m.end():]
+            if (len(tail) == int(m.group(0))
+                    and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tail)):
+                return tail
         return name
     if "." in name:
         parts = [p for p in name.split(".") if not p.isdigit()]

@@ -121,26 +121,18 @@ extern "C" fn test_struct_arg_1(ctx: *const u64) -> i32 {
 #[no_mangle]
 extern "C" fn test_struct_arg_2(ctx: *const u64) -> i32 {
     let raw_ctx = ctx as *const c_void;
-    let nregs = bpf_get_func_arg_cnt(raw_ctx);
-    let mut reg0: u64 = 0;
-    let mut reg1: u64 = 0;
-    let mut reg2: u64 = 0;
-    let mut reg3: u64 = 0;
-    bpf_get_func_arg(raw_ctx, 0, &mut reg0);
-    bpf_get_func_arg(raw_ctx, 1, &mut reg1);
-    bpf_get_func_arg(raw_ctx, 2, &mut reg2);
-    reg2 = (reg2 as u32 as i32) as i64 as u64;
-    bpf_get_func_arg(raw_ctx, 3, &mut reg3);
-    reg3 = (reg3 as u32 as i32) as i64 as u64;
-
-    let ret = arg(ctx, 4) as i32 as isize;
+    // C passes the GLOBALS directly to bpf_get_func_arg, so a failed call
+    // leaves the previous value in place; staging through zeroed locals
+    // would instead publish 0 on failure.
     unsafe {
-        t1_nregs = nregs as isize;
-        t1_reg0 = reg0;
-        t1_reg1 = reg1;
-        t1_reg2 = reg2;
-        t1_reg3 = reg3;
-        t1_ret = ret;
+        t1_nregs = bpf_get_func_arg_cnt(raw_ctx) as isize;
+        bpf_get_func_arg(raw_ctx, 0, &mut t1_reg0);
+        bpf_get_func_arg(raw_ctx, 1, &mut t1_reg1);
+        bpf_get_func_arg(raw_ctx, 2, &mut t1_reg2);
+        t1_reg2 = (t1_reg2 as u32 as i32) as i64 as u64;
+        bpf_get_func_arg(raw_ctx, 3, &mut t1_reg3);
+        t1_reg3 = (t1_reg3 as u32 as i32) as i64 as u64;
+        t1_ret = arg(ctx, 4) as i32 as isize;
     }
     0
 }

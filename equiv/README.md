@@ -240,10 +240,59 @@ Tier 6 — callback helpers, packet writes, ksym addresses:
   translations hardcode; they bail rather than compare, since the prover
   can't adjudicate them without the target config.
 
+Tier 7 — kernel-memory writes, timers, and the helper tail:
+
+- **Writable, observable `kmem`.** A store through a data-valued pointer
+  (a socket or task pointer loaded from the ctx, a probe-read'd kernel
+  address) writes the same shared `kmem` array that probe-reads and
+  data-pointer loads read, and `kmem` joins the observables. Both objects
+  start from one symbolic snapshot, so agreeing writes cancel and a
+  divergent address or value surfaces — replacing the previous blanket
+  bail (34 objects). Control: mutating the value stored through
+  `ctx->sk` in bind4_prog makes the `kmem` observable alone differ.
+- **Timers.** init/start/cancel are ordinary trace events with an errno
+  oracle; `set_callback` records the timer slot, its map, and the
+  callback's *source symbol name*, so registering a different callback is
+  caught. `timer_init` binds the slot to its map so later calls resolve.
+  DELIBERATE GAP: the callback's *body* is not proved — it runs
+  asynchronously, and executing it inline at registration proved
+  unsound-in-practice (it interleaves the callback's own trace events at
+  a point they never occur, which flagged equivalent programs; measured,
+  then removed). Same-named callbacks with divergent bodies are therefore
+  not distinguished. Closing this means proving callback bodies as
+  separately-paired programs with the callback calling convention — a
+  tier-8 item.
+- **Re-typing casts alias their argument.** `skc_to_tcp_sock`,
+  `bpf_tcp_sock` and friends hand back the *same* kernel object with a new
+  type, so they return the argument pointer (forked against NULL) rather
+  than a fresh region — a fresh region made a program that reads through
+  the cast disagree with one that reads through the original (a false
+  INEQUIV in bpf_iter_setsockopt, whose C macro does `sk = (struct sock *)tp`).
+  `per_cpu_ptr`/`this_cpu_ptr` DO yield a distinct object, so they keep a
+  region keyed by the source pointer's identity.
+- **Helper tail**: get_func_arg/ret (env read keyed by which argument),
+  get_netns_cookie (oracle keyed by ctx identity), strncmp (contents in
+  the event, oracle result — like the string kfuncs), skb_get/set_tunnel_opt,
+  skc_to_* socket down-casts and per_cpu/this_cpu_ptr (views keyed by the
+  SOURCE pointer's identity, so repeated casts of one object alias),
+  kptr_xchg, and side-effect entries for clone_redirect, redirect_peer,
+  skb_change_proto/type/tail, sk_select_reuseport.
+
 Rust v0-mangled static names are normalized to their source identifier so the
-same logical global maps to the same region in both objects. The C object's
-BTF is ground truth for return contracts: void functions skip the return
-comparison, ≤32-bit return types compare low 32 bits.
+same logical global maps to the same region in both objects. (The
+demangler previously mis-parsed multi-digit length prefixes, so any name of
+10+ characters stayed mangled — fixed in tier 7, which is what let timer
+callback identities compare.) The C object's BTF is ground truth for return
+contracts: void functions skip the return comparison, ≤32-bit return types
+compare low 32 bits.
+
+**Object hygiene:** `make test-<name>` swaps the Rust object INTO the
+selftests output directory and relies on `make restore-<name>` to put the
+C one back; an interrupted run leaves the C slot holding a Rust object, so
+every later comparison is Rust-vs-Rust and trivially "equivalent". A
+corpus audit found 20 such objects. `check.py` now refuses to run when a C
+object differs from its `.corig` backup, and `make restore-all` fixes the
+whole tree in one shot.
 
 `equiv/waivers.tsv` records accepted semantic divergences (verdict WAIVED,
 non-failing, reason required). Two classes: kernel-impossible-input
@@ -264,7 +313,11 @@ so EQUIV verdicts only rest on modeled semantics. Known deliberate
 assumptions: probe-reads never fault; LD_IMM64 global/map pointers are
 non-NULL; both programs see the same kernel memory snapshot and the same
 initial (uninit) stack residue; the nth call to a given helper observes the
-same environment value in both programs.
+same environment value in both programs; `may_goto`'s escape branch (which
+fires after ~8M iterations) is never taken; callback loops are unrolled to
+at most 8 iterations; and a timer callback's identity is compared but its
+BODY is not (see tier 7) — a same-named callback with a divergent body
+would not be distinguished.
 
 ## Verdict sweeps (2026-08-05)
 
@@ -378,6 +431,35 @@ same environment value in both programs.
   diverged for out-of-range bytes; fixed with u8 + `== 1`, re-proved
   7/7 and QEMU-gated. The linter had already flagged `test_cookie` in
   its backlog — the guard/linter/prover loop closing.
+
+- tier 7 (2026-08-11; writable kmem + timers + helper tail):
+  **1158 EQUIV / 3 INEQUIV / 16 WAIVED / 13 UNKNOWN** (307 objects fully
+  proved; object verdicts 307 EQUIV / 195 BAIL / 29 TIMEOUT / 11 NOPROGS /
+  7 UNKNOWN / 1 INEQUIV). **True findings #17–#25**, all fixed and
+  QEMU-gated: three dropped `bpf_printk`s in timer plus ten more in
+  test_tunnel_kern (including 4-/5-arg prints that lower to
+  `trace_vprintk`, helper 177, not 6); timer_crash selecting its map with
+  `== 1` where C uses a truthiness test, *and* leaking struct padding into
+  a map value; bpf_iter_setsockopt's bool compare plus a zero-init where
+  C leaves the buffer uninitialized; timer_start_deadlock masking a
+  `bool` ctx arg to a byte where C tests the full 64-bit word;
+  tracing_struct staging `get_func_arg` through zeroed locals instead of
+  writing the globals directly (so a failed call published 0 rather than
+  leaving the previous value); test_tc_dtime masking `skb->protocol` to
+  16 bits; and test_sockmap_listen's two bool globals — the sharpest
+  example of that class yet, since clang compiled `if (test_sockmap)` as
+  `jne 1` at three sites and `jne 0` at the sk_reuseport site **in the
+  same file**. Model fixes found by the same triage: re-typing casts must
+  alias their argument; `redirect_peer`'s argument indices were off by
+  one; `sk_select_reuseport`'s key is compared by CONTENTS (the two
+  compilers place it at different stack offsets); and a `NameError` on
+  the non-map helper path. The four remaining erspan divergences in
+  test_tunnel_kern are a bug in the C selftest itself —
+  `BPF_CORE_WRITE_BITFIELD` roots its relocation at `erspan_metadata`
+  instead of `erspan_md2`, so every md2 write lands past the 12-byte
+  struct into the adjacent stack slot — waived with that diagnosis rather
+  than replicated. Open: 3 test_tc_dtime programs still diverge (traced
+  to a one-increment difference in `errs[]`, not yet isolated).
 
 Results tables: `results/`. Remaining bail classes after tier 6:
 unmodeled helper tail ×180 program-sites and kfunc tail ×183 (dynptr

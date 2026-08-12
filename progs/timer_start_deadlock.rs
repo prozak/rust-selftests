@@ -52,7 +52,10 @@ extern "C" fn timer_cb(
 #[link_section = "tp_btf/hrtimer_start"]
 #[no_mangle]
 extern "C" fn tp_hrtimer_start(ctx: *const u64) -> i32 {
-    let was_armed = fentry_arg(ctx, 2) as u8;
+    // C's BPF_PROG `bool was_armed` compiles to a test of the FULL 64-bit
+    // ctx word (jeq r2, 0) — masking to the low byte here would diverge for
+    // words whose low byte is 0 but which are nonzero.
+    let was_armed = fentry_arg(ctx, 2);
 
     if unsafe { in_timer_start } == 0 || was_armed == 0 {
         return 0;

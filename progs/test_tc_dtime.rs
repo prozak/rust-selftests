@@ -281,8 +281,10 @@ fn skb_get_type(skb: *const __sk_buff) -> i32 {
     let mut ns: u8 = 0;
     let trans: usize;
 
-    let protocol = vload!((*skb).protocol) as u16;
-    if protocol == htons(ETH_P_IP) {
+    // C's `switch (skb->protocol)` compares the FULL 32-bit ctx word; a
+    // 16-bit mask here diverges for words whose upper bits are set.
+    let protocol = vload!((*skb).protocol) as u32;
+    if protocol == htons(ETH_P_IP) as u32 {
         let iph = (data + ETH_HDR_LEN) as *const iphdr;
         if iph as usize + core::mem::size_of::<iphdr>() > data_end {
             return -1;
@@ -295,7 +297,7 @@ fn skb_get_type(skb: *const __sk_buff) -> i32 {
         }
         inet_proto = unsafe { (*iph).protocol };
         trans = iph as usize + core::mem::size_of::<iphdr>();
-    } else if protocol == htons(ETH_P_IPV6) {
+    } else if protocol == htons(ETH_P_IPV6) as u32 {
         let ip6h = (data + ETH_HDR_LEN) as *const ipv6hdr;
         if ip6h as usize + core::mem::size_of::<ipv6hdr>() > data_end {
             return -1;

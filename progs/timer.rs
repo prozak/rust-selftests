@@ -27,7 +27,7 @@ use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::{
     bpf_get_smp_processor_id, bpf_ktime_get_boot_ns, bpf_map_delete_elem, bpf_map_lookup_elem,
     bpf_map_update_elem, bpf_timer_cancel, bpf_timer_init, bpf_timer_set_callback,
-    bpf_timer_start, sync_fetch_and_add_u64,
+    bpf_timer_start, bpf_trace_printk, sync_fetch_and_add_u64,
 };
 use bpf_rs_core::maps::{self, BpfMap};
 use core::ffi::c_void;
@@ -446,6 +446,10 @@ extern "C" fn timer_cb3(_map: *mut ArrayMap1, _key: *mut i32, timer: *mut bpf_ti
 #[link_section = "fentry/bpf_fentry_test3"]
 #[no_mangle]
 extern "C" fn test3(_ctx: *const u64) -> i32 {
+    // C: bpf_printk("test3") — every C trace-log site must exist here too
+    static FMT3: [u8; 6] = *b"test3\0";
+    bpf_trace_printk(FMT3.as_ptr() as *const core::ffi::c_void, FMT3.len() as u32, 0, 0, 0);
+
     let key: i32 = 0;
 
     let timer = bpf_map_lookup_elem(&abs_timer, &key) as *mut bpf_timer;
@@ -498,6 +502,8 @@ fn test_pinned_timer(soft: bool) {
 #[link_section = "fentry/bpf_fentry_test4"]
 #[no_mangle]
 extern "C" fn test4(_ctx: *const u64) -> i32 {
+    static FMT4: [u8; 6] = *b"test4\0";
+    bpf_trace_printk(FMT4.as_ptr() as *const core::ffi::c_void, FMT4.len() as u32, 0, 0, 0);
     test_pinned_timer(true);
     0
 }
@@ -505,6 +511,8 @@ extern "C" fn test4(_ctx: *const u64) -> i32 {
 #[link_section = "fentry/bpf_fentry_test5"]
 #[no_mangle]
 extern "C" fn test5(_ctx: *const u64) -> i32 {
+    static FMT5: [u8; 6] = *b"test5\0";
+    bpf_trace_printk(FMT5.as_ptr() as *const core::ffi::c_void, FMT5.len() as u32, 0, 0, 0);
     test_pinned_timer(false);
     0
 }

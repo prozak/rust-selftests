@@ -101,8 +101,20 @@ MAX_CALL_DEPTH = 8  # verifier limit on bpf2bpf nesting
 # the callbacks equivalent.
 H_FOR_EACH_MAP_ELEM = 164
 H_LOOP = 181
-CALLBACK_HELPERS = {H_FOR_EACH_MAP_ELEM, H_LOOP}
+H_TIMER_SET_CALLBACK = 170
+CALLBACK_HELPERS = {H_FOR_EACH_MAP_ELEM, H_LOOP}  # timers: see TIMER_CB_INLINE
 MAX_CB_ITERS = 8  # unroll cap for callback loops
+
+# Timers. init/start/cancel are ordinary side-effecting helpers (trace event
+# + errno oracle); set_callback additionally EXECUTES the registered
+# callback once, inline, with shared per-registration arguments. The
+# callback really runs later, asynchronously — running it here is not a
+# faithful schedule, but it is conservative: both objects run their own
+# callback at the same point against the same environment, so equivalent
+# callbacks produce equal observables and divergent ones are caught. Nested
+# re-registration (a self-rearming timer) is capped.
+H_TIMER_INIT, H_TIMER_START, H_TIMER_CANCEL = 169, 171, 172
+MAX_TIMER_CB_DEPTH = 1
 
 MAP_IN_MAP_TYPES = {12, 13}  # ARRAY_OF_MAPS, HASH_OF_MAPS
 
@@ -113,12 +125,24 @@ H_SK_LOOKUP_TCP, H_SK_LOOKUP_UDP, H_SKC_LOOKUP_TCP = 84, 85, 99
 H_SK_FULLSOCK, H_TCP_SOCK = 95, 96
 H_SK_RELEASE = 86
 
+# Tier 7: socket down-cast helpers (skc_to_*): nullable views derived from
+# an existing socket pointer — same shape as sk_fullsock/tcp_sock, keyed by
+# the source pointer's identity so repeated casts of the same socket agree.
+SKC_CAST_HELPERS = {136, 137, 138, 139, 140}
+H_PER_CPU_PTR, H_THIS_CPU_PTR = 153, 154
+H_KPTR_XCHG = 194
+H_GET_FUNC_ARG, H_GET_FUNC_RET = 183, 184
+H_GET_NETNS_COOKIE = 122
+H_STRNCMP = 182
+H_SKB_GET_TUNNEL_OPT, H_SKB_SET_TUNNEL_OPT = 29, 30
+
 PTR_FORK_HELPERS = {H_MAP_LOOKUP, H_MAP_LOOKUP_PERCPU, H_SK_STORAGE_GET,
                     H_INODE_STORAGE_GET, H_TASK_STORAGE_GET,
                     H_CGRP_STORAGE_GET, H_RINGBUF_RESERVE,
                     H_SK_LOOKUP_TCP, H_SK_LOOKUP_UDP, H_SKC_LOOKUP_TCP,
-                    H_SK_FULLSOCK, H_TCP_SOCK}
-PTR_HELPERS = PTR_FORK_HELPERS | {H_GET_LOCAL_STORAGE}
+                    H_SK_FULLSOCK, H_TCP_SOCK,
+                    H_PER_CPU_PTR, H_KPTR_XCHG} | SKC_CAST_HELPERS
+PTR_HELPERS = PTR_FORK_HELPERS | {H_GET_LOCAL_STORAGE, H_THIS_CPU_PTR}
 
 # Tier 5: generically-captured side-effecting helpers — trace event + shared
 # errno oracle, per the tier-2 rationale. Event arg specs:
@@ -143,6 +167,19 @@ SIDE_EFFECT_HELPERS = {
     146: [("map", 1), ("arg", 2)],                 # inode_storage_delete
     157: [("map", 1), ("arg", 2)],                 # task_storage_delete
     211: [("map", 1), ("arg", 2)],                 # cgrp_storage_delete
+    13:  [("val", 2), ("val", 3)],                 # clone_redirect
+    31:  [("val", 2), ("val", 3)],                 # skb_change_proto
+    32:  [("val", 2)],                             # skb_change_type
+    38:  [("val", 2), ("val", 3)],                 # skb_change_tail
+    155: [("val", 1), ("val", 2)],                 # redirect_peer(ifindex, flags)
+    # the key is compared by its CONTENTS (size from the map's BTF def),
+    # never by pointer identity — the two compilers place the key at
+    # different stack offsets
+    82:  [("map", 2), ("mapkey", 3, 2), ("val", 4)],  # sk_select_reuseport
+    30:  [("mem", 2, 3)],                          # skb_set_tunnel_opt
+    170: [("arg", 1), ("func", 2)],                # timer_set_callback
+    171: [("arg", 1), ("val", 2), ("val", 3)],     # timer_start
+    172: [("arg", 1)],                             # timer_cancel
 }
 H_GET_STACK = 67
 H_SKB_GET_TUNNEL_KEY = 20
@@ -351,9 +388,16 @@ class Executor:
 
     def _store(self, mem, ptr, size, val):
         if not is_ptr(ptr):
-            raise Bail("store through data-valued (kernel) pointer")
-        region, addr = ptr.region, ptr.off
-        if region.startswith(("ro:", "map:")) or region == "kmem":
+            # Tier 7: a store through a data-valued pointer writes kernel
+            # memory — the same shared `kmem` array probe-reads and
+            # data-pointer loads read. kmem is an observable, so a
+            # divergent address or value surfaces as INEQUIV; both objects
+            # start from the same symbolic snapshot, so agreeing writes
+            # cancel. (Conservative: never fakes EQUIV.)
+            region, addr = "kmem", ptr
+        else:
+            region, addr = ptr.region, ptr.off
+        if region.startswith(("ro:", "map:")):
             raise Bail(f"store into read-only region {region}")
         if is_ptr(val):
             # pointer spill: kept in a per-region shadow keyed by concrete
@@ -364,8 +408,8 @@ class Executor:
             # pointers) a canonical identity encoding is also written into
             # the byte array, so storing different abstract pointers stays
             # distinguishable to the observable comparison.
-            if size != 8 or not region.startswith(
-                    ("stack:", "g:", "mapval:", "arenapg:")):
+            if size != 8 or not (region == "kmem" or region.startswith(
+                    ("stack:", "g:", "mapval:", "arenapg:"))):
                 raise Bail(f"spilled pointer store into {region}")
             a = self._concrete_addr(addr, region)
             sh = dict(mem.get(("shadow", region), {}))
@@ -1012,6 +1056,23 @@ class Executor:
                     payload += self._val_bytes(regs[spec[1]], 8, what)
                 elif spec[0] == "map":
                     payload += self._name_bytes(self._map_name(regs[spec[1]], what))
+                elif spec[0] == "mapkey":
+                    # ("mapkey", key ptr reg, map reg): bytes pointed to,
+                    # sized by the map's own BTF key_size
+                    ks, _vs = self._map_kv(
+                        self._map_name(regs[spec[2]], what), what)
+                    if ks is None:
+                        raise Bail(f"map for helper {hid} lacks key size "
+                                   f"in {what}")
+                    payload += self._mem_bytes(mem, regs[spec[1]], ks, what)
+                elif spec[0] == "func":
+                    # identity of a registered callback: its SOURCE symbol
+                    # name, which both objects share (the build's keep-list
+                    # forces matching symbol names). Registering a different
+                    # callback is therefore detected; the callback's BODY is
+                    # not proved here — see the README's assumptions.
+                    payload += self._name_bytes(self._func_name(regs[spec[1]],
+                                                                what))
                 elif spec[0] == "arg":
                     payload += self._arg_id_bytes(regs[spec[1]], what)
                 else:  # ("mem", ptr reg, len reg)
@@ -1078,6 +1139,69 @@ class Executor:
             for k in range(n):
                 old = z3.Extract(7, 0, self._load(mem, self._addr_add(bufp, k), 1))
                 self._store(mem, self._addr_add(bufp, k), 1,
+                            z3.If(err == bv64(0), f(bv64(idx), bv64(k)), old))
+            ret = err
+        elif hid in (H_GET_FUNC_ARG, H_GET_FUNC_RET):
+            # reads the traced function's nth argument / return value into
+            # *value: a pure environment read keyed by the question (which
+            # arg), so both objects asking the same question get the same
+            # answer. Errors leave the buffer untouched, as the kernel does.
+            if hid == H_GET_FUNC_ARG:
+                nth = zext64(lo32(need_data(regs[2], what)))
+                dstp = regs[3]
+            else:
+                nth = bv64(0)
+                dstp = regs[2]
+            err = z3.SignExt(32, z3.Function(f"oracle_funcarg_err_h{hid}",
+                                             BV64S, BV32S)(nth))
+            f = z3.Function(f"oracle_funcarg_h{hid}", BV64S, BV64S)
+            self._store(mem, dstp, 8,
+                        z3.If(err == bv64(0), f(nth),
+                              self._load(mem, dstp, 8)))
+            ret = err
+        elif hid == H_GET_NETNS_COOKIE:
+            # pure environment value keyed by the ctx identity (NULL ctx =
+            # the initial netns, a distinct question)
+            a = regs[1]
+            key = (self._canon_region(a.region) if is_ptr(a) else "null")
+            ret = z3.Function("oracle_netns_cookie_"
+                              + re.sub(r"\W", "_", key), BV64S, BV64S)(bv64(0))
+        elif hid == H_STRNCMP:
+            # pure function of the two strings' contents: the event pins the
+            # actual bytes, the result is a shared per-index oracle (same
+            # rationale as the string kfuncs)
+            n = self._concrete_u64(regs[2], what) & 0xFFFFFFFF
+            if n > MAX_COPY:
+                raise Bail(f"strncmp size {n} > {MAX_COPY} in {what}")
+            payload = (list(n.to_bytes(4, "little"))
+                       + self._mem_bytes(mem, regs[1], n, what)
+                       + self._cstr_bytes(mem, regs[3], what))
+            self._emit_event(mem, counters, hid, payload)
+            ret = self._errno_oracle(hid, idx)
+        elif hid == H_TIMER_INIT:
+            # bind the timer slot to its map: set_callback needs the map to
+            # build the callback's arguments
+            mname = self._map_name(regs[2], what)
+            counters[("timer_map", self._slot_key(regs[1], what))] = mname
+            self._emit_event(mem, counters, hid,
+                             self._arg_id_bytes(regs[1], what)
+                             + self._name_bytes(mname)
+                             + self._val_bytes(regs[3], 8, what))
+            ret = self._errno_oracle(hid, idx)
+        elif hid == H_SKB_GET_TUNNEL_OPT:
+            # env read into a caller buffer (like skb_get_tunnel_key): the
+            # size is the question, bytes are a shared per-index oracle
+            n = self._concrete_u64(regs[3], what) & 0xFFFFFFFF
+            if n > MAX_COPY:
+                raise Bail(f"tunnel_opt size {n} > {MAX_COPY} in {what}")
+            self._emit_event(mem, counters, hid,
+                             self._val_bytes(regs[3], 8, what))
+            err = self._errno_oracle(hid, idx)
+            err = z3.If(err > bv64(0), -err, err)
+            f = z3.Function("oracle_tunnelopt", BV64S, BV64S, BV8S)
+            for k in range(n):
+                old = z3.Extract(7, 0, self._load(mem, self._addr_add(regs[2], k), 1))
+                self._store(mem, self._addr_add(regs[2], k), 1,
                             z3.If(err == bv64(0), f(bv64(idx), bv64(k)), old))
             ret = err
         elif hid == H_CHECK_MTU:
@@ -1154,6 +1278,7 @@ class Executor:
         counters[hid] = idx + 1
 
         inner = None
+        mname = None  # set only by the map-taking helpers below
         if hid in (H_MAP_LOOKUP, H_MAP_LOOKUP_PERCPU):
             mname = self._map_name(regs[1], what)
             d = self._map_def(mname, what)
@@ -1186,10 +1311,23 @@ class Executor:
                        + self._mem_bytes(mem, regs[2], n, what)
                        + self._val_bytes(regs[4], 8, what)
                        + self._val_bytes(regs[5], 8, what))
-        elif hid in (H_SK_FULLSOCK, H_TCP_SOCK):
-            # views derived from an existing socket pointer; the source
-            # socket's identity is the question
+        elif hid in (H_SK_FULLSOCK, H_TCP_SOCK) or hid in SKC_CAST_HELPERS:
+            # views/down-casts derived from an existing socket pointer; the
+            # source socket's identity is the question
             payload = self._arg_id_bytes(regs[1], what)
+        elif hid in (H_PER_CPU_PTR, H_THIS_CPU_PTR):
+            # per-cpu view of a percpu pointer: keyed by the source pointer
+            # (and cpu for per_cpu_ptr) so repeated views of the same object
+            # alias consistently
+            payload = self._arg_id_bytes(regs[1], what)
+            if hid == H_PER_CPU_PTR:
+                payload += self._val_bytes(regs[2], 8, what)
+        elif hid == H_KPTR_XCHG:
+            # atomically swaps a kernel pointer into a map value and returns
+            # the old one: the destination slot and the incoming pointer are
+            # the question, the old pointer is the (nullable) answer
+            payload = (self._arg_id_bytes(regs[1], what)
+                       + self._arg_id_bytes(regs[2], what))
         else:  # sk/inode/task/cgrp storage_get(map, obj, value, flags)
             mname = self._map_name(regs[1], what)
             payload = (self._name_bytes(mname) + self._val_bytes(regs[2], 8, what)
@@ -1209,11 +1347,24 @@ class Executor:
         elif hid == H_RINGBUF_RESERVE:
             region = f"rbuf:{idx}"
             counters[("rbufsz", region)] = n
-        elif hid in (H_SK_LOOKUP_TCP, H_SK_LOOKUP_UDP, H_SKC_LOOKUP_TCP,
-                     H_TCP_SOCK):
+        elif hid in (H_SK_LOOKUP_TCP, H_SK_LOOKUP_UDP, H_SKC_LOOKUP_TCP):
             region = f"mapval:{hid}:sk:{idx}"
-        elif hid == H_SK_FULLSOCK:
-            region = None  # returns its own argument (full-socket view)
+        elif hid in SKC_CAST_HELPERS or hid == H_TCP_SOCK:
+            # RE-TYPING casts (skc_to_tcp_sock, bpf_tcp_sock, ...) hand back
+            # the SAME kernel object, so they must alias their argument —
+            # a fresh region would make a program that reads through the
+            # cast disagree with one that reads through the original
+            # (exactly the bpf_iter_setsockopt false INEQUIV).
+            region = None
+        elif hid in (H_PER_CPU_PTR, H_THIS_CPU_PTR):
+            # a per-cpu VIEW is a different object than its percpu base;
+            # key it by the source identity so repeated views alias
+            src = regs[1]
+            tag = (self._canon_region(src.region) if is_ptr(src)
+                   else "scalar")
+            region = f"mapval:{hid}:{tag}"
+        elif hid == H_KPTR_XCHG:
+            region = f"mapval:{hid}:old:{idx}"
         else:
             region = f"mapval:{hid}:{mname}:{idx}"
         ret_ptr = regs[1] if region is None else Ptr(region, bv64(0))
@@ -1385,6 +1536,26 @@ class Executor:
 
     # ---------- tier-6: callback helpers ----------
 
+    def _func_name(self, ptr, what):
+        """Source symbol name of a function pointer (func: region)."""
+        if not is_ptr(ptr) or not ptr.region.startswith("func:"):
+            raise Bail(f"expected a function pointer in {what}")
+        _, secname, idx = ptr.region.split(":", 2)
+        sec = self.elf.section_by_name(secname)
+        sym = self.elf.named_symbol_at(sec.idx, int(idx) * 8)
+        if sym is None:
+            raise Bail(f"unnamed callback at {secname}+{idx} in {what}")
+        return normalize_name(sym.name)
+
+    def _slot_key(self, ptr, what):
+        """Stable identity of an embedded struct slot (a timer inside a map
+        value), comparable across the two objects."""
+        if not is_ptr(ptr):
+            raise Bail(f"timer slot is not a pointer in {what}")
+        off = z3.simplify(ptr.off)
+        offs = off.as_long() if z3.is_bv_value(off) else "sym"
+        return f"{self._canon_region(ptr.region)}+{offs}"
+
     def _cb_target(self, ptr, what):
         """(section, insn idx) of a callback function pointer arg."""
         if not is_ptr(ptr) or not ptr.region.startswith("func:"):
@@ -1405,6 +1576,16 @@ class Executor:
             regs[1] = zext64(z3.BitVecVal(i, 32))  # u32 index
             regs[2] = arg_ctx
             regs[3] = bv64(0)
+            regs[4] = bv64(0)
+        elif hid == H_TIMER_SET_CALLBACK:
+            # timer callback: (map, key, value) — shared per-registration
+            # key region, observable per-registration value region
+            kreg = f"cbkey:{mapname}:{cbfid}:0"
+            self.shared.setdefault(
+                kreg, z3.Array("init_" + kreg.replace(":", "_"), BV64S, BV8S))
+            regs[1] = arg_map
+            regs[2] = Ptr(kreg, bv64(0))
+            regs[3] = Ptr(f"mapval:timer:{mapname}:{cbfid}", bv64(0))
             regs[4] = bv64(0)
         else:  # for_each_map_elem: (map, key, value, ctx)
             regs[1] = arg_map
@@ -1431,6 +1612,25 @@ class Executor:
         cbfid = counters.get("cbframe", 0) + 1
         counters["cbframe"] = cbfid
         arg_ctx = regs[3]
+        if hid == H_TIMER_SET_CALLBACK:
+            slot = self._slot_key(regs[1], what)
+            mapname = counters.get(("timer_map", slot))
+            if mapname is None:
+                raise Bail(f"timer callback set on uninitialized slot {slot} "
+                           f"in {what}")
+            depth = counters.get("timer_cb_depth", 0)
+            self._emit_event(mem, counters, hid,
+                             self._arg_id_bytes(regs[1], what)
+                             + self._name_bytes(mapname))
+            if depth >= MAX_TIMER_CB_DEPTH:
+                return None  # registration recorded; don't recurse further
+            counters["timer_cb_depth"] = depth + 1
+            n = bv64(1)
+            arg_map = Ptr(f"map:{mapname}", bv64(0))
+            frame = ("__cb", hid, csec, cidx, 0, n, None, None, regs[10],
+                     cbfid, arg_ctx, arg_map, mapname)
+            return frame, self._cb_iter_regs(frame, 0, mem, counters), \
+                csec, cidx
         if hid == H_LOOP:
             nr = regs[1]
             if is_ptr(nr):

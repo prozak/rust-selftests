@@ -56,9 +56,11 @@ static parser_map: BpfMap<i32, i32, { maps::ARRAY }, 1> = BpfMap::new();
 
 /* toggled by user-space */
 #[no_mangle]
-static mut test_sockmap: bool = false;
+// C declares these `bool`; clang compiles the tests as `!= 1` (jne 1), so
+// they are true only for the byte value 1. Mirror with u8 + `== 1`.
+static mut test_sockmap: u8 = 0;
 #[no_mangle]
-static mut test_ingress: bool = false;
+static mut test_ingress: u8 = 0;
 
 /// UAPI struct sk_msg_md (bpf.h). data/data_end/sk are __bpf_md_ptr, kept as
 /// u64 like __sk_buff's flow_keys/sk (same overlay representation).
@@ -124,7 +126,7 @@ extern "C" fn prog_stream_parser(skb: *const __sk_buff) -> i32 {
 #[no_mangle]
 extern "C" fn prog_stream_verdict(skb: *const __sk_buff) -> i32 {
     let zero: u32 = 0;
-    let sockmap = unsafe { test_sockmap };
+    let sockmap = unsafe { test_sockmap } == 1;
 
     let verdict: i32 = if sockmap {
         bpf_sk_redirect_map(skb, &sock_map, zero, 0) as i32
@@ -140,8 +142,8 @@ extern "C" fn prog_stream_verdict(skb: *const __sk_buff) -> i32 {
 #[no_mangle]
 extern "C" fn prog_skb_verdict(skb: *const __sk_buff) -> i32 {
     let zero: u32 = 0;
-    let sockmap = unsafe { test_sockmap };
-    let flags: u64 = if unsafe { test_ingress } {
+    let sockmap = unsafe { test_sockmap } == 1;
+    let flags: u64 = if unsafe { test_ingress } == 1 {
         BPF_F_INGRESS
     } else {
         0
@@ -161,7 +163,7 @@ extern "C" fn prog_skb_verdict(skb: *const __sk_buff) -> i32 {
 #[no_mangle]
 extern "C" fn prog_msg_verdict(msg: *const sk_msg_md) -> i32 {
     let zero: u32 = 0;
-    let sockmap = unsafe { test_sockmap };
+    let sockmap = unsafe { test_sockmap } == 1;
 
     let verdict: i32 = if sockmap {
         bpf_msg_redirect_map(msg, &sock_map, zero, 0) as i32
@@ -177,7 +179,10 @@ extern "C" fn prog_msg_verdict(msg: *const sk_msg_md) -> i32 {
 #[no_mangle]
 extern "C" fn prog_reuseport(reuse: *mut sk_reuseport_md) -> i32 {
     let zero: u32 = 0;
-    let sockmap = unsafe { test_sockmap };
+    // clang compiles this particular `if (test_sockmap)` as `!= 0` (jne 0)
+    // while the sk_skb/sk_msg sites compile as `!= 1` — the per-site
+    // variance of the _Bool compare class, mirrored per site.
+    let sockmap = unsafe { test_sockmap } != 0;
 
     let err: i64 = if sockmap {
         bpf_sk_select_reuseport(reuse, &sock_map, &zero, 0)

@@ -6,6 +6,27 @@
 // against the kernel Makefile), so only the version-2 (BPF_CORE_WRITE_BITFIELD)
 // branch of erspan_set_tunnel/ip4ip6erspan_set_tunnel is translated; the
 // `#ifdef ERSPAN_V1` branches are dead in the C original too.
+//
+// erspan md2 bitfields: this translation reads/writes the md2 bits at their
+// real offsets (byte 10/11 of struct erspan_metadata). The C object does NOT.
+// BPF_CORE_WRITE_BITFIELD/BPF_CORE_READ_BITFIELD compute `p = (void *)s +
+// __CORE_RELO(s, field, BYTE_OFFSET)`, but LLVM roots the access spec of
+// `(&md.u.md2)->dir` at `md` (erspan_metadata), not at erspan_md2 — the relo
+// records are `erspan_metadata` + access "0:1:1:7", so libbpf patches
+// BYTE_OFFSET to 11 while `s` already carries the +4 offset of `md.u.md2`.
+// Every erspan md2 access in the C object therefore lands 4 bytes past where
+// it should (md+14/md+15, i.e. off the end of the 12-byte struct and into the
+// adjacent `key` slot). That is a C-side macro/codegen bug, not something the
+// translation should reproduce, so equiv/check.py reports the four erspan
+// programs as divergent (see equiv/waivers.tsv).
+//
+// translint: allow(printk-count) — every C bpf_printk() site is mirrored here
+// (7 bpf_trace_printk + 3 bpf_trace_vprintk restored). The residual count gap
+// is pure codegen: in erspan_set_tunnel, ip4ip6erspan_set_tunnel,
+// vxlan_set_tunnel_dst and vxlan_set_tunnel_src, LLVM tail-merges the
+// identical log_err() blocks into one shared bpf_trace_printk call site where
+// clang kept two. Per-function call-site counts agree everywhere else, and the
+// prover proves vxlan_set_tunnel_{dst,src} EQUIV despite the 2-vs-1 count.
 
 use core::ffi::c_void;
 
@@ -15,6 +36,7 @@ use bpf_rs_core::helpers::{
     bpf_csum_diff, bpf_l3_csum_replace, bpf_map_lookup_elem, bpf_skb_change_type,
     bpf_skb_get_tunnel_key, bpf_skb_get_tunnel_opt, bpf_skb_get_xfrm_state,
     bpf_skb_set_tunnel_key, bpf_skb_set_tunnel_opt, bpf_skb_store_bytes, bpf_trace_printk,
+    bpf_trace_vprintk,
 };
 use bpf_rs_core::maps::{self, BpfMap};
 use bpf_rs_core::vload;
@@ -41,6 +63,21 @@ static KEY_REMOTE_IP_FMT: [u8; 23] = *b"key %d remote ip 0x%x\n\0";
 static KEY_REMOTE_IP6_LABEL_FMT: [u8; 33] = *b"key %d remote ip6 ::%x label %x\n\0";
 static REMOTE_IP_FMT: [u8; 16] = *b"remote ip 0x%x\n\0";
 static REMOTE_IP6_FMT: [u8; 19] = *b"remote ip6 %x::%x\n\0";
+static KEY_REMOTE_IP_ERSPAN_FMT: [u8; 41] = *b"key %d remote ip 0x%x erspan version %d\n\0";
+static ERSPAN_MD2_FMT: [u8; 36] = *b"\tdirection %d hwid %x timestamp %u\n\0";
+static IP6ERSPAN_KEY_FMT: [u8; 56] =
+    *b"ip6erspan get key %d remote ip6 ::%x erspan version %d\n\0";
+static KEY_REMOTE_IP_GENEVE_FMT: [u8; 41] = *b"key %d remote ip 0x%x geneve class 0x%x\n\0";
+static LOCAL_IP_FMT: [u8; 15] = *b"local_ip 0x%x\n\0";
+
+// C's bpf_printk() lowers to bpf_trace_vprintk() (helper 177) once the format
+// takes more than three arguments: the promoted args go into a `[u64; N]` on
+// the stack and the helper gets (fmt, sizeof fmt, args, sizeof args).
+static VXLAN_KEY_FMT: [u8; 63] =
+    *b"vxlan key %d local ip 0x%x remote ip 0x%x gbp 0x%x flags 0x%x\n\0";
+static IP6VXLAN_KEY_FMT: [u8; 70] =
+    *b"ip6vxlan key %d local ip6 ::%x remote ip6 ::%x label 0x%x flags 0x%x\n\0";
+static ENCAP_REMOTE_IP_FMT: [u8; 39] = *b"%d remote ip 0x%x, sport %d, dport %d\n\0";
 
 const XDP_PASS: i32 = 2;
 
@@ -143,6 +180,19 @@ fn set_erspan_md2(md: &mut ErspanMetadata, direction: u8, hwid: u8) {
         md.u.md2.byte6 = hwid_upper;
         md.u.md2.byte7 = (direction << 3) | (hwid_lo << 4);
     }
+}
+
+// C: BPF_CORE_READ_BITFIELD(&md.u.md2, dir)
+#[inline(always)]
+fn erspan_md2_dir(md: &ErspanMetadata) -> u8 {
+    unsafe { (md.u.md2.byte7 >> 3) & 0x1 }
+}
+
+// C: (BPF_CORE_READ_BITFIELD(&md.u.md2, hwid_upper) << 4) +
+//    BPF_CORE_READ_BITFIELD(&md.u.md2, hwid)
+#[inline(always)]
+fn erspan_md2_hwid(md: &ErspanMetadata) -> u8 {
+    unsafe { ((md.u.md2.byte6 & 0x3) << 4) + ((md.u.md2.byte7 >> 4) & 0xf) }
 }
 
 // struct vxlan_metadata (net/vxlan.h).
@@ -543,6 +593,24 @@ extern "C" fn erspan_get_tunnel(skb: *const __sk_buff) -> i32 {
         return TC_ACT_SHOT;
     }
 
+    /* C line 220: bpf_printk("key %d remote ip 0x%x erspan version %d\n", ...) */
+    bpf_trace_printk(
+        KEY_REMOTE_IP_ERSPAN_FMT.as_ptr() as *const c_void,
+        KEY_REMOTE_IP_ERSPAN_FMT.len() as u32,
+        key.tunnel_id as u64,
+        unsafe { key.remote.remote_ipv4 } as u64,
+        md.version as u64,
+    );
+
+    /* C line 227: bpf_printk("\tdirection %d hwid %x timestamp %u\n", ...) */
+    bpf_trace_printk(
+        ERSPAN_MD2_FMT.as_ptr() as *const c_void,
+        ERSPAN_MD2_FMT.len() as u32,
+        erspan_md2_dir(&md) as u64,
+        erspan_md2_hwid(&md) as u64,
+        u32::from_be(unsafe { md.u.md2.timestamp }) as u64,
+    );
+
     TC_ACT_OK
 }
 
@@ -610,6 +678,24 @@ extern "C" fn ip4ip6erspan_get_tunnel(skb: *const __sk_buff) -> i32 {
         log_err(297, ret);
         return TC_ACT_SHOT;
     }
+
+    /* C line 301: bpf_printk("ip6erspan get key %d remote ip6 ::%x erspan version %d\n", ...) */
+    bpf_trace_printk(
+        IP6ERSPAN_KEY_FMT.as_ptr() as *const c_void,
+        IP6ERSPAN_KEY_FMT.len() as u32,
+        key.tunnel_id as u64,
+        unsafe { key.remote.remote_ipv4 } as u64,
+        md.version as u64,
+    );
+
+    /* C line 308: bpf_printk("\tdirection %d hwid %x timestamp %u\n", ...) */
+    bpf_trace_printk(
+        ERSPAN_MD2_FMT.as_ptr() as *const c_void,
+        ERSPAN_MD2_FMT.len() as u32,
+        erspan_md2_dir(&md) as u64,
+        erspan_md2_hwid(&md) as u64,
+        u32::from_be(unsafe { md.u.md2.timestamp }) as u64,
+    );
 
     TC_ACT_OK
 }
@@ -737,6 +823,21 @@ extern "C" fn vxlan_get_tunnel_src(skb: *const __sk_buff) -> i32 {
         || (tunnel_flags & TUNNEL_KEY) == 0
         || (tunnel_flags & TUNNEL_CSUM) != 0
     {
+        /* C line 419: bpf_printk("vxlan key %d local ip 0x%x remote ip 0x%x "
+         *                        "gbp 0x%x flags 0x%x\n", ...) */
+        let args: [u64; 5] = [
+            key.tunnel_id as u64,
+            local_ipv4 as u64,
+            unsafe { key.remote.remote_ipv4 } as u64,
+            md.gbp as u64,
+            u16::from_be(tunnel_flags) as u64,
+        ];
+        bpf_trace_vprintk(
+            VXLAN_KEY_FMT.as_ptr() as *const c_void,
+            VXLAN_KEY_FMT.len() as u32,
+            args.as_ptr() as *const c_void,
+            core::mem::size_of_val(&args) as u32,
+        );
         log_err(423, ret);
         return TC_ACT_SHOT;
     }
@@ -914,6 +1015,29 @@ extern "C" fn ip6vxlan_get_tunnel_src(skb: *const __sk_buff) -> i32 {
         || (tunnel_flags & TUNNEL_KEY) == 0
         || (tunnel_flags & TUNNEL_CSUM) == 0
     {
+        /* C line 569: bpf_printk("ip6vxlan key %d local ip6 ::%x remote ip6 "
+         *                        "::%x label 0x%x flags 0x%x\n", ...) */
+        let args: [u64; 5] = [
+            key.tunnel_id as u64,
+            u32::from_be(local_ipv6_3) as u64,
+            u32::from_be(unsafe { key.remote.remote_ipv6[3] }) as u64,
+            key.tunnel_label as u64,
+            u16::from_be(tunnel_flags) as u64,
+        ];
+        bpf_trace_vprintk(
+            IP6VXLAN_KEY_FMT.as_ptr() as *const c_void,
+            IP6VXLAN_KEY_FMT.len() as u32,
+            args.as_ptr() as *const c_void,
+            core::mem::size_of_val(&args) as u32,
+        );
+        /* C line 573: bpf_printk("local_ip 0x%x\n", *local_ip) */
+        bpf_trace_printk(
+            LOCAL_IP_FMT.as_ptr() as *const c_void,
+            LOCAL_IP_FMT.len() as u32,
+            local_ip as u64,
+            0,
+            0,
+        );
         log_err(574, ret);
         return TC_ACT_SHOT;
     }
@@ -990,6 +1114,15 @@ extern "C" fn geneve_get_tunnel(skb: *const __sk_buff) -> i32 {
         gopt.opt_class = 0;
     }
 
+    /* C line 642: bpf_printk("key %d remote ip 0x%x geneve class 0x%x\n", ...) */
+    bpf_trace_printk(
+        KEY_REMOTE_IP_GENEVE_FMT.as_ptr() as *const c_void,
+        KEY_REMOTE_IP_GENEVE_FMT.len() as u32,
+        key.tunnel_id as u64,
+        unsafe { key.remote.remote_ipv4 } as u64,
+        gopt.opt_class as u64,
+    );
+
     TC_ACT_OK
 }
 
@@ -1061,6 +1194,15 @@ extern "C" fn ip6geneve_get_tunnel(skb: *const __sk_buff) -> i32 {
     if ret < 0 {
         gopt.opt_class = 0;
     }
+
+    /* C line 704: bpf_printk("key %d remote ip 0x%x geneve class 0x%x\n", ...) */
+    bpf_trace_printk(
+        KEY_REMOTE_IP_GENEVE_FMT.as_ptr() as *const c_void,
+        KEY_REMOTE_IP_GENEVE_FMT.len() as u32,
+        key.tunnel_id as u64,
+        unsafe { key.remote.remote_ipv4 } as u64,
+        gopt.opt_class as u64,
+    );
 
     TC_ACT_OK
 }
@@ -1249,6 +1391,20 @@ extern "C" fn ipip_encap_get_tunnel(skb: *const __sk_buff) -> i32 {
     if u16::from_be(encap.dport) != 5555 {
         return TC_ACT_SHOT;
     }
+
+    /* C line 854: bpf_printk("%d remote ip 0x%x, sport %d, dport %d\n", ...) */
+    let args: [u64; 4] = [
+        ret as i64 as u64,
+        unsafe { key.remote.remote_ipv4 } as u64,
+        u16::from_be(encap.sport) as u64,
+        u16::from_be(encap.dport) as u64,
+    ];
+    bpf_trace_vprintk(
+        ENCAP_REMOTE_IP_FMT.as_ptr() as *const c_void,
+        ENCAP_REMOTE_IP_FMT.len() as u32,
+        args.as_ptr() as *const c_void,
+        core::mem::size_of_val(&args) as u32,
+    );
 
     TC_ACT_OK
 }

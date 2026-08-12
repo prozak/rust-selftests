@@ -196,3 +196,14 @@ translint:
 	python3 scripts/translint.py
 
 .PHONY: equiv-guard translint
+
+# --- Undo any swapped-in Rust objects (make test-<name> leaves the Rust
+# --- object in the selftests slot; comparing against it would be
+# --- Rust-vs-Rust). Safe to run any time.
+restore-all:
+	@n=0; for f in $(SELFTESTS_OUTPUT)/*.bpf.o.corig; do \
+		b=$${f%.corig}; \
+		cmp -s "$$b" "$$f" || { cp "$$f" "$$b"; n=$$((n+1)); }; \
+	done; echo "restored $$n C object(s)"
+
+.PHONY: restore-all

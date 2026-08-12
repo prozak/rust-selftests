@@ -62,7 +62,9 @@ static cubic_cc: [u8; 10] = *b"bpf_cubic\0";
 static mut dctcp_cc: [u8; TCP_CA_NAME_MAX] = *b"bpf_dctcp\0\0\0\0\0\0\0";
 
 #[no_mangle]
-static mut random_retry: bool = false;
+// C declares this `bool`; clang compiles the test as `!= 1` (jne 1), so it
+// is true only for the byte value 1. Mirror that with u8 + `== 1`.
+static mut random_retry: u8 = 0;
 
 #[link_section = "iter/tcp"]
 #[no_mangle]
@@ -94,7 +96,11 @@ extern "C" fn change_tcp_cc(ctx: *const bpf_iter__tcp) -> i32 {
         return 0;
     }
 
-    let mut cur_cc: [u8; TCP_CA_NAME_MAX] = [0; TCP_CA_NAME_MAX];
+    // C: `char cur_cc[TCP_CA_NAME_MAX];` — UNINITIALIZED; getsockopt fills
+    // it. Zero-initializing here would both diverge from the C object and
+    // make rustc emit a memset this pipeline has no kfunc for.
+    let mut cur_cc: [u8; TCP_CA_NAME_MAX] =
+        unsafe { core::mem::MaybeUninit::uninit().assume_init() };
     let ret = bpf_getsockopt(
         tp,
         SOL_TCP,
@@ -115,7 +121,7 @@ extern "C" fn change_tcp_cc(ctx: *const bpf_iter__tcp) -> i32 {
         return 0;
     }
 
-    if unsafe { random_retry } && bpf_get_prandom_u32() % 4 == 1 {
+    if unsafe { random_retry } == 1 && bpf_get_prandom_u32() % 4 == 1 {
         return 1;
     }
 

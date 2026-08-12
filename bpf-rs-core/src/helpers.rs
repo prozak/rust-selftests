@@ -740,6 +740,20 @@ pub fn bpf_trace_printk(fmt: *const c_void, fmt_size: u32, arg1: u64, arg2: u64,
     thunk!(6, fn(*const c_void, u32, u64, u64, u64) -> i64)(fmt, fmt_size, arg1, arg2, arg3)
 }
 
+/// `long bpf_trace_vprintk(const char *fmt, u32 fmt_size, const void *data,
+/// u32 data_len)`. What libbpf's `bpf_printk()` lowers to when the format
+/// takes more than three arguments: `data` points at a `[u64; N]` of the
+/// promoted arguments and `data_len` is its size in bytes.
+#[inline(always)]
+pub fn bpf_trace_vprintk(
+    fmt: *const c_void,
+    fmt_size: u32,
+    data: *const c_void,
+    data_len: u32,
+) -> i64 {
+    thunk!(177, fn(*const c_void, u32, *const c_void, u32) -> i64)(fmt, fmt_size, data, data_len)
+}
+
 /// `long bpf_xdp_adjust_meta(struct xdp_md *xdp_md, int delta)`.
 #[inline(always)]
 pub fn bpf_xdp_adjust_meta<T>(xdp: *mut T, delta: i32) -> i64 {

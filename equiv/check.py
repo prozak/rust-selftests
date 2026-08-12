@@ -117,7 +117,7 @@ def check_program(name, func, elves, shared, timeout_ms):
     # buffer's scribbles are invisible to userspace.
     obs_regions = [r for r in shared
                    if r.startswith(("g:", "mapval:", "arenapg:"))] \
-        + ["ctx", "trace", "sysret", "skbdata"]
+        + ["ctx", "trace", "sysret", "skbdata", "kmem"]
     ret_a, ret_b = summarize_ret(paths["A"]), summarize_ret(paths["B"])
     mem_eq = [summarize(paths["A"], shared, r) == summarize(paths["B"], shared, r)
               for r in obs_regions]
@@ -178,6 +178,19 @@ def main():
     for p in (c_path, r_path):
         if not os.path.exists(p):
             sys.exit(f"missing object: {p}")
+
+    # `make test-<name>` swaps the Rust object INTO the selftests output dir
+    # (and `make restore-<name>` puts the C one back). If a run is
+    # interrupted the C slot keeps holding a Rust object, and every later
+    # comparison would be Rust-vs-Rust — trivially "equivalent". The
+    # pristine copy lives beside it as .corig, so refuse to proceed when
+    # they differ rather than report a meaningless verdict.
+    corig = c_path + ".corig"
+    if os.path.exists(corig) and open(corig, "rb").read() != open(c_path, "rb").read():
+        sys.exit(f"C object {os.path.basename(c_path)} differs from its "
+                 f".corig backup — the selftests slot still holds a swapped-in "
+                 f"object. Run `make restore-{args.prog}` (or copy the .corig "
+                 f"back) before proving.")
 
     elf_c, elf_r = BpfElf(c_path), BpfElf(r_path)
 

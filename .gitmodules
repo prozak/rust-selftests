@@ -1,0 +1,3 @@
+[submodule "collections/vendor/libarena"]
+	path = collections/vendor/libarena
+	url = https://github.com/libbpf/libarena

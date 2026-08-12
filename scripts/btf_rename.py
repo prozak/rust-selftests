@@ -131,7 +131,10 @@ def main(path, objcopy=None):
             # legal and load-bearing for libbpf — never touch them. INT
             # names are C type names where spaces are legal ("long
             # unsigned int" is all over vmlinux BTF) — exempt too.
-            elif kind not in (15, BTF_KIND_INT) and not valid_ident.match(name):
+            # DECL_TAG (17) names are kernel-recognized annotations whose
+            # syntax includes ':' ("arg:arena", "exception_callback:f") —
+            # sanitizing them breaks verifier features that key on them.
+            elif kind not in (15, 17, BTF_KIND_INT) and not valid_ident.match(name):
                 struct.pack_into(
                     "<I", data, pos, intern(re.sub(r"[^A-Za-z0-9_]", "_", name)))
                 sanitized += 1

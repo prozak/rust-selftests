@@ -186,3 +186,13 @@ clean:
            $(SELFTESTS_OUTPUT)/%.bpf.o.corig
 
 .PHONY: all verify status clean
+
+# --- equivalence regression guard + translation linter ---
+PYZ3 ?= $(abspath $(CURDIR)/../z3-venv/bin/python)
+equiv-guard:
+	$(PYZ3) equiv/guard.py
+
+translint:
+	python3 scripts/translint.py
+
+.PHONY: equiv-guard translint

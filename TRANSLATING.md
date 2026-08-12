@@ -212,3 +212,39 @@ make test-<name>         # swap in + kernel-Makefile skeleton regen +
                          # affected test_progs tests in UML (oracle gate)
 make restore-<name>      # reinstate the clang-built object
 ```
+
+## Divergence classes the equivalence prover has caught (lint before submitting)
+
+`python3 scripts/translint.py <name>` checks a translation mechanically;
+`../z3-venv/bin/python equiv/guard.py <name>` re-proves it after a rebuild
+(hash-gated, seconds when nothing else changed). The classes, each found
+as a real bug at least once (equiv/README.md "true findings"):
+
+- **Dropped logging** [lint: printk-count]: every C `bpf_printk`/`log_err`
+  site must exist in the Rust — 62 real INEQUIV sites came from omitted
+  error/success logs. `__LINE__`-style args must carry the C source's
+  line numbers.
+- **Bool globals** [lint: bool-global]: clang compiles `if (_Bool)` as
+  `jne 0` at some sites and `jne 1` at others, in the same file. Store the
+  global as `u8` and mirror each site's compare after disassembling the C
+  object. Bool RETURNS normalize too (`(x != 0) as i32`, not `x as i32`).
+- **Hex-literal typing** [lint: big-hex]: a hex literal that doesn't fit
+  `int` is UNSIGNED int in C — `0xabcd1234 + cnt` wraps at 32 bits before
+  widening. Use `u32` + `wrapping_add`, then extend.
+- **Struct padding** [lint: padding]: C's `= {}` zeroes padding bytes; a
+  Rust struct literal leaves them undefined. Make padding explicit
+  (`_pad: [u8; N]`) for anything reaching a map value or trace.
+- **Pointer-arithmetic scaling** [lint: ptr-scaling]: C scales by element
+  size — `tuple + sizeof *tuple` advances 36*36 bytes; `sk += 1` advances
+  `sizeof(struct bpf_sock)`. Mirror the object, not the intuition.
+- **Store width** [lint: narrow-cast]: match the C pointee exactly; a u32
+  store through what C types `__u64 *` leaves 4 residue bytes in the map.
+- **Promotions & extensions**: `u32 > int` compares UNSIGNED in C;
+  `int` args to u64 helper params SIGN-extend (`x as i64 as u64`).
+- **Usual-int arithmetic**: C `int` intermediates truncate/sign-extend at
+  32 bits; keep Rust arithmetic at the same width as the C expression.
+
+After any translation edit: `make <obj>` + `equiv/guard.py <name>` +
+`make test-<name>` (runtime oracle). The guard alarms on INEQUIV and on
+verdict downgrades; its baseline (equiv/results/baseline.tsv) is
+committed and updated by the run.

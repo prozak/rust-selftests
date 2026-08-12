@@ -348,5 +348,9 @@ pointer-compare/symbolic-size/spill tail.
    (optval/pkt data), larger bounded copies.
 3. **Path-merging at join points** for the pyperf/strobemeta/iterator
    TIMEOUT class (21 objects).
-4. **Regression guard**: bytecode-hash fast path; re-prove after
-   quality-layer edits, alarm on equivalence break.
+4. ~~Regression guard~~ DONE: `equiv/guard.py` — hash-gated re-proving
+   against a committed baseline (results/baseline.tsv); the full corpus
+   checks in under a second when nothing changed, alarms on INEQUIV and
+   on verdict downgrades. Paired with `scripts/translint.py`, which
+   mechanically checks new translations for every divergence class the
+   prover has caught (see TRANSLATING.md).

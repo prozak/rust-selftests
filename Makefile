@@ -71,7 +71,8 @@ RUSTC ?= rustc
 RUST_SRC ?= $(shell $(RUSTC) --print sysroot)/lib/rustlib/src/rust/library
 
 RUSTFLAGS_ENV := RUSTC_BOOTSTRAP=1
-RUSTC_COMMON := --target $(TARGET) -C opt-level=3 -C panic=unwind -C debuginfo=2 -Z unstable-options -Z threads=64
+OPT_LEVEL ?= 3
+RUSTC_COMMON := --target $(TARGET) -C opt-level=$(OPT_LEVEL) -C panic=unwind -C debuginfo=2 -Z unstable-options -Z threads=64
 
 PROGS := $(patsubst progs/%.rs,%,$(wildcard progs/*.rs))
 

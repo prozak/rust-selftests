@@ -14,6 +14,10 @@ Aggregate parity, and a majority of programs match exactly. So "rustc emits
 bigger BPF" is not true as a general statement, and 30% of the time rustc
 emits *fewer* instructions than clang.
 
+Better still, once the corpus is split by whether the byte-wise idiom of
+Finding 1 is present, **rustc is 0.959x on the 91% of pairs without it** and
+1.249x on the 8% with it. See Finding 3.
+
 The composition tells a different story:
 
 | kind | clang | rustc | delta |
@@ -159,13 +163,58 @@ enumerate, and three of these files (`test_cls_redirect`, `test_seg6_loop`,
 coverage in `equiv/` as well as size here — worth testing rather than
 assuming.
 
-## Finding 3: rustc wins on ALU
+## Finding 3: rustc is already smaller wherever byte traffic is equal
 
-`alu64` -18%, `alu32` -3%, `ld_imm64` -2%, `endian` -8%, `atomic` -11%.
-rustc's arithmetic codegen is consistently *tighter* than clang's here.
-Worth understanding rather than only celebrating: some of it is likely
-rustc materializing constants differently, and some may be the translation
-expressing an operation more directly than the C source did.
+Splitting the corpus by whether the byte-wise idiom of Finding 1 is present
+at all changes the headline:
+
+| subset | pairs | alu64 | instructions |
+|---|---:|---:|---:|
+| byte traffic **equal** | 1004 (91%) | 3,037 -> 2,645 (-13%) | 17,221 -> 16,507 (**0.959x**) |
+| rustc has **more** byte traffic | 84 (8%) | 1,902 -> 1,358 (-29%) | 7,461 -> 9,320 (**1.249x**) |
+| rustc has **less** | 11 (1%) | 151 -> 166 (+10%) | 1,027 -> 938 (0.913x) |
+
+**On the 91% of the corpus untouched by Finding 1, rustc emits 4% FEWER
+instructions than clang.** The entire +4% aggregate regression is produced
+by the 8% of pairs that carry the byte-wise idiom. That is the strongest
+argument for work item 1: it is not chasing a 4% tail, it is the only thing
+standing between the pipeline and a net win.
+
+The ALU advantage on that subset is real and uniform — `alu64` -13% and
+`alu32` -12% fall together, so it is not `mov64` being reclassified as
+`mov32`. Memory traffic drops too (`ldx_stack` -16%, `stx_stack` -10%,
+`ldx_mem` -4%). Only `call_bpf2bpf` (+13%) and `exit` (+5%) rise, which is
+Finding 4.
+
+Two obvious explanations were tested and **both refuted**:
+
+- *Optimization level.* clang builds the selftests at `-O2`, our pipeline at
+  `-C opt-level=3`. Rebuilding eight of the biggest ALU-savers at
+  `opt-level=2` changed almost nothing (921 vs 926 instructions; only `lsm`
+  moved, by 5). The Makefile now takes `OPT_LEVEL` so this stays easy to
+  re-check.
+- *LLVM version.* clang 22.1.8 against rustc's LLVM 22.1.2 — effectively the
+  same compiler backend.
+
+### The part that is not a compiler win
+
+At least some of it is the translation being a *simplification* of the C,
+not rustc optimizing better. `cgrp_ls_recursion:on_enter` (114 -> 84):
+
+```c
+static void __on_enter(struct pt_regs *regs, long id, struct cgroup *cgrp)
+```
+
+`regs` and `id` are never used in the body, and `BPF_PROG` unpacks those ctx
+arguments to pass them. The translation writes `__on_enter(cgrp)` and
+ignores `_ctx` entirely. Both are provably equivalent — the dead values
+reach no observable — but the C is carrying work the Rust never had.
+
+This is a caveat on the whole study, not just this finding: the corpus is
+hand-written on one side, so it is not a pure compiler comparison. The
+`equiv/` proof guarantees the two sides compute the same thing; it does not
+guarantee they were *asked* to compute it the same way. Quantifying how
+much of the win is translation cleanliness versus codegen is open work.
 
 ## Finding 4: inlining disagreement
 
@@ -196,6 +245,8 @@ below is a closed loop.
 
 ## Open leads
 
-- Finding 3 (rustc's ALU win, -921 `alu64`) is unexplained and currently
-  masking Finding 1 in the totals. Worth understanding before item 1 lands,
-  or the improvement will be hard to read.
+- **Quantify the translation-simplification bias** (see Finding 3). Some of
+  rustc's advantage is the translation carrying less dead work than the C
+  source, not better codegen. Until that is separated out, "rustc is 0.959x
+  on the clean subset" is a floor on the compiler's quality, not a
+  measurement of it.

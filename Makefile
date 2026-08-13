@@ -228,3 +228,9 @@ ci-local: restore-all ci-fast
 	$(PYZ3) equiv/guard.py
 
 .PHONY: ci-fast ci-local semantics
+
+# --- codegen study: what rustc emits vs clang, over proved-equivalent pairs
+codegen:
+	$(PYZ3) codegen/compare.py
+
+.PHONY: codegen

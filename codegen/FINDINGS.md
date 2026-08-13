@@ -75,7 +75,50 @@ plain array copy gets MemCpyOpt-rewritten into an unresolvable
 unmergeable, so that workaround has the same cost by construction. Fixing
 memcpy/memset lowering for BPF would let those idioms go away too.
 
-## Finding 2: rustc wins on ALU
+## Finding 2: no way to express "do not unroll this loop"
+
+`loop4:combinations` is the largest ratio in the corpus — 14 clang
+instructions against 139 rustc ones (9.9x). The C source says so
+explicitly:
+
+```c
+__pragma_loop_no_unroll
+for (i = 0; i < 20; i++)
+        if (skb->len)
+                ret |= 1 << i;
+```
+
+rustc has no equivalent, so it fully unrolled a 20-iteration loop. This is
+worse than a size regression: `loop4` exists to test the verifier against a
+*rolled* loop, so the translation quietly stops testing what the selftest
+is for.
+
+12 translated files use loop pragmas, and they are 1.39x overall against
+the corpus-wide 1.04x. Splitting by pragma direction:
+
+| `__pragma_loop_no_unroll` (C stays rolled) | ratio |
+|---|---:|
+| loop4 | 9.93x |
+| test_xdp_loop | 1.46x |
+| test_sysctl_loop1 | 1.27x |
+| test_sysctl_loop2 | 1.19x |
+| test_seg6_loop | 1.08x |
+
+**All five are larger in rustc**, which is exactly the predicted direction.
+The seven `__pragma_loop_unroll_full` files are mixed (0.89x–1.76x), so
+those regressions have some other cause and should not be attributed here.
+
+Compiler-side: the pipeline needs a way to attach LLVM loop metadata
+(`llvm.loop.unroll.disable`) — Rust has no stable attribute for it, so this
+is a rust-bpf pipeline feature, not something a translation can express.
+
+Cross-workstream note: unrolling multiplies the paths the prover must
+enumerate, and three of these files (`test_cls_redirect`, `test_seg6_loop`,
+`test_xdp_noinline`) are currently prover TIMEOUTs. Loop control may buy
+coverage in `equiv/` as well as size here — worth testing rather than
+assuming.
+
+## Finding 3: rustc wins on ALU
 
 `alu64` -18%, `alu32` -3%, `ld_imm64` -2%, `endian` -8%, `atomic` -11%.
 rustc's arithmetic codegen is consistently *tighter* than clang's here.
@@ -83,14 +126,14 @@ Worth understanding rather than only celebrating: some of it is likely
 rustc materializing constants differently, and some may be the translation
 expressing an operation more directly than the C source did.
 
-## Finding 3: inlining disagreement
+## Finding 4: inlining disagreement
 
 `call_bpf2bpf` +11%, and `exit` +5% (one per inlined-vs-not function).
 Already seen concretely in tier 9: clang inlined `clobber_regs_stack` where
 rustc left it a bpf2bpf callee. This costs instructions but also changes
 the verifier's job, so it is worth a look independent of size.
 
-## Finding 4: stack frames are level in aggregate
+## Finding 5: stack frames are level in aggregate
 
 Total frame bytes clang 8,436 vs rustc 8,464 (1.00x). Given the verifier's
 512-byte frame cap this is the reassuring result. Individual regressions
@@ -99,9 +142,6 @@ are worth checking for headroom, but there is no systemic frame growth.
 
 ## Open leads
 
-- `loop4:combinations` is 14 clang instructions and 139 rustc ones (9.9x,
-  the largest ratio in the corpus) with +49 `alu32` and +41 frame traffic.
-  Small enough to read end to end; likely a loop-optimization difference.
 - `test_xdp:_xdp_tx_iptunnel` is the largest absolute excess (+137) with
   `ldx_mem` +49 / `stx_mem` +41 — memory traffic, not frame traffic, so a
   different cause from Finding 1.

@@ -67,7 +67,11 @@ static mut seen_tc7: bool = false;
 static mut seen_tc8: bool = false;
 
 #[no_mangle]
-static mut set_type: bool = false;
+// C's `bool` truthiness test does not compile to one fixed encoding:
+// clang emits `jne 0` at some sites and `jne 1` or `(x & 1) != 0` at
+// others, even within one file. Store u8 and mirror the compare the C
+// object actually made (see TRANSLATING.md, bool-global).
+static mut set_type: u8 = 0;
 
 #[no_mangle]
 static mut seen_eth: bool = false;
@@ -107,7 +111,7 @@ extern "C" fn tc1(skb: *const __sk_buff) -> i32 {
             seen_eth = eth.h_proto == htons(ETH_P_IP);
             seen_host = host;
         }
-        if host && unsafe { set_type } {
+        if host && unsafe { set_type } & 1 != 0 {
             eth.h_dest[0] = 4;
             if bpf_skb_store_bytes(
                 skb as *const c_void,
@@ -178,7 +182,7 @@ extern "C" fn tc7(skb: *const __sk_buff) -> i32 {
             core::mem::size_of::<ethhdr>() as u32,
         ) == 0
         && eth.h_dest[0] == 4
-        && unsafe { set_type }
+        && unsafe { set_type } & 1 != 0
     {
         unsafe { seen_mcast = vload!((*skb).pkt_type) == PACKET_MULTICAST };
         bpf_skb_change_type(skb as *const c_void, PACKET_HOST);

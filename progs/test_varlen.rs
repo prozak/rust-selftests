@@ -15,7 +15,11 @@ static mut buf_in2: [u8; MAX_LEN] = [0; MAX_LEN];
 #[no_mangle]
 static mut test_pid: i32 = 0;
 #[no_mangle]
-static mut capture: bool = false;
+// C's `bool` truthiness test does not compile to one fixed encoding:
+// clang emits `jne 0` at some sites and `jne 1` or `(x & 1) != 0` at
+// others, even within one file. Store u8 and mirror the compare the C
+// object actually made (see TRANSLATING.md, bool-global).
+static mut capture: u8 = 0;
 
 /* .bss */
 #[no_mangle]
@@ -78,7 +82,7 @@ extern "C" fn handler64_unsigned(_regs: *const c_void) -> i32 {
     unsafe {
         let pid = (bpf_get_current_pid_tgid() >> 32) as i32;
 
-        if test_pid != pid || !capture {
+        if test_pid != pid || capture & 1 == 0 {
             return 0;
         }
 
@@ -122,7 +126,7 @@ extern "C" fn handler64_signed(_regs: *const c_void) -> i32 {
     unsafe {
         let pid = (bpf_get_current_pid_tgid() >> 32) as i32;
 
-        if test_pid != pid || !capture {
+        if test_pid != pid || capture & 1 == 0 {
             return 0;
         }
 
@@ -160,7 +164,7 @@ extern "C" fn handler32_unsigned(_regs: *const c_void) -> i32 {
     unsafe {
         let pid = (bpf_get_current_pid_tgid() >> 32) as i32;
 
-        if test_pid != pid || !capture {
+        if test_pid != pid || capture & 1 == 0 {
             return 0;
         }
 
@@ -198,7 +202,7 @@ extern "C" fn handler32_signed(_regs: *const c_void) -> i32 {
     unsafe {
         let pid = (bpf_get_current_pid_tgid() >> 32) as i32;
 
-        if test_pid != pid || !capture {
+        if test_pid != pid || capture & 1 == 0 {
             return 0;
         }
 

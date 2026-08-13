@@ -29,6 +29,7 @@ use core::ffi::c_void;
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::{
     bpf_get_current_pid_tgid, bpf_loop, bpf_map_lookup_elem, bpf_map_update_elem,
+    bpf_trace_printk,
 };
 use bpf_rs_core::maps::{self, BpfMap};
 
@@ -316,6 +317,18 @@ extern "C" fn test_first_firstzero_cpu(_ctx: *const u64) -> i32 {
         }
     } else if unsafe { bpf_cpumask_first_zero(cast(mask)) } != 0 {
         unsafe {
+            // C: bpf_printk("first zero: %d", bpf_cpumask_first_zero(...)).
+            // The trace log is an observable, so the call belongs here even
+            // though only `err` is checked from userspace — and the C calls
+            // the kfunc a SECOND time to build the argument.
+            static FMT: [u8; 16] = *b"first zero: %d  ";
+            bpf_trace_printk(
+                FMT.as_ptr() as *const c_void,
+                15,
+                bpf_cpumask_first_zero(cast(mask)) as u64,
+                0,
+                0,
+            );
             err = 4;
         }
     } else {

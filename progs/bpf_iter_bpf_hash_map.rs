@@ -51,7 +51,11 @@ static hashmap2: BpfMap<u64, u64, { maps::HASH }, 3> = BpfMap::new();
 static hashmap3: BpfMap<key_t, u32, { maps::HASH }, 3> = BpfMap::new();
 
 #[no_mangle]
-static mut in_test_mode: bool = false;
+// C's `bool` truthiness test does not compile to one fixed encoding:
+// clang emits `jne 0` at some sites and `jne 1` or `(x & 1) != 0` at
+// others, even within one file. Store u8 and mirror the compare the C
+// object actually made (see TRANSLATING.md, bool-global).
+static mut in_test_mode: u8 = 0;
 
 #[no_mangle]
 static mut key_sum_a: u32 = 0;
@@ -71,7 +75,7 @@ extern "C" fn dump_bpf_hash_map(ctx: *const bpf_iter__bpf_map_elem) -> i32 {
     let key = ctx.key as *mut key_t;
     let val = ctx.value as *mut u64;
 
-    if unsafe { in_test_mode } {
+    if unsafe { in_test_mode } == 1 {
         if key.is_null() || val.is_null() {
             return 0;
         }

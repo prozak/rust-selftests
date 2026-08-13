@@ -8,8 +8,9 @@
 // map struct is the bpf_map! escape hatch (type/max_entries/key_size/
 // value_size members, same __uint(...) pointer-array encoding throughout).
 
+use core::ffi::c_void;
 use bpf_rs_core::bpf_map;
-use bpf_rs_core::helpers::{bpf_map_lookup_elem, bpf_map_update_elem, bpf_redirect_map};
+use bpf_rs_core::helpers::{bpf_map_lookup_elem, bpf_map_update_elem, bpf_redirect_map, bpf_trace_printk};
 use bpf_rs_core::maps::{self, BpfMap};
 use bpf_rs_core::{bpf_object, vload};
 
@@ -147,6 +148,19 @@ fn store_mac(xdp: *const xdp_md, id: u32) -> i32 {
             i += 1;
         }
         bpf_map_update_elem(&rx_mac, &key, &mac, 0);
+        // C: bpf_printk("%s - %x", __func__, mac). The trace log is an
+        // observable, so the call has to be here even though the userspace
+        // test does not read it; __func__ inside the C's `static store_mac`
+        // is that name at both inlined call sites.
+        static FMT: [u8; 8] = *b"%s - %x\0";
+        static FUNC: [u8; 10] = *b"store_mac\0";
+        bpf_trace_printk(
+            FMT.as_ptr() as *const c_void,
+            FMT.len() as u32,
+            FUNC.as_ptr() as u64,
+            mac,
+            0,
+        );
     }
 
     XDP_PASS

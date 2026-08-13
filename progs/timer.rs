@@ -146,6 +146,12 @@ static mut callback2_check: u64 = 52;
 static mut pinned_callback_check: u64 = 0;
 #[no_mangle]
 static mut pinned_cpu: i32 = 0;
+// translint: allow(bool-global)
+// Verified rather than assumed: clang compiles `async_cancel ? ... : ...`
+// in race() as `ldxb r7` then `if w7 == 0x0` — a plain != 0 test, with no
+// `& 1` mask and no `!= 1`. rustc emits the identical `if w7 == 0x0` for
+// the Rust `bool`, so the two encodings already agree here and re-typing
+// to u8 would buy nothing.
 #[no_mangle]
 static mut async_cancel: bool = false;
 

@@ -37,6 +37,25 @@ frame traffic (spills, fills and locals).
 | `endian` | 136 | 125 | -11 (-8%) |
 | `exit` | 1,221 | 1,278 | +57 (+5%) |
 
+## Access widths
+
+How WIDE the loads and stores are. A copy that should be a few
+8-byte moves showing up as dozens of 1-byte ones is the
+signature of an unmergeable byte-at-a-time idiom.
+
+| access | clang | rustc | delta |
+|---|---:|---:|---:|
+| `ldx_1B` | 478 | 1,661 | +1,183 (+247%) |
+| `ldx_2B` | 305 | 215 | -90 (-30%) |
+| `ldx_4B` | 1,397 | 1,149 | -248 (-18%) |
+| `ldx_8B` | 1,021 | 945 | -76 (-7%) |
+| `st_1B` | 553 | 1,687 | +1,134 (+205%) |
+| `st_2B` | 93 | 184 | +91 (+98%) |
+| `st_4B` | 869 | 912 | +43 (+5%) |
+| `st_8B` | 1,376 | 1,345 | -31 (-2%) |
+
+Byte-width share of all memory access: clang **17%**, rustc **41%** (+2,317 single-byte accesses).
+
 ## Largest ratios
 
 | program | clang | rustc | ratio | biggest excess |

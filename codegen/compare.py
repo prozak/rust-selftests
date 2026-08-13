@@ -181,6 +181,29 @@ def build_report(rows):
                    f"| `{k}` | {a:,} | {b:,} | {d:+,} |")
     doc.append("")
 
+    doc += ["## Access widths", "",
+            "How WIDE the loads and stores are. A copy that should be a few",
+            "8-byte moves showing up as dozens of 1-byte ones is the",
+            "signature of an unmergeable byte-at-a-time idiom.", "",
+            "| access | clang | rustc | delta |", "|---|---:|---:|---:|"]
+    WID = ["ldx_1B", "ldx_2B", "ldx_4B", "ldx_8B",
+           "st_1B", "st_2B", "st_4B", "st_8B"]
+    for w in WID:
+        a = sum(r[2][0].widths.get(w, 0) for r in rows)
+        b = sum(r[3][0].widths.get(w, 0) for r in rows)
+        if not a and not b:
+            continue
+        doc.append(f"| `{w}` | {a:,} | {b:,} | {b - a:+,} "
+                   + (f"({(100.0 * (b - a) / a):+.0f}%) |" if a else "|"))
+    ac = sum(r[2][0].widths.get(w, 0) for r in rows for w in WID)
+    ar = sum(r[3][0].widths.get(w, 0) for r in rows for w in WID)
+    bc = sum(r[2][0].widths.get(w, 0) for r in rows for w in ("ldx_1B", "st_1B"))
+    br = sum(r[3][0].widths.get(w, 0) for r in rows for w in ("ldx_1B", "st_1B"))
+    doc += ["",
+            f"Byte-width share of all memory access: clang "
+            f"**{100.0 * bc / ac:.0f}%**, rustc **{100.0 * br / ar:.0f}%** "
+            f"({br - bc:+,} single-byte accesses).", ""]
+
     ratio = sorted(rows, key=lambda r: -(r[3][0].n / max(r[2][0].n, 1)))
     doc += ["## Largest ratios", "",
             "| program | clang | rustc | ratio | biggest excess |",

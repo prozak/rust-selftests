@@ -16,6 +16,8 @@ OP_END = 0xD0
 JMP_CALL, JMP_EXIT, JMP_JA = 0x80, 0x90, 0x00
 # BPF_MODE(op) = op & 0xE0
 MODE_IMM, MODE_ABS, MODE_IND, MODE_MEM, MODE_ATOMIC = 0x00, 0x20, 0x40, 0x60, 0xC0
+# BPF_SIZE(op) = op & 0x18
+SIZE_NAME = {0x00: "4B", 0x08: "2B", 0x10: "1B", 0x18: "8B"}
 R10 = 10
 
 
@@ -75,14 +77,19 @@ class FuncStats:
         self.insns = insns
         self.n = len(insns)
         self.hist = {}
-        self.stack_bytes = 0
-        skip = False
+        self.widths = {}       # memory-access width: how WIDE the loads and
+        self.stack_bytes = 0   # stores are, which is what byte-wise copy
+        skip = False           # workarounds show up in
         for i, ins in enumerate(insns):
             k = classify(ins, prev_is_hi=skip)
             self.hist[k] = self.hist.get(k, 0) + 1
             skip = (not skip) and ins[0] == 0x18
             op, dst, src, off, _ = ins
             cls = op & 7
+            if cls in (LDX, ST, STX) and (op & 0xE0) != MODE_ATOMIC:
+                w = SIZE_NAME.get(op & 0x18, "?")
+                d = "ldx" if cls == LDX else "st"
+                self.widths[f"{d}_{w}"] = self.widths.get(f"{d}_{w}", 0) + 1
             if off < 0 and ((cls == LDX and src == R10)
                             or (cls in (ST, STX) and dst == R10)):
                 self.stack_bytes = max(self.stack_bytes, -off)

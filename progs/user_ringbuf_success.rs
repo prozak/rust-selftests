@@ -14,8 +14,30 @@ use core::ffi::c_void;
 
 use bpf_rs_core::helpers::{
     bpf_dynptr_data, bpf_dynptr_read, bpf_get_current_pid_tgid, bpf_loop, bpf_ringbuf_discard,
-    bpf_ringbuf_reserve, bpf_ringbuf_submit, bpf_user_ringbuf_drain, sync_fetch_and_add_u32,
+    bpf_ringbuf_reserve, bpf_ringbuf_submit, bpf_trace_printk, bpf_user_ringbuf_drain,
+    sync_fetch_and_add_u32,
 };
+
+// The C source logs on every one of these error branches. The trace log is
+// an observable, so a dropped call is a divergence even though the
+// userspace test only reads `err` (see TRANSLATING.md, printk-count).
+macro_rules! printk {
+    ($lit:literal $(, $arg:expr)*) => {{
+        static FMT: &[u8] = $lit;
+        bpf_trace_printk(
+            FMT.as_ptr() as *const c_void,
+            FMT.len() as u32,
+            printk!(@arg 0 $(, $arg)*),
+            printk!(@arg 1 $(, $arg)*),
+            0,
+        )
+    }};
+    (@arg $n:tt) => { 0u64 };
+    (@arg 0, $a:expr) => { $a as u64 };
+    (@arg 1, $a:expr) => { 0u64 };
+    (@arg 0, $a:expr, $b:expr) => { $a as u64 };
+    (@arg 1, $a:expr, $b:expr) => { $b as u64 };
+}
 use bpf_rs_core::{bpf_map, bpf_object};
 
 bpf_map! {
@@ -104,6 +126,7 @@ extern "C" fn record_sample(dynptr: *mut c_void, _context: *mut c_void) -> i64 {
             0,
         );
         if status != 0 {
+            printk!(b"bpf_dynptr_read() failed: %d\n\0", status);
             unsafe { err = 1 };
             return 1;
         }
@@ -114,6 +137,7 @@ extern "C" fn record_sample(dynptr: *mut c_void, _context: *mut c_void) -> i64 {
             core::mem::size_of::<Sample>() as u64,
         );
         if sample.is_null() {
+            printk!(b"Unexpectedly failed to get sample\n\0");
             unsafe { err = 2 };
             return 1;
         }
@@ -131,7 +155,10 @@ fn handle_sample_msg(msg: *const TestMsg) {
             TEST_MSG_OP_INC32 => kern_mutated += (*msg).operand.operand_32 as u64,
             TEST_MSG_OP_MUL64 => kern_mutated *= (*msg).operand.operand_64 as u64,
             TEST_MSG_OP_MUL32 => kern_mutated *= (*msg).operand.operand_32 as u64,
-            _ => err = 2,
+            _ => {
+                printk!(b"Unrecognized op %d\n\0", msg_op);
+                err = 2
+            }
         }
     }
 }
@@ -144,6 +171,7 @@ extern "C" fn read_protocol_msg(dynptr: *mut c_void, _context: *mut c_void) -> i
     ) as *const TestMsg;
     if msg.is_null() {
         unsafe { err = 1 };
+        printk!(b"Unexpectedly failed to get msg\n\0");
         return 0;
     }
 
@@ -198,7 +226,10 @@ extern "C" fn publish_next_kern_msg(index: u64, _context: *mut c_void) -> i64 {
 
 fn publish_kern_messages() {
     if unsafe { expected_user_mutated != user_mutated } {
-        unsafe { err = 3 };
+        unsafe {
+            printk!(b"%lu != %lu\n\0", expected_user_mutated, user_mutated);
+            err = 3;
+        }
         return;
     }
 
@@ -214,6 +245,7 @@ extern "C" fn test_user_ringbuf_protocol(_ctx: *const c_void) -> i32 {
 
     let status = bpf_user_ringbuf_drain(&user_ringbuf, read_protocol_msg, core::ptr::null_mut(), 0);
     if status < 0 {
+        printk!(b"Drain returned: %ld\n\0", status);
         unsafe { err = 1 };
         return 0;
     }

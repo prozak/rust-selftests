@@ -25,7 +25,7 @@ use bpf_rs_core::bpf_object;
 use bpf_rs_core::ctx::__sk_buff;
 use bpf_rs_core::helpers::{
     self, bpf_copy_from_user, bpf_map_lookup_elem, bpf_spin_lock, bpf_spin_unlock,
-    bpf_this_cpu_ptr,
+    bpf_this_cpu_ptr, bpf_trace_printk,
 };
 use bpf_rs_core::maps::{self, BpfMap};
 use bpf_rs_core::vload;
@@ -413,6 +413,19 @@ extern "C" fn lock_global_subprog_call2(ctx: *const __sk_buff) -> i32 {
 #[inline(never)]
 pub extern "C" fn global_subprog_int(i: i32) -> i32 {
     let mut v = i as usize;
+    // C: `if (i) bpf_printk("%p", &i);` — the trace log is an observable,
+    // so the call belongs here even though these programs are
+    // load-rejection tests that never run.
+    if i != 0 {
+        static FMT: [u8; 3] = *b"%p\0";
+        bpf_trace_printk(
+            FMT.as_ptr() as *const c_void,
+            FMT.len() as u32,
+            core::ptr::addr_of!(v) as u64,
+            0,
+            0,
+        );
+    }
     helpers::barrier_var(&mut v);
     v as i32
 }

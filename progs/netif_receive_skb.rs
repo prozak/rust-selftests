@@ -1,6 +1,16 @@
 #![no_std]
 #![no_main]
 
+// translint: allow(printk-count)
+// The C object carries 111 bpf_trace_printk sites and this one carries 7.
+// The arithmetic: 52 TEST_BTF cases x 2 printks = 104 of them sit inside
+// the macro's `if (_cmp != 0)` arm, which is UNREACHABLE as written —
+// `if (ret) break;` fires on ANY nonzero bpf_snprintf_btf return, and a
+// successful render returns a length, so __strncmp never runs for any case
+// here (none expect an empty string). The remaining 7 are reachable and
+// are translated below: the `ret < 0` render failure, which both compilers
+// unroll into the 6-iteration flags loop, plus the BADPTR check.
+//
 // Direct translation of
 // tools/testing/selftests/bpf/progs/netif_receive_skb.c, bpf-rs-core idiom.
 //
@@ -45,7 +55,7 @@
 use core::ffi::c_void;
 
 use bpf_rs_core::bpf_object;
-use bpf_rs_core::helpers::{bpf_map_lookup_elem, bpf_snprintf_btf};
+use bpf_rs_core::helpers::{bpf_map_lookup_elem, bpf_snprintf_btf, bpf_trace_printk};
 use bpf_rs_core::maps::{self, BpfMap};
 use bpf_rs_core::progs::fentry_arg;
 
@@ -175,6 +185,16 @@ extern "C" fn trace_netif_receive_skb(ctx: *const u64) -> i32 {
         );
         unsafe {
             ret = r as isize;
+            if ret < 0 {
+                static FMT: &[u8] = b"returned %d when writing skb\0";
+                bpf_trace_printk(
+                    FMT.as_ptr() as *const c_void,
+                    FMT.len() as u32,
+                    ret as u64,
+                    0,
+                    0,
+                );
+            }
             ran_subtests += 1;
         }
         i += 1;
@@ -195,6 +215,14 @@ extern "C" fn trace_netif_receive_skb(ctx: *const u64) -> i32 {
     );
     if bad_ret >= 0 {
         unsafe {
+            static FMT: &[u8] = b"printing %llx should generate error, got (%d)\0";
+            bpf_trace_printk(
+                FMT.as_ptr() as *const c_void,
+                FMT.len() as u32,
+                0,
+                bad_ret as u64,
+                0,
+            );
             ret = ERANGE;
         }
     }

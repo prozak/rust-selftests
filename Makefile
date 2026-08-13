@@ -225,7 +225,7 @@ semantics:
 # Order matters — undo any swapped-in objects BEFORE proving, or the
 # comparison is Rust-vs-Rust.
 ci-local: restore-all ci-fast
-	python3 scripts/translint.py || true
+	python3 scripts/translint.py
 	$(PYZ3) equiv/guard.py
 
 .PHONY: ci-fast ci-local semantics

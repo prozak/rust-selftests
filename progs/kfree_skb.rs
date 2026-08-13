@@ -33,7 +33,7 @@ use core::ffi::c_void;
 
 use bpf_rs_core::bpf_map;
 use bpf_rs_core::bpf_object;
-use bpf_rs_core::helpers::{bpf_probe_read_kernel, bpf_skb_output};
+use bpf_rs_core::helpers::{bpf_probe_read_kernel, bpf_skb_output, bpf_trace_printk};
 use bpf_rs_core::progs::fentry_arg;
 use btf_macros::btf;
 
@@ -46,8 +46,22 @@ bpf_map! {
 }
 
 #[btf]
+struct callback_head {
+    next: *mut callback_head,
+    // C: `void (*func)(struct callback_head *)`. Only its VALUE is printed,
+    // and a byte-offset relocation just needs pointer compatibility.
+    func: *mut u8,
+}
+
+#[btf]
+struct dev_ifalias {
+    rcuhead: callback_head,
+}
+
+#[btf]
 struct net_device {
     ifindex: i32,
+    ifalias: *mut dev_ifalias,
 }
 
 #[btf]
@@ -67,6 +81,11 @@ struct sk_buff {
     users: refcount_local,
     data: *mut u8,
     cb: [u8; 48],
+    queue_mapping: u16,
+    // Zero-length marker the C source takes the ADDRESS of to reach the
+    // bitfield byte holding pkt_type; CO-RE resolves it by name like any
+    // other member.
+    __pkt_type_offset: [u8; 0],
 }
 
 #[repr(C)]
@@ -109,6 +128,31 @@ fn skb_cb_ptr(skb: *const sk_buff) -> *const u8 {
 }
 
 #[inline(never)]
+fn skb_queue_mapping(skb: *const sk_buff) -> u16 {
+    *unsafe { &*skb }.queue_mapping().get().unwrap()
+}
+
+#[inline(never)]
+fn skb_pkt_type_offset(skb: *const sk_buff) -> *const c_void {
+    unsafe { &*skb }.__pkt_type_offset().as_ptr() as *const c_void
+}
+
+#[inline(never)]
+fn dev_ifalias_ptr(dev: *const net_device) -> *mut dev_ifalias {
+    *unsafe { &*dev }.ifalias().get().unwrap()
+}
+
+#[inline(never)]
+fn ifalias_rcuhead_next(ifalias: *const dev_ifalias) -> *mut callback_head {
+    *unsafe { &*ifalias }.rcuhead().next().get().unwrap()
+}
+
+#[inline(never)]
+fn cbhead_func(ptr: *const callback_head) -> *mut u8 {
+    *unsafe { &*ptr }.func().get().unwrap()
+}
+
+#[inline(never)]
 fn dev_ifindex(dev: *const net_device) -> i32 {
     *unsafe { &*dev }.ifindex().get().unwrap()
 }
@@ -124,6 +168,8 @@ extern "C" fn trace_kfree_skb(ctx: *const u64) -> i32 {
     let ifindex = dev_ifindex(dev);
     let cb8: *const u8 = skb_cb_ptr(skb);
     let cb32: *const u32 = cb8 as *const u32;
+    let ptr = ifalias_rcuhead_next(dev_ifalias_ptr(dev));
+    let func = cbhead_func(ptr);
 
     let meta = Meta {
         ifindex,
@@ -131,12 +177,64 @@ extern "C" fn trace_kfree_skb(ctx: *const u64) -> i32 {
         cb8_0: unsafe { *cb8.add(8) },
     };
 
+    let mut pkt_type: u8 = 0;
+    bpf_probe_read_kernel(
+        &mut pkt_type,
+        core::mem::size_of::<u8>() as u32,
+        skb_pkt_type_offset(skb),
+    );
+    pkt_type &= 7;
+
+    // read eth proto
     let mut pkt_data: u16 = 0;
     bpf_probe_read_kernel(
         &mut pkt_data,
         core::mem::size_of::<u16>() as u32,
         unsafe { data.add(12) } as *const c_void,
     );
+
+    {
+        static F1: &[u8] = b"rcuhead.next %llx func %llx\n\0";
+        bpf_trace_printk(
+            F1.as_ptr() as *const c_void,
+            F1.len() as u32,
+            ptr as u64,
+            func as u64,
+            0,
+        );
+        static F2: &[u8] = b"skb->len %d users %d pkt_type %x\n\0";
+        bpf_trace_printk(
+            F2.as_ptr() as *const c_void,
+            F2.len() as u32,
+            skb_len(skb) as u64,
+            users as u64,
+            pkt_type as u64,
+        );
+        static F3: &[u8] = b"skb->queue_mapping %d\n\0";
+        bpf_trace_printk(
+            F3.as_ptr() as *const c_void,
+            F3.len() as u32,
+            skb_queue_mapping(skb) as u64,
+            0,
+            0,
+        );
+        static F4: &[u8] = b"dev->ifindex %d data %llx pkt_data %x\n\0";
+        bpf_trace_printk(
+            F4.as_ptr() as *const c_void,
+            F4.len() as u32,
+            meta.ifindex as u64,
+            data as u64,
+            pkt_data as u64,
+        );
+        static F5: &[u8] = b"cb8_0:%x cb32_0:%x\n\0";
+        bpf_trace_printk(
+            F5.as_ptr() as *const c_void,
+            F5.len() as u32,
+            meta.cb8_0 as u64,
+            meta.cb32_0 as u64,
+            0,
+        );
+    }
 
     if users != 1 || pkt_data != htons(0x86dd) || meta.ifindex != 1 {
         // raw tp ignores return value

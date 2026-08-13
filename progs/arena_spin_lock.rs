@@ -2,6 +2,19 @@
 #![no_main]
 #![feature(asm_experimental_arch)]
 
+// translint: allow(printk-count)
+// The C object carries 2 bpf_trace_printk sites and this one carries 0.
+// Both are the `out:` label of a `cond_break_label(out)` inside
+// bpf_arena_spin_lock.h's CAS retry loops -- "RUNTIME ERROR: %s unexpected
+// cond_break exit!!!" -- reached only if the verifier's loop bound fires,
+// which the header itself calls "not expected". This translation has no
+// cond_break at all (its `asm goto` is nightly-only and unavailable), so
+// there is no such path to log from: see the algorithm note below, where a
+// plain arena-backed compare_exchange spinlock replaces the MCS queue.
+// Emitting a printk on a path that cannot exist would claim a fidelity the
+// translation does not have, so the count difference is documented rather
+// than papered over.
+//
 // Direct translation of tools/testing/selftests/bpf/progs/arena_spin_lock.c
 // (bpf-rs-core idiom).
 //

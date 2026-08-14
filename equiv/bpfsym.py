@@ -412,6 +412,16 @@ class Executor:
             region, addr = ptr.region, ptr.off
         if region.startswith(("ro:", "map:")):
             raise Bail(f"store into read-only region {region}")
+        if is_ptr(val) and size < 8:
+            # A NARROWED pointer store is not a spill: the program has
+            # truncated an address to 4 bytes or fewer, so what lands in
+            # memory is the low bits of an address and nothing can be read
+            # back out as a pointer (`a[0] = (int)(long)ctx` in
+            # test_log_buf). Store the low bits of the same canonical
+            # identity encoding whole-pointer stores use — deterministic,
+            # and equal across the two objects for the same logical pointer
+            # — then let it take the ordinary scalar path below.
+            val = self._canon_ptr_bits(val)
         if is_ptr(val):
             # pointer spill: kept in a per-region shadow keyed by concrete
             # offset. On the (non-observable) stack the byte array is left
@@ -432,9 +442,7 @@ class Executor:
             mem[("shadow", region)] = sh
             self._note_write(mem, region, addr, 8)
             if not region.startswith("stack:"):
-                import zlib
-                cname = self._canon_region(val.region)
-                canon = bv64(zlib.crc32(cname.encode()) << 32) + val.off
+                canon = self._canon_ptr_bits(val)
                 arr = self._region_array(mem, region)
                 for k in range(8):
                     arr = z3.Store(arr, addr + bv64(k),
@@ -1556,6 +1564,15 @@ class Executor:
         if ret_kind == 8:
             return z3.Function(f"oracle_h{hid}_ret", BV64S, BV64S)(bv64(idx))
         return self._errno_oracle(hid, idx)
+
+    def _canon_ptr_bits(self, ptr):
+        """A pointer's identity as a 64-bit value: crc32 of its canonical
+        region name in the high half, its offset in the low half. Same
+        logical pointer -> same bits in both objects (the per-run tag is
+        neutralized), different pointers -> different bits."""
+        import zlib
+        cname = self._canon_region(ptr.region)
+        return bv64(zlib.crc32(cname.encode()) << 32) + ptr.off
 
     def _copy_preserving_pointers(self, mem, dst, src, n, what):
         """Byte copy that carries a stored POINTER across whole.

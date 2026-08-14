@@ -510,3 +510,15 @@ def test_map_key_without_a_map_size_bails():
     # key_size 0 yields an empty capture rather than a wrong-width one
     v, _ = compare(p, p, hsigs=HSIGS_MAP, maps=nodef, relocs={8: "m"})
     assert v == "EQUIV"
+
+
+def test_narrowed_pointer_store_is_not_a_spill():
+    """`a[0] = (int)(long)ctx` truncates an address to 4 bytes. Nothing can
+    be read back out as a pointer, so it is a scalar store of the low bits
+    — not a spill, which is what it used to bail as."""
+    g = {"a": b"\x00" * 16}
+    p = asm.prog(asm.ld_imm64(R2, 0),
+                 asm.stx(4, R2, R1, 0),      # a[0] = (u32)ctx
+                 asm.ldx(4, R0, R2, 4),      # return a[1]
+                 asm.exit_())
+    assert verdict(p, p, globals_=g, relocs={0: "a"}) == "EQUIV"

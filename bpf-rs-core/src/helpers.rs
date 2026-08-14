@@ -57,6 +57,16 @@ pub fn bpf_get_smp_processor_id() -> u32 {
 }
 
 #[inline(always)]
+pub fn bpf_rc_keydown(ctx: *const c_void, protocol: u32, scancode: u64, toggle: u32) -> i64 {
+    thunk!(78, fn(*const c_void, u32, u64, u32) -> i64)(ctx, protocol, scancode, toggle)
+}
+
+#[inline(always)]
+pub fn bpf_rc_pointer_rel(ctx: *const c_void, rel_x: i32, rel_y: i32) -> i64 {
+    thunk!(92, fn(*const c_void, i32, i32) -> i64)(ctx, rel_x, rel_y)
+}
+
+#[inline(always)]
 pub fn bpf_tail_call<M>(ctx: *const c_void, prog_array: *const M, index: u32) -> i64 {
     thunk!(12, fn(*const c_void, *const M, u32) -> i64)(ctx, prog_array, index)
 }

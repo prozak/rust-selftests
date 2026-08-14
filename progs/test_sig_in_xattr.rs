@@ -138,7 +138,17 @@ extern "C" fn test_file_open(ctx: *const u64) -> i32 {
 
     unsafe { bpf_key_put(trusted_keyring) };
 
-    if ret < -4095 || ret > 0 {
+    // C: set_if_not_errno_or_zero(ret, -EFAULT), whose asm is
+    //     if %0 s< -4095 goto +1 ; if %0 s<= 0 goto +1 ; %0 = -EFAULT
+    // meaning "keep a valid errno, else force -EFAULT". But clang holds the
+    // kfunc's `int` return in a register via MOV32 (`w7 = w0`, then
+    // `w7 = w7`), which ZERO-extends, and the asm then compares the full
+    // 64-bit register. A zero-extended value is never negative at 64 bits,
+    // so the errno-preserving branch is unreachable in the compiled object
+    // and every nonzero return becomes -EFAULT. Comparing as i32 here would
+    // keep errnos the C object throws away, so mirror its width.
+    let wide = ret as u32 as i64;
+    if wide < -4095 || wide > 0 {
         ret = -EFAULT;
     }
 

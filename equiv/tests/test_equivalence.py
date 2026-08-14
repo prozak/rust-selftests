@@ -315,3 +315,99 @@ def test_generic_helper_unsized_pointee_bails():
                  asm.call(209), asm.mov64_imm(R0, 0), asm.exit_())
     with pytest.raises(Bail, match="unsized"):
         compare(p, p, hsigs=HSIGS)
+
+
+# ------------------------------- kfunc signatures from the kernel's own BTF
+
+# check.kernel_kfunc_sigs()'s shape: name -> ([(is_ptr, size, extra)],
+# void_ret). `extra` is the index of the argument giving a buffer's length.
+KSIGS = {
+    # a struct pointee the two objects would declare differently (the C at
+    # 16 bytes, rustc opaque at 0) — the kernel's size is what gets used
+    "bpf_dynptr_from_mem": ([(True, 16, None), (False, 4, None)],
+                            False, False),
+    # `void *p, u32 p__sz`: the extent is the NEXT argument
+    "bpf_kfunc_call_test_mem_len_pass1": ([(True, None, 1), (False, 4, None)],
+                                          True, False),
+    # `const char *s__str`: compared by contents, not by identity. Named so
+    # it does NOT hit the bespoke KFUNC_STR set, which is what we want to
+    # test the generic path here.
+    "bpf_testmod_str_arg": ([(True, -1, None)], False, False),
+}
+
+
+def kcall(name, setup=()):
+    """A program that calls `name` as a kfunc (call relocating to an UND sym)."""
+    code = asm.prog(*setup, asm.raw(0x85, src=2, imm=-1),
+                    asm.mov64_imm(R0, 0), asm.exit_())
+    off = len(asm.prog(*setup))
+    return code, {off: name}
+
+
+def kverdict(a, b, ra, rb, **kw):
+    va, _ = compare(a, b, ksigs=KSIGS, kfuncs=list(KSIGS), relocs=ra, **kw)
+    return va
+
+
+def test_kfunc_struct_pointee_sized_from_kernel_btf():
+    """Both objects would declare this pointee differently; the kernel's
+    prototype gives one size, so the contents are actually compared."""
+    def prog(fill):
+        setup = (asm.st_imm(8, R10, -16, fill), asm.st_imm(8, R10, -8, 0),
+                 asm.mov64_reg(R1, R10), asm.add64_imm(R1, -16),
+                 asm.mov64_imm(R2, 4))
+        return kcall("bpf_dynptr_from_mem", setup)
+    (a, ra), (b, rb) = prog(1), prog(1)
+    assert kverdict(a, b, ra, rb) == "EQUIV"
+    (a, ra), (b, rb) = prog(1), prog(2)
+    assert kverdict(a, b, ra, rb) == "INEQUIV"
+
+
+def test_kfunc_length_paired_buffer():
+    """`void *p, u32 p__sz` — the kernel's ABI puts the extent in the next
+    argument, so differing buffer contents are caught."""
+    def prog(fill):
+        setup = (asm.st_imm(8, R10, -8, fill),
+                 asm.mov64_reg(R1, R10), asm.add64_imm(R1, -8),
+                 asm.mov64_imm(R2, 8))
+        return kcall("bpf_kfunc_call_test_mem_len_pass1", setup)
+    (a, ra), (b, rb) = prog(7), prog(7)
+    assert kverdict(a, b, ra, rb) == "EQUIV"
+    (a, ra), (b, rb) = prog(7), prog(9)
+    assert kverdict(a, b, ra, rb) == "INEQUIV"
+
+
+def test_kfunc_symbolic_length_bails():
+    """An extent the model cannot pin down is a bail, not a guess."""
+    setup = (asm.mov64_reg(R1, R10), asm.add64_imm(R1, -8),
+             asm.ldx(4, R2, R1, 0))          # length read from memory
+    code, rel = kcall("bpf_kfunc_call_test_mem_len_pass1", setup)
+    with pytest.raises(Bail, match="symbolic size"):
+        compare(code, code, ksigs=KSIGS, kfuncs=list(KSIGS), relocs=rel)
+
+
+def test_kfunc_str_argument_compared_by_contents():
+    """A `s__str` argument is compared by its BYTES: the same literal sits
+    at different rodata offsets in the two objects, so comparing the
+    pointer would report a difference that isn't one."""
+    setup = (asm.ld_imm64(R1, 0),)
+    code, rel = kcall("bpf_testmod_str_arg", setup)
+    # same string, different offset within .rodata in the second object
+    va, detail = compare(code, code, ksigs=KSIGS, kfuncs=list(KSIGS),
+                         relocs=rel, rodata=b"hi\x00\x00")
+    assert va == "EQUIV", detail
+
+
+def test_kfunc_private_buffer_address_is_not_observable():
+    """A local's FRAME OFFSET is a compiler choice, not a difference. The
+    two objects put the same struct at different stack offsets (the C's
+    `p1` at stack:T+496 where the translation has it at +376), which the
+    raw pointer identity reported as a divergence until the kfunc model
+    was taught the same rule the helper model already had."""
+    def prog(slot):
+        setup = (asm.st_imm(8, R10, slot, 0), asm.st_imm(8, R10, slot + 8, 0),
+                 asm.mov64_reg(R1, R10), asm.add64_imm(R1, slot),
+                 asm.mov64_imm(R2, 4))
+        return kcall("bpf_dynptr_from_mem", setup)
+    (a, ra), (b, rb) = prog(-16), prog(-32)
+    assert kverdict(a, b, ra, rb) == "EQUIV"

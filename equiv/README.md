@@ -547,12 +547,68 @@ would not be distinguished.
   right-sized prefix structs its header documents against C's full
   168-byte `union bpf_attr` statics.
 
-Results tables: `results/`. Remaining bail classes after tier 9:
-kfunc tail ×~90 (mostly unsized pointees: dynptr family, wq, testmod and
-struct_ops kfuncs); `__kconfig` externs ×18 (build constants,
-unadjudicable); `get_stack` sizes over MAX_COPY ×15; core-type-id-local
-poison ×15; `pointer used as data` ×9; symbolic-size, pointer-compare and
-spill tail; 6 helper sites (unsized `void *` with no length partner).
+- tier 10 (2026-08-13; kfunc prototypes from the KERNEL's BTF):
+  **1321 EQUIV / 0 INEQUIV / 19 WAIVED** (374 objects fully proved, from
+  356). Kfunc signatures no longer come from intersecting what the two
+  objects declare. Each object declares only the kfuncs it calls, in its
+  own BTF, and they disagree constantly in ways that say nothing about
+  behaviour — the C object has `struct bpf_dynptr` at 16 bytes where rustc
+  declares the pointee opaque at 0 — so the size had to be dropped and the
+  model bailed. That was the biggest remaining bail class: 102 sites. The
+  KERNEL has the real prototype, and being one table handed to both
+  objects it cannot manufacture a divergence, exactly as with the helper
+  table in tier 9. 222 of the 223 kfuncs the corpus calls resolve from
+  vmlinux plus the five selftest module BTFs; unsized kfunc sites fell
+  102 -> 9.
+
+  Buffer extents come from the kernel's own kfunc ABI, which turned out to
+  be recorded in the BTF parameter NAMES (bpfcore was discarding them):
+  `p__sz` gives the preceding pointer's length and `p__str` marks a
+  NUL-terminated string, routed to the `_cstr_bytes` capture the string
+  kfuncs already used. So `bpf_sock_addr_set_sun_path(sa, sun_path,
+  sun_path__sz)` sizes its buffer from the next argument, and
+  `bpf_stream_vprintk(id, fmt__str, args, len__sz)` gets both treatments.
+  Same bail-not-guess rule as the helpers: struct pointees sized by the
+  struct, wide scalars as single out-parameters, `void *` with no partner
+  still bails.
+
+  ONE MODEL BUG, exposed only because these calls stopped bailing: the
+  generic kfunc model still compared pointer arguments by raw identity,
+  the bug already fixed for the generic HELPER model in tier 9.
+  kfunc_call_test's payloads were identical except the frame offset — the
+  C's `p1` at `stack:T+496` where the translation has it at +376. Private
+  pointers now compare by aliasing structure, as helpers do.
+
+  Three real translation bugs, all QEMU-gated. test_xdp_pull_data narrowed
+  a pointer difference to i32 where C's `int data_len != data_end - data`
+  promotes to 64 bits. test_sig_in_xattr is the subtle one: the C's
+  `set_if_not_errno_or_zero(ret, -EFAULT)` macro means "keep a valid
+  errno", but clang holds the kfunc's `int` return via MOV32 (`w7 = w0`,
+  then `w7 = w7`), which ZERO-extends, and the asm then compares the full
+  64-bit register — so the errno-preserving branch is unreachable in the
+  compiled object and every nonzero return becomes -EFAULT. The
+  translation compared as i32 and kept errnos the C object throws away;
+  it now mirrors the object's width, with the disassembly in a comment.
+  read_vsyscall is waived: its two `*_str` kfuncs have a bare `void *dst`
+  that makes add_ksyms.py emit IR this LLVM rejects, so the translation
+  reimplements their contract on bpf_probe_read_user_str.
+
+  METHOD NOTE: the first sweep ran 12-way and reported test_tunnel_kern as
+  TIMEOUT with ZERO programs; standalone it takes 24.7s and proves 28/31.
+  sweep.sh gives each object a fixed 120s while N run in parallel, so load
+  alone can fabricate a TIMEOUT — which silently dropped 28 proved
+  programs AND stopped 4 waivers from firing, the tier-7b failure mode. At
+  8-way it recovered. Real regressions: `stream` and `read_cgroupfs_xattr`
+  went BAIL -> TIMEOUT because the model now goes deeper (cost, not
+  divergence).
+
+Results tables: `results/`. Remaining bail classes after tier 10:
+pointer provenance ×55 (map-pointer deref, pointer-as-data, cross-region
+compares, spill tail); kfunc tail ×46 (now dominated by POINTER RETURNS —
+dynptr slices — rather than unsized pointees, which fell to 9);
+`__kconfig` externs ×34; core-type-id-local poison ×28; oversized copies
+×18; symbolic size/address ×13; helper `void *` with no length partner ×6;
+path-too-long ×4.
 
 ## Roadmap
 

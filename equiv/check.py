@@ -150,18 +150,84 @@ def summarize_ret(paths):
     return expr
 
 
-def agreed_kfunc_sigs(elves):
-    """Kfunc signatures the two objects AGREE on.
+# a pointee size meaning "NUL-terminated string, compare by contents"
+STR_POINTEE = -1
 
-    Each object declares the kfuncs it calls in its own BTF, and the
-    declarations can differ in ways that say nothing about behaviour — a
-    translation may declare a kernel struct opaque (size 0) where the C
-    object has the full definition. Capturing an argument's contents at
-    two different lengths would then look like a divergence. Where the
-    objects disagree, drop the size so the model bails instead."""
+
+def kernel_kfunc_sigs(btfs):
+    """{kfunc name: (params, void_ret, ret_is_ptr)} from the KERNEL's BTF.
+
+    params is [(is_pointer, size, extra)]; for a scalar `extra` is unused
+    and `size` is its width, for a pointer `extra` is the index of the
+    argument giving its length (or None).
+
+    This is the authoritative source, and it replaces intersecting the two
+    objects' own declarations: each object declares only what it calls, and
+    they differ in ways that say nothing about behaviour (the C object has
+    `struct bpf_dynptr` at 16 bytes where rustc declares the pointee
+    opaque at 0), which forced the size to be dropped and the model to bail.
+    The kernel has the real prototype, and being one table handed to both
+    objects it cannot manufacture a divergence.
+
+    Buffer extents come from the kernel's own kfunc ABI conventions,
+    spelled in the parameter NAMES: `p__sz` means the previous pointer's
+    length, and `p__str` means a NUL-terminated string (captured by
+    contents, since the same literal sits at different rodata offsets in
+    the two objects). A pointer to a struct is sized by the struct; a
+    pointer to a wide scalar with no `__sz` partner is a single
+    out-parameter. `void *` and byte pointers with no partner stay unsized
+    and bail, exactly as in the helper model — the extent is the thing not
+    worth guessing."""
+    out = {}
+    for b in btfs:
+        for t in b.types.values():
+            if t.kind != bpfcore.K_FUNC or not t.name or t.name in out:
+                continue
+            proto = b.resolve(t.type)
+            if proto.kind != bpfcore.K_FUNC_PROTO:
+                continue
+            rett, ptypes = proto.proto
+            pnames = list(proto.param_names) + [""] * len(ptypes)
+            params = []
+            for i, p in enumerate(ptypes):
+                pt = b.resolve(p)
+                if pt.kind != bpfcore.K_PTR:
+                    params.append((False, b.type_size(p), None))
+                    continue
+                if pnames[i].endswith("__str"):
+                    params.append((True, STR_POINTEE, None))
+                    continue
+                lenarg = None
+                if i + 1 < len(ptypes) and pnames[i + 1].endswith("__sz"):
+                    nxt = b.resolve(ptypes[i + 1])
+                    if nxt.kind != bpfcore.K_PTR:
+                        lenarg = i + 1
+                size = None
+                if lenarg is None:
+                    pointee = b.resolve(pt.type)
+                    sz = b.type_size(pt.type)
+                    if pointee.kind in (bpfcore.K_STRUCT, bpfcore.K_UNION):
+                        size = sz
+                    elif pointee.kind in (bpfcore.K_INT, bpfcore.K_ENUM,
+                                          bpfcore.K_ENUM64) and sz and sz >= 2:
+                        size = sz          # single scalar out-parameter
+                params.append((True, size, lenarg))
+            rt = b.resolve(rett)
+            out[t.name] = (params, rt.kind == 0, rt.kind == bpfcore.K_PTR)
+    return out
+
+
+def agreed_kfunc_sigs(elves, kernel=None):
+    """Kfunc signatures to model calls with.
+
+    Prefers the kernel's own prototype (kernel_kfunc_sigs). Falls back to
+    what the two objects AGREE on for anything the kernel BTF does not
+    carry: each object declares the kfuncs it calls in its own BTF, and the
+    declarations can differ in ways that say nothing about behaviour, so
+    where they disagree the size is dropped and the model bails."""
     per = [Executor.kfunc_sigs_of(elf) for elf, _, _ in elves.values()]
     if len(per) != 2:
-        return {}
+        return dict(kernel or {})
     a, b = per
     out = {}
     for name in set(a) & set(b):
@@ -173,9 +239,10 @@ def agreed_kfunc_sigs(elves):
             if ap != bp:
                 params = None
                 break
-            params.append((ap, asz if asz == bsz else None))
+            params.append((ap, asz if asz == bsz else None, None))
         if params is not None:
-            out[name] = (params, pa[1])
+            out[name] = (params, pa[1], None)   # return kind unknown
+    out.update(kernel or {})       # the kernel's prototype wins
     return out
 
 
@@ -230,9 +297,9 @@ def helper_sigs(kbtf):
 
 
 def check_program(name, func, elves, shared, timeout_ms, callback=False,
-                  hsigs=None):
+                  hsigs=None, ksigs=None):
     paths, void = {}, {}
-    sigs = agreed_kfunc_sigs(elves)
+    sigs = agreed_kfunc_sigs(elves, ksigs)
     for tag, (elf, sec, entry) in elves.items():
         ex = Executor(elf, sec, shared, tag, kfunc_sigs=sigs,
                       helper_sigs=hsigs)
@@ -336,12 +403,11 @@ def main():
     else:
         kbtf_path = None
     core_applied = False
-    kbtf = None
+    kbtf, mod_btfs = None, []
     if kbtf_path:
         kbtf = bpfcore.load_kernel_btf(kbtf_path)
         # module split BTFs: candidate sources alongside vmlinux, as libbpf
         # searches /sys/kernel/btf/<module> for loaded modules
-        mod_btfs = []
         for ko in sorted(glob.glob(os.path.join(DEFAULT_C_DIR, "*.ko"))):
             try:
                 mod_btfs.append(bpfcore.load_kernel_btf(ko, base=kbtf))
@@ -356,6 +422,9 @@ def main():
         core_applied = True
 
     hsigs = helper_sigs(kbtf)
+    # kfunc prototypes come from the kernel (and the selftest modules,
+    # which is where the testmod kfuncs live), not from each object's BTF
+    ksigs = kernel_kfunc_sigs([kbtf] + mod_btfs) if kbtf else {}
     progs_c, progs_r = programs(elf_c), programs(elf_r)
 
     shared, warnings = global_regions({"A": elf_c, "B": elf_r})
@@ -412,7 +481,7 @@ def main():
                 label, func,
                 {"A": (elf_c,) + progs_c[key], "B": (elf_r,) + progs_r[key]},
                 shared, args.timeout, callback=(key in callbacks),
-                hsigs=hsigs)
+                hsigs=hsigs, ksigs=ksigs)
         except Bail as e:
             verdict, detail = "BAIL", str(e)
         if verdict == "INEQUIV" and label in waivers:

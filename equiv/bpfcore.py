@@ -55,7 +55,7 @@ class BtfMember:
 class BtfType:
     __slots__ = ("id", "kind", "name", "size", "type", "vlen", "kflag",
                  "members", "enums", "array", "int_bits", "int_signed",
-                 "fwd_union", "proto")
+                 "fwd_union", "proto", "param_names")
 
     def __init__(self, tid, kind, name, kflag, vlen):
         self.id, self.kind, self.name, self.kflag, self.vlen = \
@@ -67,6 +67,7 @@ class BtfType:
         self.int_bits = self.int_signed = 0
         self.fwd_union = False
         self.proto = None     # (ret_type, [param types]) for FUNC_PROTO
+        self.param_names = ()  # FUNC_PROTO parameter names (kfunc ABI suffixes)
 
 
 class Btf:
@@ -140,12 +141,17 @@ class Btf:
                     t.enums.append((self._str(n_off), v))
                     pos += 12
             elif kind == K_FUNC_PROTO:
-                params = []
+                params, pnames = [], []
                 for _ in range(t.vlen):
-                    _pn, p_typ = struct.unpack_from("<II", data, pos)
+                    p_name, p_typ = struct.unpack_from("<II", data, pos)
                     params.append(p_typ)
+                    # Parameter NAMES carry the kernel's kfunc ABI
+                    # conventions (`__sz`, `__str`, ...), which is the only
+                    # thing that says how much of a buffer a kfunc reads.
+                    pnames.append(self._str(p_name) if p_name else "")
                     pos += 8
                 t.proto = (t.type, params)
+                t.param_names = pnames
             elif kind == K_VAR:
                 pos += 4
             elif kind == K_DECL_TAG:

@@ -109,10 +109,15 @@ class FakeElf:
     """The slice of BpfElf the Executor and check_program actually touch."""
 
     def __init__(self, code, path="synthetic.bpf.o", globals_=None,
-                 rodata=None, maps=None, relocs=None, ret_bits=None):
+                 rodata=None, maps=None, relocs=None, ret_bits=None,
+                 kfuncs=()):
         """relocs: {insn byte offset -> symbol name}. Symbols for maps,
         globals and .rodata are created automatically, so a caller just
-        names the thing an ld_imm64 should resolve to."""
+        names the thing an ld_imm64 should resolve to.
+
+        kfuncs: names to declare as UNDEFINED symbols, which is how a kfunc
+        call appears in a real object (a call insn relocating against a
+        symbol with shndx 0)."""
         self.path = path
         self.core_applied, self.core_poison = True, {}
         self._map_defs = maps or {}
@@ -145,6 +150,9 @@ class FakeElf:
             ro_idx = add_section(".rodata", rodata, SHF_ALLOC)
             self.symbols.append(Symbol(len(self.symbols), ".rodata", 0,
                                        len(rodata), 1, STT_SECTION, ro_idx))
+        for kname in kfuncs:
+            self.symbols.append(Symbol(len(self.symbols), kname, 0, 0,
+                                       1, STT_FUNC, 0))   # shndx 0 = UND
         if relocs:
             table = {}
             for off, symname in relocs.items():
@@ -185,11 +193,12 @@ class FakeElf:
 
 # -------------------------------------------------------------- comparison
 
-def compare(code_a, code_b, timeout_ms=20_000, hsigs=None, **kw):
+def compare(code_a, code_b, timeout_ms=20_000, hsigs=None, ksigs=None, **kw):
     """Prove two synthetic programs equivalent. Returns (verdict, detail).
 
-    hsigs: generic helper signatures, in check.helper_sigs()'s shape. Given
-    explicitly here so the tests need no kernel BTF."""
+    hsigs / ksigs: generic helper and kfunc signatures, in the shape of
+    check.helper_sigs() and check.kernel_kfunc_sigs(). Given explicitly
+    here so the tests need no kernel BTF."""
     elf_a = FakeElf(code_a, path="a.bpf.o", **kw)
     elf_b = FakeElf(code_b, path="b.bpf.o", **kw)
     shared, _ = _check.global_regions({"A": elf_a, "B": elf_b})
@@ -202,4 +211,5 @@ def compare(code_a, code_b, timeout_ms=20_000, hsigs=None, **kw):
     return _check.check_program(FUNC_NAME, FUNC_NAME,
                                 {"A": (elf_a, sec_a, 0),
                                  "B": (elf_b, sec_b, 0)},
-                                shared, timeout_ms, hsigs=hsigs)
+                                shared, timeout_ms, hsigs=hsigs,
+                                ksigs=ksigs)

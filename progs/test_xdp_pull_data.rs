@@ -68,7 +68,11 @@ fn do_xdp_pull_data(ctx: *const xdp_md) -> i32 {
     let data_end = vload!((*ctx).data_end) as usize;
     let data = vload!((*ctx).data) as usize;
 
-    if unsafe { data_len } != (data_end - data) as i32 {
+    // C: `if (data_len != data_end - data)`. The pointer difference is
+    // 64-bit and `int data_len` promotes to it, so the comparison is done
+    // at 64 bits; narrowing the difference to i32 first would match on the
+    // low half alone.
+    if unsafe { data_len } as i64 != (data_end - data) as i64 {
         return XDP_DROP;
     }
 

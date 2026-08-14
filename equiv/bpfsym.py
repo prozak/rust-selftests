@@ -32,7 +32,8 @@ MAX_INSNS_PER_PATH = 50_000
 MAX_PATHS = 4096
 FEAS_TIMEOUT_MS = 200
 MAX_COPY = 512  # largest concrete probe_read size we'll expand byte-wise
-MAX_ARG = 8192  # largest key/value/data arg we'll byte-compare in an event
+MAX_ARG = 8192  # largest key/value/data arg we will byte-compare in an event
+STR_POINTEE = -1  # see check.kernel_kfunc_sigs: a `p__str` argument
 STR_CAP = 64    # symbolic-contents window captured for string kfunc args
 
 # Argument-free helpers whose return value is environment-determined: modeled
@@ -887,10 +888,11 @@ class Executor:
                         for p in params:
                             pt = b.resolve(p)
                             if pt.kind == 2:  # PTR
-                                out.append((True, b.type_size(pt.type)))
+                                out.append((True, b.type_size(pt.type), None))
                             else:
-                                out.append((False, b.type_size(p)))
-                        sig = (out, b.resolve(rett).kind == 0)
+                                out.append((False, b.type_size(p), None))
+                        rt = b.resolve(rett)
+                        sig = (out, rt.kind == 0, rt.kind == 2)
                     break
         self._kf_protos[name] = sig
         return sig
@@ -914,11 +916,11 @@ class Executor:
         sig = self._kfunc_sig(name)
         if sig is None:
             raise Bail(f"kfunc {name} has no BTF proto in {what}")
-        params, void_ret = sig
+        params, void_ret = sig[0], sig[1]
         if len(params) > 5:
             raise Bail(f"kfunc {name} takes {len(params)} args in {what}")
-        payload = []
-        for i, (ptr_param, size) in enumerate(params):
+        payload, priv = [], []
+        for i, (ptr_param, size, lenarg) in enumerate(params):
             a = regs[1 + i]
             if not ptr_param:
                 # compare a scalar argument at the width the KERNEL reads
@@ -928,11 +930,35 @@ class Executor:
                 w = size if size in (1, 2, 4, 8) else 8
                 payload += self._val_bytes(a, w, what)
                 continue
-            # identity pins WHICH object is passed; contents pin what the
-            # kfunc would read out of it
-            payload += self._arg_id_bytes(a, what)
+            # Identity pins WHICH object is passed; contents pin what the
+            # kfunc would read out of it. For a pointer into PRIVATE memory
+            # the address itself is not an observable — the two objects put
+            # the same local at different frame offsets (C's `p1` at
+            # stack:T+496 where the translation has it at +376) — so
+            # identity there is the aliasing structure only, exactly as in
+            # the generic helper model.
+            if is_ptr(a) and not self._is_observable(a.region):
+                payload += self._name_bytes(self._private_kind(a.region))
+                payload += [z3.If(a.off == p.off, z3.BitVecVal(1, 8),
+                                  z3.BitVecVal(0, 8))
+                            if a.region == p.region else z3.BitVecVal(0, 8)
+                            for p in priv]
+                priv.append(a)
+            else:
+                payload += self._arg_id_bytes(a, what)
             if not is_ptr(a):
                 continue          # a scalar in a pointer slot (NULL, ksym)
+            if size == STR_POINTEE:
+                # `p__str` in the kernel's prototype: a NUL-terminated
+                # string, compared by contents rather than by length
+                payload += self._cstr_bytes(mem, a, what)
+                continue
+            if size is None and lenarg is not None:
+                # the kernel's kfunc ABI spells the extent in the next
+                # argument's NAME (`p__sz`), so that argument says how much
+                # of the buffer is read; a symbolic one leaves no extent
+                size = self._concrete_u64(
+                    need_data(regs[1 + lenarg], what), what)
             if size is None:
                 raise Bail(f"kfunc {name} arg{i} points to an unsized type "
                            f"in {what}")
@@ -1810,13 +1836,17 @@ class Executor:
         # so those still bail rather than guess.
         sig = self._kfunc_sig(name)
         if sig is not None:
-            b = self._btf_full
-            rett = None
-            for t in b.types.values():
-                if t.kind == 12 and t.name == name:
-                    rett = b.resolve(b.resolve(t.type).proto[0])
-                    break
-            if rett is not None and rett.kind != 2:   # not a PTR return
+            ret_is_ptr = sig[2] if len(sig) > 2 else None
+            if ret_is_ptr is None:
+                # no kernel prototype for it: fall back to this object's BTF
+                b, rett = self._btf_full, None
+                if b is not None:
+                    for t in b.types.values():
+                        if t.kind == 12 and t.name == name:
+                            rett = b.resolve(b.resolve(t.type).proto[0])
+                            break
+                ret_is_ptr = None if rett is None else rett.kind == 2
+            if ret_is_ptr is False:                   # not a PTR return
                 return one(self._kfunc_generic(name, regs, mem, counters,
                                                what, event, err))
         raise Bail(f"kfunc {name} in {what}")

@@ -143,11 +143,12 @@ extern "C" fn prog_stream_verdict(skb: *const __sk_buff) -> i32 {
 extern "C" fn prog_skb_verdict(skb: *const __sk_buff) -> i32 {
     let zero: u32 = 0;
     let sockmap = unsafe { test_sockmap } == 1;
-    let flags: u64 = if unsafe { test_ingress } == 1 {
-        BPF_F_INGRESS
-    } else {
-        0
-    };
+    // C: `test_ingress ? BPF_F_INGRESS : 0`. BPF_F_INGRESS is 1 and a
+    // `bool` byte is 0 or 1, so clang drops the branch entirely and passes
+    // the RAW BYTE as the flags argument. Branching on `== 1` here would
+    // send 0 where the C object sends the byte (see TRANSLATING.md,
+    // bool-global).
+    let flags: u64 = unsafe { test_ingress } as u64;
 
     let verdict: i32 = if sockmap {
         bpf_sk_redirect_map(skb, &sock_map, zero, flags) as i32

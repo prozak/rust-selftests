@@ -152,6 +152,9 @@ def summarize_ret(paths):
 
 # a pointee size meaning "NUL-terminated string, compare by contents"
 STR_POINTEE = -1
+# pointee sizes meaning "as wide as this map's key / value"; `extra` holds
+# the index of the map argument
+MAPKEY_POINTEE, MAPVAL_POINTEE = -2, -3
 
 
 def kernel_kfunc_sigs(btfs):
@@ -280,6 +283,16 @@ def helper_sigs(kbtf):
                 # ambiguous name => no single layout to read
                 size = sizes.pop() if len(sizes) == 1 else None
             lenarg = bpfhelpers.length_param(params, i) if size is None else None
+            if size is None and lenarg is None:
+                # `void *key` / `void *value` next to a `struct bpf_map *`:
+                # the MAP says how wide they are, exactly as the kernel
+                # decides. Same information the bespoke map helpers use.
+                mapidx = next((j for j, (t, _n) in enumerate(params)
+                               if j < i and "bpf_map" in t and "*" in t), None)
+                if mapidx is not None and _pname in ("key", "value"):
+                    size = (MAPKEY_POINTEE if _pname == "key"
+                            else MAPVAL_POINTEE)
+                    lenarg = mapidx
             if size is None and lenarg is None:
                 # No length partner: a pointer to a WIDE scalar is a single
                 # out-parameter (`unsigned long *res`) and is sized by its

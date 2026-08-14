@@ -602,13 +602,61 @@ would not be distinguished.
   went BAIL -> TIMEOUT because the model now goes deeper (cost, not
   divergence).
 
-Results tables: `results/`. Remaining bail classes after tier 10:
-pointer provenance ×55 (map-pointer deref, pointer-as-data, cross-region
-compares, spill tail); kfunc tail ×46 (now dominated by POINTER RETURNS —
-dynptr slices — rather than unsized pointees, which fell to 9);
-`__kconfig` externs ×34; core-type-id-local poison ×28; oversized copies
-×18; symbolic size/address ×13; helper `void *` with no length partner ×6;
-path-too-long ×4.
+- tier 11 (2026-08-14; pointer provenance):
+  **1336 EQUIV / 0 INEQUIV / 19 WAIVED** (383 objects fully proved, from
+  374). Five distinct mechanisms, each traced to a cause rather than
+  patched generically; the pointer bail class fell 55 -> 37 and the
+  map-pointer deref 15 -> 1.
+
+  (1) BPF_SEQ_PRINTF spills every argument into an `unsigned long long
+  ___param[]` slot, so a `%s` argument is a POINTER in that array. The
+  byte-wise capture hit the spilled-pointer shadow and bailed, and
+  comparing the pointer would have been wrong anyway — the same literal
+  sits at different rodata offsets in the two objects. The format string is
+  now walked as trace_printk's already was: numerics compared at the width
+  the kernel reads, `%s` by the string's CONTENTS.
+
+  (2) BPF_PROBE_READ chains spill a pointer into a global (`k_probe_in.next
+  = &k_probe_in`) and probe-read 8 bytes back out to walk the chain; the
+  byte-at-a-time copy read into the slot and bailed. probe_read now moves a
+  whole spilled pointer as a pointer, so provenance survives.
+
+  (3) A map argument is an opaque HANDLE. `struct bpf_map *` has a size in
+  the kernel's BTF, so tier 9's generic helper model dutifully tried to
+  capture its pointed-to bytes — but a map has no modeled memory.
+
+  (4) `void *key` has no size of its own; the MAP argument gives it one,
+  which is exactly how the kernel decides. Same information the bespoke map
+  helpers already used, now available to the generic model.
+
+  (5) A map key or value is compared by its BYTES wherever it lives.
+  Skipping contents for an observable region (tier 9's rule) made the same
+  lookup look different depending only on where the caller kept the key —
+  the C passing `&sk_index`, a global, where the translation passes a stack
+  copy of it.
+
+  (3) and (5) were latent bugs in tier 9's own generic model that only
+  became REACHABLE as other bails cleared. Worth recording that the first
+  attempt at (3) silently did not apply — it was written against an
+  argument ordering that function does not use — and only re-running and
+  seeing the identical bail caught it.
+
+  One translation bug, QEMU-gated (sockmap_listen OK across 152 subtests):
+  test_sockmap_listen writes `test_ingress ? BPF_F_INGRESS : 0`, and since
+  BPF_F_INGRESS is 1 and a `bool` byte is 0 or 1, clang drops the branch
+  entirely and passes the RAW BYTE. The translation branched on `== 1`,
+  sending 0 where the C object sends the byte. That is a FOURTH encoding
+  for the bool-global class, alongside `jne 0`, `jne 1` and `(x & 1) != 0`
+  — which is why `scripts/boolsites.py` now exists to read the compiled
+  answer off the C object rather than guessing it.
+
+Results tables: `results/`. Remaining bail classes after tier 11:
+kfunc tail ×46 (dominated by POINTER RETURNS — dynptr slices); pointer
+provenance ×37 (spill tail, pointer-as-data, cross-region compares);
+`__kconfig` externs ×33; core-type-id-local poison ×28; oversized copies
+×18; symbolic size/address ×13; `%s`/`%p` printk conversions ×10; helper
+`void *` with no length partner ×9; kfunc unsized ×8; path-too-long ×4.
+18 objects are blocked by the pointer class alone.
 
 ## Roadmap
 

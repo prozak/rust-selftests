@@ -34,6 +34,7 @@ FEAS_TIMEOUT_MS = 200
 MAX_COPY = 512  # largest concrete probe_read size we'll expand byte-wise
 MAX_ARG = 8192  # largest key/value/data arg we will byte-compare in an event
 STR_POINTEE = -1  # see check.kernel_kfunc_sigs: a `p__str` argument
+MAPKEY_POINTEE, MAPVAL_POINTEE = -2, -3  # sized by the map argument's def
 STR_CAP = 64    # symbolic-contents window captured for string kfunc args
 
 # Argument-free helpers whose return value is environment-determined: modeled
@@ -948,6 +949,8 @@ class Executor:
                 payload += self._arg_id_bytes(a, what)
             if not is_ptr(a):
                 continue          # a scalar in a pointer slot (NULL, ksym)
+            if a.region.startswith("map:"):
+                continue          # opaque handle; identity is the whole story
             if size == STR_POINTEE:
                 # `p__str` in the kernel's prototype: a NUL-terminated
                 # string, compared by contents rather than by length
@@ -969,8 +972,14 @@ class Executor:
         event(payload)
         return err()
 
-    def _printk_arg_widths(self, fmt, what):
-        """Byte widths of the args a bpf_printk format consumes."""
+    def _printk_arg_widths(self, fmt, what, allow_str=False):
+        """Byte widths of the args a bpf_printk-style format consumes.
+
+        With allow_str, a `%s` yields the STR_POINTEE marker instead of
+        bailing: bpf_seq_printf takes its arguments in a memory array, so
+        the string can be captured by contents from the pointer sitting in
+        that slot (a bpf_printk `%s` argument is in a register, where the
+        same trick does not apply)."""
         widths, i = [], 0
         while i < len(fmt):
             if fmt[i] != ord("%"):
@@ -987,11 +996,14 @@ class Executor:
                 longs += 1
                 i += 1
             conv = chr(fmt[i]) if i < len(fmt) else "?"
-            if conv not in "diuxXc":
+            if conv == "s" and allow_str:
+                widths.append(STR_POINTEE)
+            elif conv in "diuxXc":
+                widths.append(8 if longs else 4)
+            else:
                 raise Bail(f"printk conversion %{'l' * longs}{conv} in {what}")
-            widths.append(8 if longs else 4)
             i += 1
-        if len(widths) > 3:
+        if not allow_str and len(widths) > 3:
             raise Bail(f"printk with {len(widths)} args in {what}")
         return widths
 
@@ -1013,9 +1025,7 @@ class Executor:
             n = self._concrete_u64(size, what)
             if n > MAX_COPY:
                 raise Bail(f"probe_read size {n} > {MAX_COPY} in {what}")
-            for k in range(n):  # assumed non-faulting (see module docstring)
-                byte = self._load(mem, self._addr_add(src, k), 1)
-                self._store(mem, self._addr_add(dst, k), 1, byte)
+            self._copy_preserving_pointers(mem, dst, src, n, what)
             ret = bv64(0)
         elif hid in PROBE_READ_STR_HELPERS:
             n = self._concrete_u64(size, what)
@@ -1394,9 +1404,18 @@ class Executor:
             self._emit_event(mem, counters, hid, payload)
             ret = self._errno_oracle(hid, idx)
         elif hid == H_SEQ_PRINTF:
-            # seq output is the bpf_iter observable: format + raw data array
-            # bytes (numeric args only — a %s pointer arg sits in the data
-            # array as a spilled pointer and bails in _mem_bytes)
+            # seq output is the bpf_iter observable: the format string plus
+            # what it makes the kernel READ out of the argument array.
+            #
+            # The array cannot be captured as raw bytes: BPF_SEQ_PRINTF
+            # spills each argument into an `unsigned long long ___param[]`
+            # slot, so a `%s` argument is a POINTER in that array — the
+            # byte-wise capture used to hit the spilled-pointer shadow and
+            # bail, and comparing the pointer itself would be wrong anyway
+            # (the same literal sits at different rodata offsets in the two
+            # objects). Walking the format instead compares each argument
+            # the way the kernel consumes it: numerics at their width, a
+            # `%s` by the string's CONTENTS.
             fsz = self._concrete_u64(regs[3], what) & 0xFFFFFFFF
             if fsz > MAX_COPY:
                 raise Bail(f"seq_printf fmt size {fsz} > {MAX_COPY} in {what}")
@@ -1404,8 +1423,19 @@ class Executor:
             n = self._concrete_u64(regs[5], what) & 0xFFFFFFFF
             payload = [fsz & 0xFF, (fsz >> 8) & 0xFF] + fmt \
                 + list(n.to_bytes(4, "little"))
-            if n:
-                payload += self._mem_bytes(mem, regs[4], n, what)
+            widths = self._printk_arg_widths(fmt, what, allow_str=True)
+            if n and n != 8 * len(widths):
+                raise Bail(f"seq_printf array {n}B for {len(widths)} args "
+                           f"in {what}")
+            for k, w in enumerate(widths):
+                slot = self._addr_add(regs[4], 8 * k)
+                if w == STR_POINTEE:
+                    payload += self._cstr_bytes(mem, self._load(mem, slot, 8),
+                                                what)
+                else:
+                    payload += self._val_bytes(
+                        z3.Extract(8 * w - 1, 0, self._load(mem, slot, 8))
+                        if w < 8 else self._load(mem, slot, 8), w, what)
             self._emit_event(mem, counters, hid, payload)
             ret = self._errno_oracle(hid, idx)
         elif hid in self.helper_sigs:
@@ -1460,13 +1490,39 @@ class Executor:
             if not is_pointer:
                 payload += self._val_bytes(a, extra or 8, what)
                 continue
-            if size is None and extra is not None:
+            is_mapkv = size in (MAPKEY_POINTEE, MAPVAL_POINTEE)
+            if is_mapkv:
+                # width comes from the map argument's own BTF definition
+                mname = self._map_name(regs[1 + extra], what)
+                d = self.elf.map_defs().get(mname)
+                if not d:
+                    raise Bail(f"helper {hid} ({name}) arg{i} sized by map "
+                               f"{mname} with no def in {what}")
+                size = (d["key_size"] if size == MAPKEY_POINTEE
+                        else d["value_size"])
+            elif size is None and extra is not None:
                 # buffer whose length is a later argument: that argument
                 # says how much the kernel reads, so a symbolic one leaves
                 # us with no extent to capture
                 size = self._concrete_u64(need_data(regs[1 + extra], what),
                                           what)
-            if not is_ptr(a) or self._is_observable(a.region):
+            if is_mapkv and is_ptr(a):
+                # A map key or value is compared by its BYTES wherever it
+                # lives, as the bespoke map helpers already do. Skipping
+                # contents for an observable region would make the same
+                # lookup look different depending only on where the caller
+                # kept the key — the C passing `&sk_index` (a global) and
+                # the translation passing a stack copy of it. Contents ONLY,
+                # for that same reason: the two pointers legitimately differ.
+                payload += self._mem_bytes(mem, a, size, what)
+                continue
+            if (not is_ptr(a) or self._is_observable(a.region)
+                    or a.region.startswith("map:")):
+                # A map argument is an opaque HANDLE. `struct bpf_map *` has
+                # a size in the kernel's BTF, but the object it names is not
+                # modeled memory — there is nothing to read out of it. Its
+                # identity, which _arg_id_bytes encodes as the map's name,
+                # is the whole of what the call says.
                 payload += self._arg_id_bytes(a, what)
                 continue
             # A private buffer's ADDRESS is not an observable: the two
@@ -1500,6 +1556,32 @@ class Executor:
         if ret_kind == 8:
             return z3.Function(f"oracle_h{hid}_ret", BV64S, BV64S)(bv64(idx))
         return self._errno_oracle(hid, idx)
+
+    def _copy_preserving_pointers(self, mem, dst, src, n, what):
+        """Byte copy that carries a stored POINTER across whole.
+
+        A byte-at-a-time copy would read into a spilled pointer's slot and
+        bail (`partial read of spilled pointer`), which is what
+        BPF_PROBE_READ chains do for a living: `k_probe_in.next =
+        &k_probe_in` spills a pointer into a global, and the macro then
+        probe-reads 8 bytes back out of that slot to walk the chain. When
+        the copy covers such a slot exactly, move the pointer as a pointer
+        so provenance survives the round trip; everything else copies
+        byte-wise as before."""
+        k = 0
+        while k < n:
+            sptr = self._addr_add(src, k)
+            if n - k >= 8 and is_ptr(sptr):
+                sh = mem.get(("shadow", sptr.region))
+                off = z3.simplify(sptr.off)
+                if sh and z3.is_bv_value(off) and off.as_long() in sh:
+                    self._store(mem, self._addr_add(dst, k), 8,
+                                sh[off.as_long()])
+                    k += 8
+                    continue
+            byte = self._load(mem, sptr, 1)
+            self._store(mem, self._addr_add(dst, k), 1, byte)
+            k += 1
 
     def _written_bytes(self, mem, ptr, n, what):
         """`n` bytes at `ptr`, with bytes the program never stored to

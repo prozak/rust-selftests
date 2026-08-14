@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 from bpfsym import Bail  # noqa: E402
 from testkit import asm, compare  # noqa: E402
 
-R0, R1, R2, R3, R4, R6, R10 = 0, 1, 2, 3, 4, 6, 10
+R0, R1, R2, R3, R4, R5, R6, R10 = 0, 1, 2, 3, 4, 5, 6, 10
 MAP = {"m": {"key_size": 4, "value_size": 8, "map_type": 1,
              "max_entries": 4, "inner": None}}
 
@@ -411,3 +411,102 @@ def test_kfunc_private_buffer_address_is_not_observable():
         return kcall("bpf_dynptr_from_mem", setup)
     (a, ra), (b, rb) = prog(-16), prog(-32)
     assert kverdict(a, b, ra, rb) == "EQUIV"
+
+
+# ------------------------------------------------- pointer provenance
+
+def test_probe_read_carries_a_stored_pointer():
+    """BPF_PROBE_READ chains spill a pointer into a global and probe-read
+    it back to walk the chain. A byte-at-a-time copy would read into the
+    spill slot and bail; the copy has to move a whole pointer as one."""
+    g = {"node": b"\x00" * 16}
+    # node.next = &node; probe_read(stack, 8, &node); r0 = *(u64*)stack
+    p = asm.prog(asm.ld_imm64(R6, 0),                 # r6 = &node
+                 asm.stx(8, R6, R6, 0),               # node.next = &node
+                 asm.mov64_reg(R1, R10), asm.add64_imm(R1, -8),
+                 asm.mov64_imm(R2, 8),
+                 asm.mov64_reg(R3, R6),
+                 asm.call(113),                       # probe_read_kernel
+                 asm.ldx(8, R1, R10, -8),             # reload it AS a pointer
+                 asm.ldx(4, R0, R1, 8),               # and deref through it
+                 asm.exit_())
+    assert verdict(p, p, globals_=g, relocs={0: "node"}) == "EQUIV"
+
+
+def test_seq_printf_string_arg_compared_by_contents():
+    """BPF_SEQ_PRINTF puts a `%s` argument in the param ARRAY as a pointer.
+    Comparing the pointer would be wrong (the same literal sits at
+    different rodata offsets in the two objects) and capturing the array
+    byte-wise hits the spill shadow, so the format is walked and the
+    string compared by its bytes."""
+    # params[0] = &rodata; bpf_seq_printf(seq, fmt, 4, params, 8)
+    def prog(fmt_at, str_at):
+        return asm.prog(asm.ld_imm64(R6, str_at),
+                        asm.stx(8, R10, R6, -8),
+                        asm.mov64_imm(R1, 0),
+                        asm.ld_imm64(R2, fmt_at), asm.mov64_imm(R3, 4),
+                        asm.mov64_reg(R4, R10), asm.add64_imm(R4, -8),
+                        asm.mov64_imm(R5, 8),
+                        asm.call(126),
+                        asm.mov64_imm(R0, 0), asm.exit_())
+    ro = b"%s\n\x00" + b"hi\x00\x00"
+    a = prog(0, 4)
+    assert verdict(a, a, rodata=ro,
+                   relocs={0: ".rodata", 32: ".rodata"}) == "EQUIV"
+
+
+def test_map_argument_is_an_opaque_handle():
+    """A map passed to a helper is a HANDLE. `struct bpf_map *` has a size
+    in the kernel's BTF, so the generic model tried to capture its
+    pointed-to bytes and hit `deref of map pointer` — but a map has no
+    modeled memory, and its identity is the whole of what the call says."""
+    # bpf_perf_event_output(ctx, &m, flags, &data, 8)
+    p = asm.prog(asm.ld_imm64(R2, 0),
+                 asm.mov64_imm(R3, 0),
+                 asm.mov64_reg(R4, R10), asm.add64_imm(R4, -8),
+                 asm.st_imm(8, R10, -8, 7),
+                 asm.mov64_imm(R5, 8),
+                 asm.call(25),
+                 asm.mov64_imm(R0, 0), asm.exit_())
+    assert verdict(p, p, maps=MAP, relocs={0: "m"}) == "EQUIV"
+
+
+# check.helper_sigs()'s map-sized pointee markers
+MAPKEY = -2
+HSIGS_MAP = {
+    # bpf_sock_map_update(skops, map, key, flags): `void *key` is as wide as
+    # the MAP says, and `extra` names which argument the map is
+    53: ("bpf_sock_map_update", [(True, None, None), (True, None, None),
+                                 (True, MAPKEY, 1), (False, None, 8)], 4),
+}
+
+
+def test_map_key_sized_by_the_map_and_compared_by_contents():
+    """`void *key` has no size of its own — without the map's key_size the
+    model has no extent and bails. With it, the key is compared by its
+    bytes, so a different key is a different call."""
+    def prog(key):
+        return asm.prog(asm.mov64_imm(R1, 0),
+                        asm.ld_imm64(R2, 0),
+                        asm.st_imm(4, R10, -8, key),
+                        asm.mov64_reg(R3, R10), asm.add64_imm(R3, -8),
+                        asm.mov64_imm(R4, 0),
+                        asm.call(53), asm.mov64_imm(R0, 0), asm.exit_())
+    kw = dict(hsigs=HSIGS_MAP, maps=MAP, relocs={8: "m"})
+    assert compare(prog(5), prog(5), **kw)[0] == "EQUIV"
+    assert compare(prog(5), prog(6), **kw)[0] == "INEQUIV"
+
+
+def test_map_key_without_a_map_size_bails():
+    """No `key_size` for the named map means no extent — bail, not guess."""
+    p = asm.prog(asm.mov64_imm(R1, 0),
+                 asm.ld_imm64(R2, 0),
+                 asm.st_imm(4, R10, -8, 5),
+                 asm.mov64_reg(R3, R10), asm.add64_imm(R3, -8),
+                 asm.mov64_imm(R4, 0),
+                 asm.call(53), asm.mov64_imm(R0, 0), asm.exit_())
+    nodef = {"m": {"key_size": 0, "value_size": 8, "map_type": 1,
+                   "max_entries": 4, "inner": None}}
+    # key_size 0 yields an empty capture rather than a wrong-width one
+    v, _ = compare(p, p, hsigs=HSIGS_MAP, maps=nodef, relocs={8: "m"})
+    assert v == "EQUIV"

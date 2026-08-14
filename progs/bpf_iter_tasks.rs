@@ -95,6 +95,31 @@ static mut num_success_copy_from_user_task: i32 = 0;
 #[no_mangle]
 static mut num_success_copy_from_user_task_str: i32 = 0;
 
+// C's dump_task declares `static char info[]` (MUTABLE -> .data) while
+// dump_task_sleepable declares `static const char info[]` (-> .rodata).
+// That difference is observable to the prover: a .data global becomes a
+// writable map the loader exposes as skel->data->info, so it is modelled
+// as a shared observable with symbolic initial contents, and reading the
+// same text out of .rodata instead would compare concrete bytes against
+// that symbolic array. Mirror the split rather than share one array.
+#[allow(non_upper_case_globals)]
+#[no_mangle]
+static mut info: [u8; 16] = *b"    === END ===\0";
+
+#[inline(always)]
+fn print_end_data(seq: *mut c_void) -> i32 {
+    static FMT: [u8; 4] = *b"%s\n\0";
+    let params: [u64; 1] = [core::ptr::addr_of!(info) as u64];
+    bpf_seq_printf(
+        seq,
+        FMT.as_ptr() as *const c_void,
+        FMT.len() as u32,
+        params.as_ptr() as *const c_void,
+        core::mem::size_of_val(&params) as u32,
+    );
+    0
+}
+
 #[inline(always)]
 fn print_end(seq: *mut c_void) -> i32 {
     static FMT: [u8; 4] = *b"%s\n\0";
@@ -119,7 +144,7 @@ extern "C" fn dump_task(ctx: *const bpf_iter__task) -> i32 {
     let seq = meta.seq;
 
     if task.is_null() {
-        return print_end(seq);
+        return print_end_data(seq);
     }
 
     let task_ref = unsafe { &*task };

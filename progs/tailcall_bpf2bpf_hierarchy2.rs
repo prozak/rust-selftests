@@ -6,37 +6,42 @@
 // tools/testing/selftests/bpf/progs/tailcall_bpf2bpf_hierarchy2.c,
 // bpf-rs-core idiom.
 //
-// jmp_table has explicit key_size/value_size (not key/value types), so it
-// needs the bpf_map! escape hatch, same idiom as tailcall3.rs/tailcall4.rs.
+// jmp_table has an explicit key_size and a statically-initialized `values`
+// slot array, so it is written out rather than built with bpf_map!.
 // bpf_tail_call_static's constant-slot asm is a JIT-poke optimization, not
 // behavioral; the regular bpf_tail_call thunk with a literal index is
 // functionally equivalent for this test (see tailcall3.rs).
 //
-// C's `.values = {[0] = &classifier_0, [1] = &classifier_1}` static
-// prog-array initializer is unfixable here (see
-// [[prog-array-static-values-init-unfixable]]): rustc can't diverge a
-// static's codegen type from its debug type the way Clang's flexible-array
-// trick does, so the map is declared with plain key_size/value_size and an
-// empty runtime-populated slot layout, same as tailcall_bpf2bpf_hierarchy1.
-// This is consumed via test_loader.c's RUN_TESTS/__success/__retval
-// mechanism, but rustc emits no BTF_KIND_DECL_TAG at all, so every SEC("tc")
-// function here (classifier_0, classifier_1, and the main entry) becomes an
-// untagged, non-auxiliary, non-executing subtest that only needs to load
-// successfully (see [[negative-verifier-tests-need-loadable-translation]]) —
-// the unpopulated tail-call slot doesn't affect verification.
+// C's `.values = {[0] = &classifier_0, [1] = &classifier_1}` needs the map's
+// BTF to call `values` a ZERO-length array while its .maps storage is two
+// pointers wide -- libbpf reads the slot index off the RELOCATION offset.
+// Declaring `[ClassifierFn; 2]` gets rustc to emit storage and .rel.maps
+// entries byte-identical to clang's, and scripts/btf_map_slots.py rewrites
+// the BTF member to the zero-length array libbpf demands.
 
 use bpf_rs_core::ctx::__sk_buff;
 use bpf_rs_core::helpers::{bpf_strtoul, bpf_tail_call, sink_val};
-use bpf_rs_core::{bpf_map, bpf_object, maps};
+use bpf_rs_core::{bpf_object, maps, test_tags};
 
-bpf_map! {
-    jmp_table {
-        r#type: *const [i32; maps::PROG_ARRAY],
-        max_entries: *const [i32; 2],
-        key_size: *const [i32; 4],
-        value_size: *const [i32; 4],
-    }
+type ClassifierFn = extern "C" fn(*const __sk_buff) -> i32;
+
+#[repr(C)]
+struct jmp_table {
+    r#type: *const [i32; maps::PROG_ARRAY],
+    max_entries: *const [i32; 2],
+    key_size: *const [i32; 4],
+    values: [ClassifierFn; 2],
 }
+unsafe impl Sync for jmp_table {}
+
+#[link_section = ".maps"]
+#[no_mangle]
+static jmp_table: jmp_table = jmp_table {
+    r#type: core::ptr::null(),
+    max_entries: core::ptr::null(),
+    key_size: core::ptr::null(),
+    values: [classifier_0, classifier_1],
+};
 
 #[no_mangle]
 static mut count0: i32 = 0;
@@ -97,6 +102,12 @@ fn subprog_tail1(skb: *const __sk_buff) -> i32 {
         core::arch::asm!("{0} = {0}", inout(reg) ret, options(nostack, preserves_flags));
     }
     ret
+}
+
+test_tags! {
+    classifier_0:                 __auxiliary;
+    classifier_1:                 __auxiliary;
+    tailcall_bpf2bpf_hierarchy_2: __success, __retval(33);
 }
 
 #[link_section = "tc"]

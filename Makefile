@@ -156,6 +156,7 @@ $(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc
 		--strip-symbol=rust_eh_personality $@.tmp $@
 	@rm -f $@.tmp
 	python3 scripts/btf_rename.py $@
+	python3 scripts/btf_map_slots.py $@
 	python3 scripts/btf_test_tags.py $@ progs/$*.rs
 
 # --- Kernel verifier gate (all built objects) ---

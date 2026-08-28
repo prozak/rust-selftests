@@ -9,6 +9,7 @@ use core::ffi::c_void;
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::ctx::__sk_buff;
 use bpf_rs_core::helpers::bpf_lwt_push_encap;
+use bpf_rs_core::test_tags;
 
 const BPF_LWT_ENCAP_IP: u32 = 2;
 
@@ -24,6 +25,10 @@ struct iphdr {
     check: u16,
     saddr: u32,
     daddr: u32,
+}
+
+test_tags! {
+    test_missing_dst: __success, __retval(0);
 }
 
 #[link_section = "lwt_xmit"]

@@ -48,6 +48,7 @@ use bpf_rs_core::helpers::{
     bpf_ringbuf_submit,
 };
 use bpf_rs_core::maps;
+use bpf_rs_core::test_tags;
 use btf::{BtfType, Field};
 use btf_macros::btf;
 
@@ -157,6 +158,10 @@ fn read_u64(addr: usize) -> u64 {
     let mut v: u64 = 0;
     bpf_probe_read_kernel(&mut v, 8, addr as *const c_void);
     v
+}
+
+test_tags! {
+    iterate_wakeupsources: __success, __retval(0);
 }
 
 #[link_section = "syscall"]

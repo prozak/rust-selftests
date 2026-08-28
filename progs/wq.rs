@@ -16,6 +16,7 @@ use bpf_rs_core::bpf_object;
 use bpf_rs_core::ctx::__sk_buff;
 use bpf_rs_core::helpers::{bpf_map_lookup_elem, bpf_map_update_elem};
 use bpf_rs_core::maps::{self, BpfMap};
+use bpf_rs_core::test_tags;
 use core::ffi::c_void;
 
 // struct bpf_timer { __u64 __opaque[2]; } __attribute__((aligned(8)));
@@ -210,6 +211,14 @@ extern "C" fn wq_cb_sleepable(_map: *mut c_void, key: *mut i32, value: *mut c_vo
     }
 
     0
+}
+
+test_tags! {
+    test_call_array_sleepable:        __retval(0);
+    test_syscall_array_sleepable:     __retval(0);
+    test_call_hash_sleepable:         __retval(0);
+    test_call_hash_malloc_sleepable:  __retval(0);
+    test_call_lru_sleepable:          __retval(0);
 }
 
 #[link_section = "tc"]

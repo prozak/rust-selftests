@@ -127,6 +127,38 @@ the kernel rejects non-identifier chars in type names, and
 are not load-bearing for libbpf — only the VAR name and member layout
 are.)
 
+### Statically-initialized `values` slots (prog-array, map-in-map)
+
+C's `__array(values, void (void))` with `.values = { [0] = &prog }` asks the
+map's BTF to call `values` a **zero-length** array (`parse_btf_map_def`
+rejects anything else: *"prog-array value spec is not a zero-sized array"*)
+while its `.maps` storage is one pointer per slot — `bpf_object__collect_map_relos`
+derives the slot index from the **relocation offset** against that storage,
+not from the BTF. clang gets both by widening the LLVM global's codegen type
+past its debuginfo type; a Rust static's IR type and DIType always come from
+the same declaration, so neither `[Fn; 0]` (valid BTF, no storage, no
+relocation) nor `[Fn; N]` (storage libbpf refuses to parse) works alone.
+
+Declare the real thing and let the post-build pass fix the BTF:
+
+```rust
+type ClassifierFn = extern "C" fn(*const __sk_buff) -> i32;
+
+#[repr(C)]
+struct jmp_table {
+    r#type: *const [i32; maps::PROG_ARRAY],
+    max_entries: *const [i32; 2],
+    key_size: *const [i32; 4],
+    values: [ClassifierFn; 2],   // must be the LAST member, named `values`
+}
+```
+
+rustc then emits `.maps` bytes and `.rel.maps` entries identical to clang's,
+and `scripts/btf_map_slots.py` repoints the `values` member at an appended
+zero-length ARRAY. Slots are live: a `__retval` that depends on the tail
+call actually runs it. Before this pass the slots stayed empty and such
+tests passed vacuously.
+
 ## Helper calls
 
 All helpers live in `bpf_rs_core::helpers` as `#[inline(always)]` thunks

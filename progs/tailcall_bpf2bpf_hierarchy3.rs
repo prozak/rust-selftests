@@ -9,37 +9,22 @@
 // jmp_table0/jmp_table1 statically pre-populate their single prog-array slot
 // via a designated initializer on a flexible array member
 // (`__array(values, void (void))`, `.values = { [0] = (void *)&classifier_0 }`).
-// This is the same shape confirmed unfixable in progs/test_prog_array_init.rs
-// and progs/epilogue_tailcall.rs: libbpf's parse_btf_map_def requires the
-// "values" field's BTF ARRAY type to have nr_elems==0, but the real slot
-// storage in the C object comes from Clang widening the LLVM IR global's
-// *codegen* type past its debuginfo type -- a frontend-only divergence with
-// no rustc equivalent (a Rust static's IR type and DIType always come from
-// the same declaration). A `[ClassifierFn; 1]` field round-trips as
-// nr_elems=1 and libbpf rejects the map outright; `[ClassifierFn; 0]`
-// satisfies nr_elems==0 and loads, but is then genuinely 0 bytes, leaving no
-// room for a relocation to classifier_0, so both maps load with slot 0
-// permanently empty -- confirmed by `llvm-readelf -r`: no `.rel.maps`
-// section exists in the built object at all.
+// That asks the map's BTF to call `values` a ZERO-length array -- libbpf's
+// parse_btf_map_def rejects anything else -- while its `.maps` storage is one
+// pointer wide, because bpf_object__collect_map_relos derives the slot index
+// from the RELOCATION offset against that storage. clang gets both by widening
+// the LLVM global's codegen type past its debuginfo type; a Rust static's IR
+// type and DIType always come from the same declaration.
 //
-// This does NOT surface as a test failure here, though: `__success`/
-// `__retval(33)` are BTF decl tags (`btf_decl_tag("comment:...")`), which
-// rustc cannot emit (see TRANSLATING.md's `__failure`/`__msg` note -- the
-// same limitation applies to every `bpf_misc.h` decl-tag annotation, not
-// just negative-test ones). test_loader.c's `should_do_test_run()` only
-// runs `bpf_prog_test_run_opts()`/checks retval when a `test_retval=` tag
-// was actually parsed (see `spec->priv.execute = true` in the
-// `test_retval=` branch of `parse_test_spec`); with no decl tags at all,
-// `execute` stays false and the retval assertion is skipped entirely --
-// `make test-tailcall_bpf2bpf_hierarchy3` only exercises "does classifier_0
-// / tailcall_bpf2bpf_hierarchy_3 load", which succeeds regardless of the
-// prog-array populate bug above. So the tail-call chaining logic below is
-// never actually exercised; it exists to keep the translation's shape
-// (and BTF/keep-list ABI) matching the C original as closely as possible.
+// Declaring `[ClassifierFn; 1]` gets the half rustc can give: the built object's
+// .maps section and .rel.maps entries are byte-identical to clang's. The BTF
+// half is rewritten by scripts/btf_map_slots.py, which repoints the `values`
+// member at an appended zero-length ARRAY. The tail-call chaining below is
+// therefore live, and __retval(33) below actually runs it.
 
 use bpf_rs_core::ctx::__sk_buff;
 use bpf_rs_core::helpers::{bpf_strtoul, bpf_tail_call};
-use bpf_rs_core::{bpf_object, maps};
+use bpf_rs_core::{bpf_object, maps, test_tags};
 use core::ffi::c_void;
 
 #[no_mangle]
@@ -102,7 +87,7 @@ struct jmp_table0 {
     r#type: *const [i32; maps::PROG_ARRAY],
     max_entries: *const [i32; 1],
     key_size: *const [i32; 4],
-    values: [ClassifierFn; 0],
+    values: [ClassifierFn; 1],
 }
 unsafe impl Sync for jmp_table0 {}
 
@@ -112,7 +97,7 @@ static jmp_table0: jmp_table0 = jmp_table0 {
     r#type: core::ptr::null(),
     max_entries: core::ptr::null(),
     key_size: core::ptr::null(),
-    values: [],
+    values: [classifier_0],
 };
 
 #[repr(C)]
@@ -120,7 +105,7 @@ struct jmp_table1 {
     r#type: *const [i32; maps::PROG_ARRAY],
     max_entries: *const [i32; 1],
     key_size: *const [i32; 4],
-    values: [ClassifierFn; 0],
+    values: [ClassifierFn; 1],
 }
 unsafe impl Sync for jmp_table1 {}
 
@@ -130,8 +115,13 @@ static jmp_table1: jmp_table1 = jmp_table1 {
     r#type: core::ptr::null(),
     max_entries: core::ptr::null(),
     key_size: core::ptr::null(),
-    values: [],
+    values: [classifier_0],
 };
+
+test_tags! {
+    classifier_0:                 __auxiliary;
+    tailcall_bpf2bpf_hierarchy_3: __success, __retval(33);
+}
 
 #[link_section = "tc"]
 #[no_mangle]

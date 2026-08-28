@@ -6,6 +6,7 @@
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::bpf_get_current_task_btf;
+use bpf_rs_core::test_tags;
 use btf_macros::btf;
 
 #[btf]
@@ -80,6 +81,21 @@ fn cpumask_kfunc_load_test() {
 
     unsafe { bpf_cpumask_release(r#ref) };
     unsafe { bpf_cpumask_release(alloc) };
+}
+
+test_tags! {
+    task_kfunc_raw_tp:        __success;
+    task_kfunc_syscall:       __success;
+    task_kfunc_tracepoint:    __success;
+    task_kfunc_perf_event:    __success;
+    cgrp_kfunc_raw_tp:        __success;
+    cgrp_kfunc_syscall:       __success;
+    cgrp_kfunc_tracepoint:    __success;
+    cgrp_kfunc_perf_event:    __success;
+    cpumask_kfunc_raw_tp:     __success;
+    cpumask_kfunc_syscall:    __success;
+    cpumask_kfunc_tracepoint: __success;
+    cpumask_kfunc_perf_event: __success;
 }
 
 #[link_section = "raw_tp"]

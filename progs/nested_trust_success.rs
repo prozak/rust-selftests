@@ -7,6 +7,7 @@
 use bpf_rs_core::helpers::bpf_sk_storage_get;
 use bpf_rs_core::progs::fentry_arg as arg;
 use bpf_rs_core::{bpf_map, bpf_object};
+use bpf_rs_core::test_tags;
 use btf_macros::btf;
 
 #[btf]
@@ -40,6 +41,12 @@ bpf_map! {
         key: *const i32,
         value: *const u64,
     }
+}
+
+test_tags! {
+    test_read_cpumask:  __success;
+    test_skb_field:     __success;
+    test_nested_offset: __success;
 }
 
 #[link_section = "tp_btf/task_newtask"]

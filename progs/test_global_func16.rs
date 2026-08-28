@@ -6,6 +6,7 @@
 // taking a pointer to a fixed-size array, guarded by a null check.
 
 use bpf_rs_core::ctx::__sk_buff;
+use bpf_rs_core::test_tags;
 
 #[no_mangle]
 #[inline(never)]
@@ -15,6 +16,10 @@ pub extern "C" fn foo(arr: *const [i32; 10]) -> i32 {
     } else {
         0
     }
+}
+
+test_tags! {
+    global_func16: __success;
 }
 
 #[link_section = "cgroup_skb/ingress"]

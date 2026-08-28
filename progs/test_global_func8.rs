@@ -7,11 +7,16 @@
 
 use bpf_rs_core::ctx::__sk_buff;
 use bpf_rs_core::helpers::bpf_get_prandom_u32;
+use bpf_rs_core::test_tags;
 
 #[no_mangle]
 #[inline(never)]
 pub extern "C" fn foo(_skb: *const __sk_buff) -> i32 {
     bpf_get_prandom_u32() as i32
+}
+
+test_tags! {
+    global_func8: __success;
 }
 
 #[link_section = "cgroup_skb/ingress"]

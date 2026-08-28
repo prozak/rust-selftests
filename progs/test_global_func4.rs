@@ -7,6 +7,7 @@
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::ctx::__sk_buff;
+use bpf_rs_core::test_tags;
 
 #[no_mangle]
 #[inline(never)]
@@ -48,6 +49,10 @@ pub extern "C" fn f6(skb: *const __sk_buff) -> i32 {
 #[inline(never)]
 pub extern "C" fn f7(skb: *const __sk_buff) -> i32 {
     f6(skb)
+}
+
+test_tags! {
+    global_func4: __success;
 }
 
 #[link_section = "tc"]

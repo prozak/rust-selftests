@@ -31,6 +31,7 @@ use core::ffi::c_void;
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::bpf_get_stack;
+use bpf_rs_core::test_tags;
 use btf_macros::btf;
 
 const STACK_BYTES: u32 = 256 * 8;
@@ -71,6 +72,18 @@ pub extern "C" fn kprobe_typedef_ctx_subprog(ctx: *const bpf_user_pt_regs_t) -> 
             0,
         ) as i32
     }
+}
+
+test_tags! {
+    kprobe_typedef_ctx:    __success;
+    kprobe_resolved_ctx:   __success;
+    kprobe_workaround_ctx: __success;
+    raw_tp_ctx:            __success;
+    raw_tp_writable_ctx:   __success;
+    perf_event_ctx:        __success;
+    arg_tag_ctx_raw_tp:    __success, __log_level(2);
+    arg_tag_ctx_perf:      __success, __log_level(2);
+    arg_tag_ctx_kprobe:    __success, __log_level(2);
 }
 
 #[link_section = "?kprobe"]

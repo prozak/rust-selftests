@@ -14,6 +14,7 @@
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::progs::fentry_arg;
+use bpf_rs_core::test_tags;
 use core::ffi::c_void;
 
 #[repr(C, align(8))]
@@ -44,6 +45,14 @@ extern "C" {
 
 #[no_mangle]
 static mut proto: i32 = 0;
+
+test_tags! {
+    dynptr_use_after_invalidate_clone: __success;
+    bpf_qdisc_test_dequeue:            __auxiliary;
+    bpf_qdisc_test_init:               __auxiliary;
+    bpf_qdisc_test_reset:              __auxiliary;
+    bpf_qdisc_test_destroy:            __auxiliary;
+}
 
 #[link_section = "struct_ops"]
 #[no_mangle]

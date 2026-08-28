@@ -11,6 +11,7 @@
 
 use bpf_rs_core::ctx::__sk_buff;
 use bpf_rs_core::helpers::{sink, sink_val};
+use bpf_rs_core::test_tags;
 
 const MAX_STACK: usize = 512 - 3 * 32;
 
@@ -57,6 +58,10 @@ pub extern "C" fn f3(val: i32, skb: *const __sk_buff, var: i32) -> i32 {
     (unsafe { (*skb).ifindex } as i32)
         .wrapping_mul(val)
         .wrapping_mul(var)
+}
+
+test_tags! {
+    global_func2: __success;
 }
 
 #[link_section = "tc"]

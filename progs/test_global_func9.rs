@@ -11,6 +11,7 @@ use bpf_rs_core::bpf_object;
 use bpf_rs_core::ctx::__sk_buff;
 use bpf_rs_core::helpers::{bpf_get_prandom_u32, bpf_map_lookup_elem};
 use bpf_rs_core::maps::{self, BpfMap};
+use bpf_rs_core::test_tags;
 
 #[repr(C)]
 struct S {
@@ -105,6 +106,10 @@ pub extern "C" fn quuz(p: *mut *mut i32) -> i32 {
     }
 
     0
+}
+
+test_tags! {
+    global_func9: __success;
 }
 
 #[link_section = "cgroup_skb/ingress"]

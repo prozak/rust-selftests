@@ -32,6 +32,7 @@
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::progs::fentry_arg as arg;
+use bpf_rs_core::test_tags;
 use btf::{BtfType, Field};
 use btf_macros::btf;
 
@@ -82,6 +83,11 @@ extern "C" {
     fn bpf_kfunc_nested_acquire_nonzero_offset_test(ptr: *mut sk_buff_head) -> *mut sk_buff;
     fn bpf_kfunc_nested_acquire_zero_offset_test(ptr: *mut sock_common) -> *mut sk_buff;
     fn bpf_kfunc_nested_release_test(ptr: *mut sk_buff);
+}
+
+test_tags! {
+    test_nested_acquire_nonzero: __success;
+    test_nested_acquire_zero:    __success;
 }
 
 #[link_section = "tp_btf/tcp_probe"]

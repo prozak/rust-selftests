@@ -156,11 +156,18 @@ $(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc
 		--strip-symbol=rust_eh_personality $@.tmp $@
 	@rm -f $@.tmp
 	python3 scripts/btf_rename.py $@
+	python3 scripts/btf_test_tags.py $@ progs/$*.rs
 
 # --- Kernel verifier gate (all built objects) ---
+# Objects a translation declares must FAIL to load (test_tags! __failure) are
+# left out: the verifier rejecting them is the assertion, not a regression.
 verify: all
-	UML_INSTALL_DIR=$(UML_INSTALL_DIR) $(UML_HARNESS)/uml-veristat \
-		$(addprefix $(BLDDIR)/,$(addsuffix .bpf.o,$(PROGS)))
+	@neg=$$(python3 scripts/btf_test_tags.py --list-negative progs/*.rs); \
+	[ -z "$$neg" ] || echo "[verify] skipping must-fail object(s): $$(echo $$neg)"; \
+	objs=""; for n in $(PROGS); do \
+		echo "$$neg" | grep -qx "$$n" || objs="$$objs $(BLDDIR)/$$n.bpf.o"; \
+	done; \
+	UML_INSTALL_DIR=$(UML_INSTALL_DIR) $(UML_HARNESS)/uml-veristat $$objs
 
 # --- Swap Rust object in, rebuild harness pieces, run affected tests in UML ---
 test-%: $(BLDDIR)/%.bpf.o

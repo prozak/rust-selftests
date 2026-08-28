@@ -207,11 +207,53 @@ a register, keeps dead-arg-elim from dropping a function argument).
 
 ```sh
 make                     # bld/<name>.bpf.o  (compile gate)
-make verify              # kernel verifier gate for all objects (UML)
+make verify              # kernel verifier gate (UML); skips __failure objects
 make test-<name>         # swap in + kernel-Makefile skeleton regen +
                          # affected test_progs tests in UML (oracle gate)
 make restore-<name>      # reinstate the clang-built object
 ```
+
+## Test-loader expectations (`__failure`, `__msg`, `__retval`, ...)
+
+Many selftests carry their assertions IN THE OBJECT, as BTF decl tags the
+kernel's `test_loader` reads off each program's FUNC: whether the program
+must load, must be REJECTED, what the verifier log has to contain, what
+`bpf_prog_test_run` must return. clang emits them from `bpf_misc.h`'s
+`__failure` / `__msg(...)` / `__retval(...)` attributes; **rustc emits no
+decl tags at all**, and a tag-less object makes the loader default to
+expect-success — which silently inverts every negative test.
+
+So mirror the C object's tags with `test_tags!`, which expands to nothing;
+`scripts/btf_test_tags.py` appends the real DECL_TAGs to the built object:
+
+```rust
+use bpf_rs_core::test_tags;
+
+test_tags! {
+    global_func1: __failure, __msg("combined stack size of 3 calls is");
+    other_prog:   __success, __retval(0);
+}
+```
+
+Rules:
+
+- **Copy the C object's tags, in order, one entry per program.** The C
+  object is the ground truth; `translint.py` reads its BTF and errors on any
+  divergence. A missing declaration where the C object says `__failure` is
+  an error (the test inverts); a missing one for positive tags is a warning
+  (the translation is simply tested more weakly).
+- **A message may be relaxed only where the verifier log depends on
+  register allocation** — register numbers, `fp-` slots, `off=`, insn
+  indices — using the matcher's own regex brackets:
+  `__msg("{{R[0-9]}} type=scalar expected=fp")`. Widening a wildcard past
+  those tokens is an error; the rest of the message IS the assertion.
+- **Arguments are written as the C macro expands them**, since bpf_misc.h
+  stringizes after macro expansion: `__caps_unpriv("39|12")`, not
+  `CAP_BPF|CAP_NET_ADMIN`. Comments belong outside the macro body.
+- `make verify` skips objects declaring a privileged `__failure` — the
+  verifier rejecting them is the assertion, not a regression. The prover
+  says nothing meaningful about them either: both objects are rejected, so
+  the load-time test is the whole oracle.
 
 ## Divergence classes the equivalence prover has caught (lint before submitting)
 

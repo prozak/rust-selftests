@@ -4,20 +4,32 @@
 // Direct translation of tools/testing/selftests/bpf/progs/verifier_mtu.c
 // (bpf-rs-core idiom). A single verifier test: bpf_check_mtu() is passed a
 // pointer to a stack-local __u32 that is left uninitialized on purpose (the
-// C source declares `__u32 mtu;` with no initializer) — the __msg_unpriv
-// BTF decl tag on the C source ("invalid read from stack") documents that
-// unprivileged loads reject this, but rustc cannot emit __failure_unpriv/
-// __msg_unpriv decl tags, so test_loader falls back to its default
-// expect-success behavior, matching the C source's own __success tag for
-// the privileged case.
+// C source declares `__u32 mtu;` with no initializer). Privileged load
+// succeeds; unprivileged, with CAP_BPF|CAP_NET_ADMIN dropped, the verifier
+// rejects the uninitialized stack read.
+//
+// Both halves of that are decl tags on the C object, mirrored below by
+// test_tags! and appended to the built object by scripts/btf_test_tags.py.
+// __caps_unpriv takes the numbers bpf_misc.h's EXPAND_QUOTE produces for
+// CAP_BPF|CAP_NET_ADMIN.
 
 use core::ffi::c_void;
 use core::mem::MaybeUninit;
 
 use bpf_rs_core::ctx::__sk_buff;
 use bpf_rs_core::helpers::bpf_check_mtu;
+use bpf_rs_core::test_tags;
 
 const TCX_PASS: i32 = 0;
+
+test_tags! {
+    tc_uninit_mtu:
+        __description("uninit/mtu: write rejected"),
+        __success,
+        __caps_unpriv("39|12"),
+        __failure_unpriv,
+        __msg_unpriv("invalid read from stack");
+}
 
 #[link_section = "tc/ingress"]
 #[no_mangle]

@@ -46,3 +46,31 @@ pub const fn __lic_bytes<const N: usize>(s: &str) -> [u8; N] {
     }
     out
 }
+
+/// Test-loader expectations, mirroring the `bpf_misc.h` attributes.
+///
+/// `test_loader.c` decides whether a program must load, must be *rejected*,
+/// and what the verifier log must contain by reading BTF_KIND_DECL_TAGs off
+/// the program's FUNC ("comment:<n>:test_expect_failure",
+/// "comment:<n>:test_expect_msg=..."). clang derives those from
+/// `__attribute__((btf_decl_tag))`; rustc has no way to emit them.
+///
+/// So this macro expands to NOTHING: the declaration is read from the source
+/// by scripts/btf_test_tags.py, which appends the tags to the built object's
+/// .BTF. It is a macro rather than a comment so that rustc checks the shape
+/// and so there is exactly one grep-able anchor per translation:
+///
+/// ```ignore
+/// test_tags! {
+///     global_func1: __failure, __msg("combined stack size of 3 calls is");
+/// }
+/// ```
+///
+/// A message may wildcard the parts of a verifier log line that depend on
+/// register allocation, using the matcher's own `{{regex}}` brackets:
+/// `__msg("{{R[0-9]}} type=scalar expected=fp")`. scripts/translint.py bounds
+/// which tokens may be relaxed that way.
+#[macro_export]
+macro_rules! test_tags {
+    ($($func:ident : $($tag:expr),+ $(,)? );+ $(;)?) => {};
+}

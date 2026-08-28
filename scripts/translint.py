@@ -6,6 +6,12 @@ any ERROR.
 
 Classes checked (suppress per file with `// translint: allow(<class>)`):
 
+  test-tags      [ERROR] the C object's test_loader decl tags (__failure /
+                 __msg / ...) must be mirrored by a test_tags! declaration,
+                 which scripts/btf_test_tags.py appends to the built object.
+                 A message may relax ONLY register/stack-slot/insn-index
+                 tokens, via the matcher's own {{regex}} brackets; anything
+                 else diverging from the C tag is an error.
   printk-count   [ERROR] C and Rust must have the same number of trace-log
                  call sites (bpf_printk / log_err / bpf_trace_printk):
                  dropped logging was 62 real INEQUIV sites.
@@ -39,7 +45,9 @@ C_OBJ_DIR = os.path.join(REPO, "..", "uml-harness", ".build",
                          "selftests-output-qemu")
 
 sys.path.insert(0, os.path.join(REPO, "equiv"))
+sys.path.insert(0, os.path.join(REPO, "scripts"))
 from bpfelf import BpfElf, SHF_EXECINSTR
+import btf_test_tags
 
 SIZES = {"u8": 1, "i8": 1, "u16": 2, "i16": 2, "u32": 4, "i32": 4,
          "u64": 8, "i64": 8, "usize": 8, "isize": 8, "bool": 1, "f32": 4,
@@ -112,6 +120,110 @@ def count_trace_printk(obj_path):
     return n
 
 
+def c_test_tags(obj_path):
+    """Program name -> [decl tag payload, ...] from a compiled object's BTF,
+    in the loader's own order. None when the object can't be read."""
+    if not os.path.exists(obj_path):
+        return None
+    try:
+        elf = BpfElf(obj_path)
+        types = elf.btf_types()
+    except Exception:
+        return None
+    funcs = {tid: t[1] for tid, t in types.items() if t[0] == 12}
+    out = {}
+    for _tid, (kind, tname, target, _vlen, _extra) in types.items():
+        if kind == 17 and target in funcs and tname.startswith("comment:"):
+            out.setdefault(funcs[target], []).append(tname)
+    for fn in out:
+        # test_loader sorts with strverscmp, which compares the __COUNTER__
+        # run numerically; sorting by the parsed counter is the same order.
+        out[fn] = [re.sub(r"^comment:\d+:", "", t) for t in
+                   sorted(out[fn], key=lambda s: int(s.split(":")[1]))]
+    return out
+
+
+# Tokens of a verifier log line that depend on register allocation and stack
+# layout, i.e. the only things a translation may relax with the matcher's own
+# {{regex}} brackets. Everything else in the message is the assertion.
+CODEGEN_TOKENS = [
+    (re.compile(r"\{\{[^}]*\}\}"), "<X>"),   # an explicit relaxation
+    (re.compile(r"\bR\d+\b"), "<X>"),        # R1, R2, ...
+    (re.compile(r"\bfp-\d+\b"), "<X>"),      # stack slots
+    (re.compile(r"\boff=-?\d+\b"), "<X>"),
+    (re.compile(r"\binsn \d+\b"), "insn <X>"),
+    (re.compile(r"processed \d+ insns"), "processed <X> insns"),
+]
+
+
+def normalize_msg(s):
+    for pat, repl in CODEGEN_TOKENS:
+        s = pat.sub(repl, s)
+    return s
+
+
+def check_test_tags(name, rs_raw):
+    """The C object's decl tags are the ground truth for what the loader must
+    assert. Yield (level, text) for any divergence."""
+    obj = os.path.join(C_OBJ_DIR, f"{name}.bpf.o")
+    if os.path.exists(obj + ".corig"):
+        obj = obj + ".corig"           # pristine C, even mid-swap
+    c_tags = c_test_tags(obj)
+    if c_tags is None:
+        return
+    try:
+        declared = dict(btf_test_tags.parse_source(
+            os.path.join(REPO, "progs", f"{name}.rs")))
+    except btf_test_tags.TagError as e:
+        yield "ERROR", f"test_tags! does not parse: {e}"
+        return
+
+    if c_tags and not declared:
+        kinds = sorted({t.split("=")[0] for tl in c_tags.values() for t in tl})
+        # A dropped __failure INVERTS the test: the loader defaults to
+        # expect-success (test_loader.c:parse_test_spec), so a translation the
+        # verifier rejects for exactly the right reason is reported as a pass.
+        # Dropping only positive tags (__retval, __xlated, __auxiliary, ...)
+        # doesn't invert anything, it just tests the translation more weakly
+        # than the C object is tested.
+        inverts = any(k.startswith("test_expect_failure") for k in kinds)
+        yield ("ERROR" if inverts else "WARN",
+               f"the C object carries test_loader decl tags ({', '.join(kinds)}) "
+               f"but this translation declares no test_tags! — "
+               + ("without them the loader defaults to expect-success and the "
+                  "test inverts" if inverts else
+                  "those assertions are not being made against the translation"))
+        return
+    if declared and not c_tags:
+        yield ("ERROR",
+               "test_tags! is declared but the C object carries none")
+        return
+
+    for fn in sorted(set(c_tags) | set(declared)):
+        want, got = c_tags.get(fn, []), declared.get(fn, [])
+        if not want:
+            yield "ERROR", f"{fn}: declares tags the C object does not have"
+            continue
+        if not got:
+            yield "ERROR", f"{fn}: C object tags this program, translation does not"
+            continue
+        if len(want) != len(got):
+            yield ("ERROR",
+                   f"{fn}: {len(got)} tag(s) declared, C object has {len(want)}")
+            continue
+        for w, g in zip(want, got):
+            if w == g:
+                continue
+            if normalize_msg(w) == normalize_msg(g):
+                yield ("NOTE",
+                       f"{fn}: relaxed {w!r} -> {g!r} (codegen-dependent "
+                       f"tokens only)")
+                continue
+            yield ("ERROR",
+                   f"{fn}: declared tag {g!r} diverges from the C object's "
+                   f"{w!r} beyond register/offset relaxation")
+
+
 def lint(name):
     rs_path = os.path.join(REPO, "progs", f"{name}.rs")
     c_path = os.path.join(C_PROGS, f"{name}.c")
@@ -128,6 +240,9 @@ def lint(name):
     def emit(level, cls, text):
         if cls not in allowed:
             msgs.append((level, cls, text))
+
+    for level, text in check_test_tags(name, rs_raw):
+        emit(level, "test-tags", text)
 
     # bool-global: only an error when the BPF side BRANCHES on it (reads);
     # write-only status flags (data.skip = true) store 1 identically in

@@ -4,27 +4,24 @@
 // Translation of tools/testing/selftests/bpf/progs/test_global_func1.c,
 // bpf-rs-core idiom.
 //
-// The C original is a NEGATIVE verifier test: three noinline global
-// functions with 260-byte stack buffers overflow the 512-byte combined
-// stack limit, and __failure/__msg("combined stack size of 3 calls is")
-// encode that expectation as BTF decl tags that the RUN_TESTS test_loader
-// reads from the object itself.
+// A NEGATIVE verifier test: three noinline global functions with 260-byte
+// stack buffers overflow the 512-byte combined stack limit, and
+// __failure/__msg("combined stack size of 3 calls is") encode that
+// expectation as BTF decl tags the RUN_TESTS test_loader reads from the
+// object itself.
 //
-// The rustc -> llc pipeline has no way to emit BTF_KIND_DECL_TAG (clang
-// derives it from __attribute__((btf_decl_tag)) via DI annotations rustc
-// cannot produce). A tag-less object makes test_loader default to
-// "expect successful load" (test_loader.c parse_test_spec: mode_mask=PRIV,
-// expect_failure=false). So this translation keeps the exact function
-// structure — static f0, global noinline f1/f2/f3 with volatile stack
-// buffers, the same call graph — but sizes the buffers so the combined
-// stack stays under the limit and the program loads.
+// rustc emits no BTF_KIND_DECL_TAG (clang derives it from
+// __attribute__((btf_decl_tag)) via DI annotations rustc cannot produce), so
+// the expectation is declared below with test_tags! and appended to the built
+// object's .BTF by scripts/btf_test_tags.py.
 
 use bpf_rs_core::ctx::__sk_buff;
 use bpf_rs_core::helpers::{sink, sink_val};
+use bpf_rs_core::test_tags;
 
-// Small enough that the deepest chain (global_func1 -> f2 -> f1 -> f0)
-// stays well under the 512-byte combined stack limit.
-const MAX_STACK: usize = 100;
+// C: #define MAX_STACK 260 -- three of these on one call chain is what
+// blows the 512-byte combined stack limit the test asserts.
+const MAX_STACK: usize = 260;
 
 // C: volatile char buf[MAX_STACK] = {}; __sink(buf[MAX_STACK - 1]);
 // sink() makes the array address escape, so the whole buffer stays on the
@@ -70,6 +67,10 @@ pub extern "C" fn f2(val: i32, skb: *const __sk_buff) -> i32 {
 pub extern "C" fn f3(val: i32, skb: *const __sk_buff, var: i32) -> i32 {
     stack_buf();
     (unsafe { (*skb).ifindex } as i32).wrapping_mul(val).wrapping_mul(var)
+}
+
+test_tags! {
+    global_func1: __failure, __msg("combined stack size of 3 calls is");
 }
 
 #[link_section = "tc"]

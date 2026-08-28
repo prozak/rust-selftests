@@ -5,6 +5,7 @@
 // (bpf-rs-core idiom).
 
 use bpf_rs_core::bpf_object;
+use bpf_rs_core::test_tags;
 use core::ffi::c_void;
 
 extern "C" {
@@ -32,6 +33,58 @@ macro_rules! s {
     ($ptr:expr) => {
         $ptr as *const u8
     };
+}
+
+test_tags! {
+    test_strcmp_eq:             __success, __retval(0);
+    test_strcmp_neq:            __success, __retval(1);
+    test_strcasecmp_eq1:        __success, __retval(0);
+    test_strcasecmp_eq2:        __success, __retval(0);
+    test_strcasecmp_eq3:        __success, __retval(0);
+    test_strcasecmp_neq1:       __success, __retval(1);
+    test_strcasecmp_neq2:       __success, __retval(1);
+    test_strncasecmp_eq1:       __success, __retval(0);
+    test_strncasecmp_eq2:       __success, __retval(0);
+    test_strncasecmp_eq3:       __success, __retval(0);
+    test_strncasecmp_eq4:       __success, __retval(0);
+    test_strncasecmp_eq5:       __success, __retval(0);
+    test_strncasecmp_neq1:      __success, __retval(-1);
+    test_strncasecmp_neq2:      __success, __retval(1);
+    test_strchr_found:          __success, __retval(1);
+    test_strchr_null:           __success, __retval(11);
+    test_strchr_notfound:       __success, __retval(-2);
+    test_strchrnul_found:       __success, __retval(1);
+    test_strchrnul_notfound:    __success, __retval(11);
+    test_strnchr_found:         __success, __retval(1);
+    test_strnchr_null:          __success, __retval(11);
+    test_strnchr_notfound:      __success, __retval(-2);
+    test_strrchr_found:         __success, __retval(9);
+    test_strrchr_null:          __success, __retval(11);
+    test_strrchr_notfound:      __success, __retval(-2);
+    test_strlen:                __success, __retval(11);
+    test_strnlen:               __success, __retval(11);
+    test_strspn:                __success, __retval(5);
+    test_strcspn:               __success, __retval(2);
+    test_strstr_found:          __success, __retval(6);
+    test_strcasestr_found:      __success, __retval(6);
+    test_strstr_notfound:       __success, __retval(-2);
+    test_strcasestr_notfound:   __success, __retval(-2);
+    test_strstr_empty:          __success, __retval(0);
+    test_strcasestr_empty:      __success, __retval(0);
+    test_strnstr_found1:        __success, __retval(0);
+    test_strnstr_found2:        __success, __retval(0);
+    test_strnstr_found3:        __success, __retval(0);
+    test_strnstr_notfound1:     __success, __retval(-2);
+    test_strnstr_notfound2:     __success, __retval(-2);
+    test_strnstr_notfound3:     __success, __retval(-2);
+    test_strnstr_empty:         __success, __retval(0);
+    test_strncasestr_found1:    __success, __retval(0);
+    test_strncasestr_found2:    __success, __retval(0);
+    test_strncasestr_found3:    __success, __retval(0);
+    test_strncasestr_notfound1: __success, __retval(-2);
+    test_strncasestr_notfound2: __success, __retval(-2);
+    test_strncasestr_notfound3: __success, __retval(-2);
+    test_strncasestr_empty:     __success, __retval(0);
 }
 
 #[link_section = "syscall"]

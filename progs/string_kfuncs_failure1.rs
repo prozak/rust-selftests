@@ -2,6 +2,7 @@
 #![no_main]
 
 use bpf_rs_core::bpf_object;
+use bpf_rs_core::test_tags;
 use core::ffi::c_void;
 
 #[no_mangle]
@@ -29,6 +30,81 @@ extern "C" {
 }
 
 /* Passing NULL to string kfuncs (treated as a userspace ptr) */
+
+test_tags! {
+    test_strcmp_null1:           __retval(-34);
+    test_strcmp_null2:           __retval(-34);
+    test_strcasecmp_null1:       __retval(-34);
+    test_strcasecmp_null2:       __retval(-34);
+    test_strncasecmp_null1:      __retval(-34);
+    test_strncasecmp_null2:      __retval(-34);
+    test_strchr_null:            __retval(-34);
+    test_strchrnul_null:         __retval(-34);
+    test_strnchr_null:           __retval(-34);
+    test_strrchr_null:           __retval(-34);
+    test_strlen_null:            __retval(-34);
+    test_strnlen_null:           __retval(-34);
+    test_strspn_null1:           __retval(-34);
+    test_strspn_null2:           __retval(-34);
+    test_strcspn_null1:          __retval(-34);
+    test_strcspn_null2:          __retval(-34);
+    test_strstr_null1:           __retval(-34);
+    test_strstr_null2:           __retval(-34);
+    test_strcasestr_null1:       __retval(-34);
+    test_strcasestr_null2:       __retval(-34);
+    test_strnstr_null1:          __retval(-34);
+    test_strnstr_null2:          __retval(-34);
+    test_strncasestr_null1:      __retval(-34);
+    test_strncasestr_null2:      __retval(-34);
+    test_strcmp_user_ptr1:       __retval(-34);
+    test_strcmp_user_ptr2:       __retval(-34);
+    test_strcasecmp_user_ptr1:   __retval(-34);
+    test_strcasecmp_user_ptr2:   __retval(-34);
+    test_strncasecmp_user_ptr1:  __retval(-34);
+    test_strncasecmp_user_ptr2:  __retval(-34);
+    test_strchr_user_ptr:        __retval(-34);
+    test_strchrnul_user_ptr:     __retval(-34);
+    test_strnchr_user_ptr:       __retval(-34);
+    test_strrchr_user_ptr:       __retval(-34);
+    test_strlen_user_ptr:        __retval(-34);
+    test_strnlen_user_ptr:       __retval(-34);
+    test_strspn_user_ptr1:       __retval(-34);
+    test_strspn_user_ptr2:       __retval(-34);
+    test_strcspn_user_ptr1:      __retval(-34);
+    test_strcspn_user_ptr2:      __retval(-34);
+    test_strstr_user_ptr1:       __retval(-34);
+    test_strstr_user_ptr2:       __retval(-34);
+    test_strcasestr_user_ptr1:   __retval(-34);
+    test_strcasestr_user_ptr2:   __retval(-34);
+    test_strnstr_user_ptr1:      __retval(-34);
+    test_strnstr_user_ptr2:      __retval(-34);
+    test_strncasestr_user_ptr1:  __retval(-34);
+    test_strncasestr_user_ptr2:  __retval(-34);
+    test_strcmp_pagefault1:      __retval(-14);
+    test_strcmp_pagefault2:      __retval(-14);
+    test_strcasecmp_pagefault1:  __retval(-14);
+    test_strcasecmp_pagefault2:  __retval(-14);
+    test_strncasecmp_pagefault1: __retval(-14);
+    test_strncasecmp_pagefault2: __retval(-14);
+    test_strchr_pagefault:       __retval(-14);
+    test_strchrnul_pagefault:    __retval(-14);
+    test_strnchr_pagefault:      __retval(-14);
+    test_strrchr_pagefault:      __retval(-14);
+    test_strlen_pagefault:       __retval(-14);
+    test_strnlen_pagefault:      __retval(-14);
+    test_strspn_pagefault1:      __retval(-14);
+    test_strspn_pagefault2:      __retval(-14);
+    test_strcspn_pagefault1:     __retval(-14);
+    test_strcspn_pagefault2:     __retval(-14);
+    test_strstr_pagefault1:      __retval(-14);
+    test_strstr_pagefault2:      __retval(-14);
+    test_strcasestr_pagefault1:  __retval(-14);
+    test_strcasestr_pagefault2:  __retval(-14);
+    test_strnstr_pagefault1:     __retval(-14);
+    test_strnstr_pagefault2:     __retval(-14);
+    test_strncasestr_pagefault1: __retval(-14);
+    test_strncasestr_pagefault2: __retval(-14);
+}
 
 #[link_section = "syscall"]
 #[no_mangle]

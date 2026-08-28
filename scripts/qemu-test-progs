@@ -38,6 +38,20 @@ export PATH="$(dirname "${VNG}"):${PATH}"
 [ -f "${QEMU_KERNEL}" ] || { echo "kernel not found: ${QEMU_KERNEL}" >&2; exit 1; }
 [ -x "${TEST_PROGS}" ] || { echo "test_progs not found: ${TEST_PROGS}" >&2; exit 1; }
 
+# vng passes the guest command on the KERNEL COMMAND LINE, which x86 caps at
+# 2048 bytes. Objects consumed by a prog_tests file that registers many tests
+# (verifier.c registers every verifier_*: ~2.5KB of names) overflow it, and
+# the guest panics with "Unable to mount root fs" because the truncation eats
+# the boot arguments. test_progs takes the list from a file instead when the
+# argument starts with '@' (test_progs.c:parse_test_list_file), and $OUT is
+# the shared, writable guest cwd.
+TEST_ARG="-t '${FILTER}'"
+if [ "${#FILTER}" -gt 512 ]; then
+    tr ',' '\n' <<< "${FILTER}" > "${OUT}/.test-filter"
+    TEST_ARG="-t @.test-filter"
+    echo "[qemu] filter is ${#FILTER} chars — passed via ${OUT}/.test-filter" >&2
+fi
+
 # vng: boot the kernel, share host fs, run the command in $OUT, propagate
 # the exit status. --verbose keeps kernel oops visible in the log.
 exec timeout "${QEMU_TIMEOUT:-600}" "${VNG}" \
@@ -46,4 +60,4 @@ exec timeout "${QEMU_TIMEOUT:-600}" "${VNG}" \
     --rw \
     --cwd "${OUT}" \
     --verbose \
-    -- "mount -t bpf bpffs /sys/fs/bpf 2>/dev/null; ./$(basename "${TEST_PROGS}") -t '${FILTER}'"
+    -- "mount -t bpf bpffs /sys/fs/bpf 2>/dev/null; ./$(basename "${TEST_PROGS}") ${TEST_ARG}"

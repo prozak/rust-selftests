@@ -15,14 +15,14 @@ pipeline at this tree's LLVM, `vmlinux.h`, libbpf and qemu kernel:
 
 ```
 $ git submodule update --init --recursive collections/vendor/libarena-rs
-$ make test          # boots the pinned qemu kernel via vng
+$ make test          # cargo bpf --examples in the crate, then vng
 OK   test_rs_box
 OK   test_rs_grow_shrink
 OK   test_rs_sort
 OK   test_rs_string
 OK   test_rs_vec
 OK   test_rs_vecdeque
-bld/collections_smoke.bpf.o: 6/6 passed
+target/bpfel-unknown-none-v4/release/examples/collections_smoke: 6/6 passed
 ```
 
 Changes to the allocator, the pipeline or the test programs go to the crate

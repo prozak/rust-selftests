@@ -14,6 +14,7 @@ args for opt on stdout). Also strips `noinline` from ALL attribute groups:
 rustc marks cold-path call SITES (RawVec::grow_one) noinline, which would
 override the callee's alwaysinline.
 """
+import os
 import re
 import sys
 
@@ -24,6 +25,15 @@ text = open(in_ll).read()
 # strip noinline everywhere (function attrs AND call-site attr groups)
 text = re.sub(r'^(attributes #\d+ = \{[^}]*?) ?\bnoinline\b',
               r'\1', text, flags=re.MULTILINE)
+
+# FORCE_INLINE=0 leaves the Rust helpers outlined, for measuring what the
+# inlining actually buys. Everything downstream has to hold up on its own:
+# scripts/lower_i128.py for the i128 multiply that stops constant-folding,
+# and arena typing across the resulting call boundaries.
+if os.environ.get('FORCE_INLINE') == '0':
+    open(out_ll, 'w').write(text)
+    print('')
+    raise SystemExit(0)
 
 args = []
 for m in re.finditer(r'^define\s[^\n]*?@([A-Za-z0-9_.$]+)\(',

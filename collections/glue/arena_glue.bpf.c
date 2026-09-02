@@ -2,12 +2,20 @@
 /* Plain-u64 ABI shims over libarena for the Rust side.
  *
  * Rust cannot express __arena (addrspace(1)) pointers, so its FFI surface
- * must be integer-only. arena_malloc_internal() is already u64-based;
- * arena_free() takes a __arena pointer, so wrap it. The u64 values are
- * arena (user-form) addresses: the Rust allocator addr_space_casts them to
- * the kernel view right after allocation and back before freeing.
+ * must be integer-only: arena_malloc()/arena_free() both traffic in them,
+ * so wrap both. An __arena pointer holds the arena's user-form address
+ * (map_extra base + offset) — that is exactly what the register holds, and
+ * what the addr_space_cast before each dereference converts to the kernel
+ * view — so the cast to u64 is a plain move. The Rust allocator
+ * addr_space_casts it to the kernel view right after allocation and back
+ * before freeing.
  */
 #include <libarena/common.h>
+
+u64 arena_malloc_u64(u64 size)
+{
+	return (u64)arena_malloc(size);
+}
 
 void arena_free_u64(u64 ptr)
 {

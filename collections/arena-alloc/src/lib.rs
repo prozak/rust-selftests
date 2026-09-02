@@ -3,15 +3,26 @@
 
 //! BPF-arena-backed `GlobalAlloc` over libarena's buddy allocator.
 //!
-//! libarena (vendored under collections/vendor/libarena, linked in at the
-//! LLVM-bitcode level) provides `arena_malloc_internal(size) -> u64` and
-//! (via glue/arena_glue.bpf.c) `arena_free_u64(u64)`. Those u64 values are
-//! arena addresses in their user-space form (map_extra base + offset). The
-//! allocator casts each fresh allocation to the kernel view once with the
-//! `addr_space_cast` instruction — hand-encoded inline asm, same idiom as
-//! progs/arena_atomics.rs, byte-for-byte what clang emits for
-//! `bpf_addr_space_cast()` — so Rust collections only ever hold and deref
-//! plain kernel-view pointers. `dealloc` casts back before freeing.
+//! libarena (vendored under collections/vendor/libarena, or bpf-next's
+//! in-tree copy — see the Makefile — linked in at the LLVM-bitcode level)
+//! provides `arena_malloc`/`arena_free` over `__arena` pointers, which Rust
+//! cannot spell; glue/arena_glue.bpf.c wraps both as `arena_malloc_u64` and
+//! `arena_free_u64`. Those u64 values are arena addresses in their
+//! user-space form (map_extra base + offset). The allocator casts each
+//! fresh allocation once with the `addr_space_cast` instruction —
+//! hand-encoded inline asm, same idiom as progs/arena_atomics.rs,
+//! byte-for-byte what clang emits for `bpf_addr_space_cast()`; `dealloc`
+//! casts back before freeing.
+//!
+//! What that cast produces is worth stating precisely, because assuming
+//! otherwise is what made v1 conclude that pointer chasing needed an LLVM
+//! backend feature. It is NOT a kernel address: `kernel/bpf/fixups.c:1577`
+//! rewrites it to "a 32-bit mov that clears upper 32-bit", so the register
+//! holds the bare 32-bit arena offset and the kernel base is added by each
+//! access (`BPF_PROBE_MEM32`). Two consequences: the value is meaningless
+//! to userspace without adding a base back, and the cast is idempotent —
+//! which is exactly what scripts/arena_recast.py relies on to re-type a
+//! pointer reloaded out of arena memory without disturbing it.
 //!
 //! Alignment: buddy blocks are power-of-two sized and aligned, so
 //! allocating max(size, align) guarantees the requested alignment.
@@ -19,7 +30,7 @@
 use core::alloc::{GlobalAlloc, Layout};
 
 extern "C" {
-    fn arena_malloc_internal(size: usize) -> u64;
+    fn arena_malloc_u64(size: u64) -> u64;
     fn arena_free_u64(ptr: u64);
 }
 
@@ -80,7 +91,7 @@ pub struct ArenaAlloc;
 unsafe impl GlobalAlloc for ArenaAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let sz = layout.size().max(layout.align()).max(1);
-        let ua = arena_malloc_internal(sz);
+        let ua = arena_malloc_u64(sz as u64);
         if ua == 0 {
             return core::ptr::null_mut();
         }

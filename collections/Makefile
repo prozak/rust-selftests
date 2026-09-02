@@ -11,11 +11,20 @@
 # Run: make test  (boots the qemu kernel via vng, runs loader against every
 # built object; each SEC("syscall") test_* program must return 0).
 
+# Toolchain locations follow the top-level Makefile's names, so a tree that
+# builds ../progs builds this too:
+#   LLVM_PREFIX       LLVM >= 22 install (clang/llc/opt/llvm-link/...)
+#   KERNEL_SRC        bpf-next checkout (vmlinux, bzImage)
+#   SELFTESTS_OUTPUT  selftests build output (tools/include/vmlinux.h,
+#                     tools/include/bpf/*.h, tools/build/libbpf/libbpf.a)
 HEIM     := $(abspath ../..)
 RUSTBPF  ?= $(HEIM)/rust-bpf
-LLVM     := $(HEIM)/uml-harness/.build/llvm-install/bin
-BTOOLDIR := $(HEIM)/uml-harness/.build/bpftool-output-qemu
-KERNEL   := $(HEIM)/uml-harness/.build/bpf-next-x86
+LLVM_PREFIX      ?= $(HEIM)/uml-harness/.build/llvm-install
+KERNEL_SRC       ?= $(HEIM)/uml-harness/.build/bpf-next-x86
+SELFTESTS_OUTPUT ?= $(HEIM)/uml-harness/.build/selftests-output-qemu
+LIBBPF_A ?= $(SELFTESTS_OUTPUT)/tools/build/libbpf/libbpf.a
+LLVM     := $(LLVM_PREFIX)/bin
+KERNEL   := $(KERNEL_SRC)
 DEPDIR   := $(RUSTBPF)/bld_deps
 TARGET   := $(RUSTBPF)/bpfel-unknown-none-v4.json
 
@@ -29,7 +38,12 @@ LLVM_OBJCOPY := $(LLVM)/llvm-objcopy
 RUSTC        ?= rustc
 CC           ?= cc
 
-LA  := vendor/libarena/libarena
+# libarena source. The vendored submodule is the pinned copy we control;
+# bpf-next carries libarena in-tree as well, so fall back to that when the
+# submodule has not been checked out (github clone needs network).
+LA_VENDOR := vendor/libarena/libarena
+LA_KERNEL := $(KERNEL_SRC)/tools/testing/selftests/bpf/libarena
+LA  ?= $(if $(wildcard $(LA_VENDOR)/src/buddy.bpf.c),$(LA_VENDOR),$(LA_KERNEL))
 BLD := bld
 
 RUSTFLAGS_ENV := RUSTC_BOOTSTRAP=1
@@ -39,7 +53,7 @@ RUSTC_COMMON  := --target $(TARGET) -C opt-level=3 -C panic=unwind -C debuginfo=
 BPF_CFLAGS := --target=bpfel -mcpu=v4 -O2 -g -DENABLE_ATOMICS_TESTS \
               -Wno-incompatible-pointer-types-discards-qualifiers \
               -Wno-missing-declarations -Wno-macro-redefined \
-              -I$(LA)/include -I$(BTOOLDIR) -I$(BTOOLDIR)/libbpf/include
+              -I$(LA)/include -I$(SELFTESTS_OUTPUT)/tools/include
 
 ARENA_BCS := $(BLD)/arena_common.bc $(BLD)/arena_buddy.bc $(BLD)/arena_glue.bc
 PROGS     := $(patsubst progs/%.rs,%,$(wildcard progs/*.rs))
@@ -160,9 +174,12 @@ $(BLD)/%.keep: progs/%.rs $(BLD)/arena_syms.txt
 	printf '%s\n' arena_get_info arena_alloc_reserve arena_buddy_reset _license arena >> $@
 	cat $(BLD)/arena_syms.txt >> $@
 
-# Two-stage opt: (1) internalize + dce, (2) force-inline every non-entry
+# Three-stage opt: (1) internalize + dce, (2) force-inline every non-entry
 # function (arena pointers must never cross a live call boundary — see
-# scripts/force_inline.py) and optimize.
+# scripts/force_inline.py) and optimize, (3) re-cast pointers reloaded out
+# of arena memory, which is what lets pointer-chasing collections verify
+# (scripts/arena_recast.py). Stage 3 runs after O2 so the casts it inserts
+# are not sunk or duplicated by later passes.
 $(BLD)/%-opt.bc: $(BLD)/%-linked.bc $(BLD)/%.keep
 	$(LLVM_DIS) $< -o $@.stage0.ll
 	python3 scripts/lower_mem.py $@.stage0.ll $@.stage0.ll
@@ -171,14 +188,21 @@ $(BLD)/%-opt.bc: $(BLD)/%-linked.bc $(BLD)/%.keep
 		-passes='forceattrs,internalize,globaldce' $@.stage0.ll -o $@.stage1
 	@rm -f $@.stage0.ll
 	$(LLVM_DIS) $@.stage1 -o $@.stage1.ll
+	python3 scripts/lower_i128.py $@.stage1.ll $@.stage1.ll
 	$(OPT) $$(python3 scripts/force_inline.py $@.stage1.ll $@.stage2.ll $(BLD)/$*.keep) \
-		-passes='forceattrs,always-inline,globaldce,default<O2>' $@.stage2.ll -o $@
-	@rm -f $@.stage1 $@.stage1.ll $@.stage2.ll
+		-passes='forceattrs,always-inline,globaldce,default<O2>' $@.stage2.ll -o $@.stage3
+	$(LLVM_DIS) $@.stage3 -o $@.stage3.ll
+	python3 scripts/arena_recast.py $@.stage3.ll $@.stage3.ll
+	$(LLVM_AS) $@.stage3.ll -o $@
+	@rm -f $@.stage1 $@.stage1.ll $@.stage2.ll $@.stage3 $@.stage3.ll
 
-# --- invoke->call, unreachable->ret (no Rust-side ksyms here) ---
+# --- invoke->call, unreachable->ret, llvm.trap->bpf_throw ---
+# No Rust-side ksyms here, so no KSYM_BTF_FILES/BPFTOOL: add_ksyms.py reads
+# neither (it mirrors no kfunc protos from kernel BTF), and passing them was
+# only ever decoration.
 $(BLD)/%-ksyms.bc: $(BLD)/%-opt.bc
 	$(LLVM_DIS) $< -o $@.ll
-	KSYM_BTF_FILES="$(KERNEL)/vmlinux" BPFTOOL="$(BTOOLDIR)/bpftool" TRAP_TO_BPF_THROW=0xC0DED \
+	TRAP_TO_BPF_THROW=0xC0DED \
 		python3 $(RUSTBPF)/add_ksyms.py $@.ll $@.ll
 	$(LLVM_AS) $@.ll -o $@
 	@rm -f $@.ll
@@ -195,8 +219,8 @@ $(BLD)/%.bpf.o: $(BLD)/%-ksyms.bc
 # --- userspace runner (links against the harness libbpf) ---
 $(BLD)/loader: loader.c
 	$(CC) -O2 -o $@ $< \
-		-I$(BTOOLDIR)/libbpf/include -I$(HEIM)/uml-harness/.build/bpf-next/tools/lib \
-		$(BTOOLDIR)/libbpf/libbpf.a -lelf -lz
+		-I$(SELFTESTS_OUTPUT)/tools/include -I$(KERNEL_SRC)/tools/lib \
+		$(LIBBPF_A) -lelf -lz
 
 # --- run all tests inside the qemu guest ---
 VNG ?= $(HOME)/.local/share/vng-venv/bin/vng

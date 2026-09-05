@@ -20,11 +20,27 @@ LLVM_PREFIX="${LLVM_PREFIX:-${BUILD}/llvm-install}"
 export PATH="${BUILD}/pahole-install/bin:${PATH}"
 
 mkdir -p "${OUT}"
-# bpftool flavor dir expected by swap-and-test.sh's BPFTOOL derivation;
-# the host bpftool from the UML flavor works for skeleton generation.
-if [ ! -e "${BUILD}/bpftool-output-qemu" ]; then
-    ln -s bpftool-output-heimdall "${BUILD}/bpftool-output-qemu"
+# bpftool flavor dir expected by swap-and-test.sh's BPFTOOL derivation.
+# It must come from THIS tree: skeleton generation opens every object with
+# bpftool's libbpf, and an older libbpf rejects objects using newer ELF
+# conventions (the 520d7d7-era UML bpftool fails on 3ccdb078's .percpu
+# sections and ksym externs, and then test_progs never links).
+BPFTOOL_OUT="${BUILD}/bpftool-output-qemu"
+if [ ! -x "${BPFTOOL_OUT}/bpftool" ] || [ -n "${REBUILD_BPFTOOL:-}" ]; then
+    rm -rf "${BPFTOOL_OUT}"
+    mkdir -p "${BPFTOOL_OUT}"
+    make -C "${KSRC}/tools/bpf/bpftool" OUTPUT="${BPFTOOL_OUT}/" \
+        CLANG="${LLVM_PREFIX}/bin/clang" \
+        LLVM_CONFIG="${LLVM_PREFIX}/bin/llvm-config" \
+        LLVM_STRIP="${LLVM_PREFIX}/bin/llvm-strip" \
+        -j"$(nproc)" all
 fi
+
+# libarena builds in the SOURCE tree and its Makefile does not track
+# header dependencies, so after a checkout its objects keep calling
+# functions the headers no longer export (bmp_test_bit after the inlining
+# commit) and the libarena skeleton, then test_progs, fail to build.
+git -C "${KSRC}" clean -fdXq -- tools/testing/selftests/bpf/libarena
 
 # Module.symvers (via modules) so test_kmods builds against THIS kernel,
 # not the host's /lib/modules fallback.
@@ -38,7 +54,7 @@ make -C "${KSRC}/tools/testing/selftests/bpf" \
     CLANG="${LLVM_PREFIX}/bin/clang" \
     LLC="${LLVM_PREFIX}/bin/llc" \
     LD="${LLVM_PREFIX}/bin/ld.lld" \
-    BPFTOOL="${BUILD}/bpftool-output-qemu/bpftool" \
+    BPFTOOL="${BPFTOOL_OUT}/bpftool" \
     VMLINUX_BTF="${KSRC}/vmlinux" \
     ARCH=x86_64 SKIP_LLVM=1 BPF_STRICT_BUILD=0 \
     -j"$(nproc)" -k || true

@@ -83,6 +83,11 @@ run_lane() {
             if SELFTESTS_OUTPUT="${out}" timeout 1200 \
                     scripts/swap-and-test.sh "${name}" c > "${log%.log}.c.log" 2>&1 < /dev/null; then
                 note="${note}; C-PASS"
+            elif grep -q "no prog_tests consume ${name}" "${log%.log}.c.log"; then
+                # the Rust swap broke a test object's compile, which also
+                # dropped its .test.d, so consumer discovery finds nothing
+                # now: the C object was not actually exercised
+                note="${note}; C-NOCONSUMER"
             else
                 note="${note}; C-FAIL"
             fi

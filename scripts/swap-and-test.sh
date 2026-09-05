@@ -135,6 +135,10 @@ fi
 TESTS=("${EXPANDED[@]}")
 echo "[swap] affected tests: ${TESTS[*]}"
 
+# SWAP_ONLY=1: install the object and rebuild what derives from it, but do
+# not boot the guest (a batch driver restoring the C object between runs).
+[ -z "${SWAP_ONLY:-}" ] || { echo "[swap] SWAP_ONLY set — not running"; exit 0; }
+
 FILTER="$(IFS=,; echo "${TESTS[*]}")"
 # TEST_RUNNER selects the guest runner (default: UML). Any runner must
 # accept -t <comma-list> and honor TEST_PROGS/SELFTESTS_OUTPUT.

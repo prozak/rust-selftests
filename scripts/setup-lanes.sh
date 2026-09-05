@@ -31,6 +31,6 @@ for i in $(seq 1 "${N}"); do
         echo "[lane${i}] output: ${OUT}"
     fi
     # bpftool flavor dir expected by swap-and-test's derivation
-    ln -sfn bpftool-output-heimdall "${BUILD}/bpftool-output-qemu-lane${i}"
+    ln -sfn bpftool-output-qemu "${BUILD}/bpftool-output-qemu-lane${i}"
 done
 echo "lanes ready: ${N}"

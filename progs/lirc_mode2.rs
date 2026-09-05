@@ -20,19 +20,23 @@ extern "C" fn bpf_decoder(sample: *mut u32) -> i32 {
     let v = unsafe { core::ptr::read_volatile(sample) };
     if v & LIRC_MODE2_MASK == LIRC_MODE2_PULSE {
         let duration = v & LIRC_VALUE_MASK;
-        if duration & 0x1000 != 0 {
+        // Flag bits picked deliberately low: rc-loopback simulates a
+        // receiver overflow for any pulse over MS_TO_US(50) (see
+        // loop_tx_ir() in rc-loopback.c), which would silently swallow
+        // the sample before it ever reaches this decoder.
+        if duration & 0x8000 != 0 {
             bpf_rc_keydown(
                 sample as *const c_void,
                 0x40,
-                (duration & 0xffff) as u64,
+                (duration & 0x3fff) as u64,
                 0,
             );
         }
-        if duration & 0x2000 != 0 {
+        if duration & 0x4000 != 0 {
             bpf_rc_pointer_rel(
                 sample as *const c_void,
-                ((duration >> 8) & 0xff) as i32,
-                (duration & 0xff) as i32,
+                ((duration >> 7) & 0x7f) as i32,
+                (duration & 0x7f) as i32,
             );
         }
     }

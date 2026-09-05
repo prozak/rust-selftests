@@ -6,9 +6,10 @@ Rust translations of `tools/testing/selftests/bpf/progs/*.c`, compiled
 bpf-linker), and validated against the kernel's **unmodified** selftests
 harness: the real `prog_tests/*.c`, the real skeleton generation, the real
 `test_progs`, running in a guest kernel built from the pinned bpf-next tree
-(`kernel-pin`).
+(`kernel-commit`; `make status` and `make ci-local` refuse to run when the
+x86 worktree's merge-base with upstream is a different commit).
 
-Current corpus: 550 translated programs in `progs/`, each verified by
+Current corpus: 577 translated programs in `progs/`, each verified by
 running the kernel's own tests against it. This README is about **running
 those tests**; for how a translation is written see `TRANSLATING.md`.
 
@@ -28,7 +29,9 @@ kernel tree, the selftests output directory and the guest runner.
 ## Prerequisites for the QEMU flavor
 
 1. **x86_64 kernel worktree** at `../uml-harness/.build/bpf-next-x86` — a
-   `git worktree` of the pinned bpf-next tree, configured to boot under
+   `git worktree` of bpf-next at `kernel-commit` plus the seven
+   selftests/libbpf patches from `uml-harness/patches/bpf-selftests-uml`
+   (0004, 0005, 0005b, 0007, 0007b, 0009, 0011), configured to boot under
    virtme-ng (`CONFIG_KVM_GUEST`, `CONFIG_VIRTIO*`, `CONFIG_VIRTIO_FS`,
    `CONFIG_9P_FS`, `CONFIG_DEBUG_INFO_BTF`, `CONFIG_BPF_JIT`,
    `CONFIG_KPROBES`, `CONFIG_UPROBES`, `CONFIG_FUNCTION_TRACER`), built to
@@ -36,10 +39,13 @@ kernel tree, the selftests output directory and the guest runner.
 2. **virtme-ng** at `~/.local/share/vng-venv/bin/vng` (v1.41 here) and
    access to `/dev/kvm` (be in the `kvm` group).
 3. **QEMU selftests output** — build it once with
-   `scripts/build-qemu-selftests.sh`. It builds `modules` in the x86 tree
-   and then the selftests into `../uml-harness/.build/selftests-output-qemu`
-   with the harness-built pahole 1.31 on `PATH`, in keep-going mode
-   (a partial `test_progs` is expected and fine).
+   `scripts/build-qemu-selftests.sh`. It builds `bpftool` from the x86
+   tree into `../uml-harness/.build/bpftool-output-qemu`, `modules` in the
+   x86 tree, and then the selftests into
+   `../uml-harness/.build/selftests-output-qemu` with the harness-built
+   pahole 1.31 on `PATH`, in keep-going mode (a partial `test_progs` is
+   expected and fine). After a pin bump: move the old output aside,
+   `REBUILD_BPFTOOL=1`, and re-run `scripts/setup-lanes.sh`.
 4. **Toolchain for building the Rust objects**: a built
    [4ast/rust-bpf](../rust-bpf) checkout (`bld_deps/` rlibs,
    `bld/bpf-postproc`, `bld/libbtf_macros.so`), LLVM >= 22 at
@@ -211,9 +217,10 @@ Then re-run the affected programs (results for them must be removed from
 | `qemu/results-postmerge.md` | 24 programs re-verified on a freshly built output dir after the helper-crate merge |
 | `qemu/results-pre-elffix.md` | historical, before the BTF/ELF append fix |
 | `sweep/lane-results/lane*.md` | the 4-lane translation sweep: 484 PASS / 117 FAIL of 608 candidates, each verdict from a QEMU test run in its lane |
+| `qemu/gate/results.md` | the whole corpus re-run in one pass on bpf-next 3ccdb078 (`scripts/qemu-gate.sh`, 2026-09-05): 547 PASS / 22 FAIL / 8 NO-ORACLE, FAILs classified in commit 2757f2b |
 | `sweep/results.md`, `docs/` | earlier sample sweep and the failure taxonomy |
 
 Every program in `progs/` has passed the kernel's tests in the QEMU guest
-at the time it was added; the corpus has not been re-run end to end in a
-single pass since the sweep — `scripts/qemu-verify.sh` with a fresh
-`qemu/results.md` is exactly that run.
+at the time it was added; `scripts/qemu-gate.sh` re-runs the whole corpus
+in one pass over the four lane outputs (`qemu/gate/`), which is how a
+kernel bump is re-validated.

@@ -45,6 +45,14 @@ VMLINUX_BTF ?= $(KERNEL_SRC)/linux
 endif
 SELFTESTS_SRC := $(KERNEL_SRC)/tools/testing/selftests/bpf
 
+# The bpf-next commit the QEMU flavor kernel is built from. kernel-commit
+# is this repo's own pin (the harness pin file belongs to bpf-uml-selftests
+# and stays on the UML stack's base); the x86 worktree is that commit plus
+# the harness selftests/libbpf patches, so its merge-base with upstream
+# must be exactly the pin. Bumping either side alone fails status/ci-local.
+KERNEL_X86 := $(abspath $(CURDIR)/../uml-harness/.build/bpf-next-x86)
+KERNEL_COMMIT := $(shell cat $(CURDIR)/kernel-commit)
+
 # kfunc extern protos are mirrored from kernel BTF by add_ksyms.py
 # (vmlinux first = base BTF, then the test kmods' split BTFs).
 BPFTOOL_BIN := $(dir $(SELFTESTS_OUTPUT))bpftool-output-$(patsubst selftests-output-%,%,$(notdir $(SELFTESTS_OUTPUT)))/bpftool
@@ -181,8 +189,15 @@ restore-%:
 echo-kernel-src:
 	@echo $(KERNEL_SRC)
 
-status:
-	@total=$$(ls $(SELFTESTS_SRC)/progs/*.c | wc -l); \
+check-kernel-commit:
+	@have=$$(git -C $(KERNEL_X86) merge-base HEAD origin/master 2>/dev/null); \
+	[ "$$have" = "$(KERNEL_COMMIT)" ] || { \
+	  echo "kernel-commit: $(KERNEL_X86) is based on $${have:-<unknown>}," \
+	       "not the pinned $(KERNEL_COMMIT)" >&2; exit 1; }
+
+status: check-kernel-commit
+	@echo "kernel: bpf-next $(KERNEL_COMMIT) (+ harness patches)"; \
+	total=$$(ls $(SELFTESTS_SRC)/progs/*.c | wc -l); \
 	done=$$(ls progs/*.rs 2>/dev/null | wc -l); \
 	echo "translated $$done of $$total kernel selftests BPF programs:"; \
 	for p in $(PROGS); do echo "  $$p"; done
@@ -194,7 +209,7 @@ clean:
            $(BLDDIR)/%-opt.bc $(BLDDIR)/%-ksyms.bc $(BLDDIR)/%.keep \
            $(SELFTESTS_OUTPUT)/%.bpf.o.corig
 
-.PHONY: all verify status clean
+.PHONY: all verify status check-kernel-commit clean
 
 # --- equivalence regression guard + translation linter ---
 PYZ3 ?= $(abspath $(CURDIR)/../z3-venv/bin/python)
@@ -232,7 +247,7 @@ semantics:
 # ci-local: everything that needs the pinned kernel tree and built objects.
 # Order matters — undo any swapped-in objects BEFORE proving, or the
 # comparison is Rust-vs-Rust.
-ci-local: restore-all ci-fast
+ci-local: restore-all ci-fast check-kernel-commit
 	python3 scripts/translint.py
 	$(PYZ3) equiv/guard.py
 

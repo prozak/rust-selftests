@@ -650,6 +650,30 @@ would not be distinguished.
   — which is why `scripts/boolsites.py` now exists to read the compiled
   answer off the C object rather than guessing it.
 
+- bpf-next bump 520d7d7 -> 3ccdb078 (2026-09-05; kernel, selftests
+  output, bpftool and all 577 Rust objects rebuilt, `kernel-commit`
+  introduced): **400 EQUIV / 113 BAIL / 35 TIMEOUT / 16 UNKNOWN /
+  13 NOPROGS, zero INEQUIV** (`results/sweep-2026-09-05-577.tsv`),
+  against 405 / 112 / 35 / 12 / 13 on 2026-08-20. 572 objects reproduce
+  their verdict exactly; the five that move are explained by upstream,
+  not by the prover: four EQUIV -> UNKNOWN where the C object gained
+  programs the translation lacks (UNPAIRED: fib_lookup, rcu_read_lock,
+  tracing_failure, xdp_dummy), and test_tc_tunnel EQUIV -> BAIL because
+  the rewritten `decap_internal` now does `bpf_core_cast(kskb->head +
+  kskb->end, struct skb_shared_info)` -- a type-id CO-RE relocation plus
+  `bpf_rdonly_cast` the C object carries and the Rust pipeline cannot
+  emit. (`guard.py --all`, with its 180 s wall instead of the sweep's
+  120 s, additionally turns bpf_loop's and test_l4lb_noinline's TIMEOUT
+  into the BAIL / UNKNOWN they reach given the time; unchanged code.)
+  547 of the 577 C objects are byte-identical in
+  code to the old pin's; the other 30 are the eight source-modified
+  objects plus the pyperf/profiler family and a handful of small
+  vmlinux.h-driven diffs, all of which still prove. lirc_mode2 (the
+  renamed test_lirc_mode2_kern, with its flag bits followed) proves
+  EQUIV. Not visible to the prover but caught by the QEMU gate:
+  mptcp_subflow and netif_receive_skb hard-coded kernel BTF type ids
+  from the old vmlinux (both BAIL here) and fail to load/run now.
+
 Results tables: `results/`. Remaining bail classes after tier 11:
 kfunc tail ×46 (dominated by POINTER RETURNS — dynptr slices); pointer
 provenance ×37 (spill tail, pointer-as-data, cross-region compares);

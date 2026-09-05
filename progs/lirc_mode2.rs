@@ -2,7 +2,7 @@
 #![no_main]
 
 // Direct translation of
-// tools/testing/selftests/bpf/progs/test_lirc_mode2_kern.c (bpf-rs-core
+// tools/testing/selftests/bpf/progs/lirc_mode2.c (bpf-rs-core
 // idiom). An IR decoder: the ctx is a pointer to one lirc mode2 sample.
 
 use bpf_rs_core::bpf_object;

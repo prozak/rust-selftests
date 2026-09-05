@@ -1,0 +1,147 @@
+| program | verdict | wall | notes |
+|---|---|---|---|
+| access_map_in_map | PASS | 26s | Summary: 3/20 PASSED, 0 SKIPPED, 0/0 FAILED |
+| arena_list | PASS | 16s | Summary: 1/0 PASSED, 4 SKIPPED, 0/0 FAILED |
+| atomics | PASS | 18s | Summary: 2/17 PASSED, 0 SKIPPED, 0/0 FAILED |
+| bind6_prog | PASS | 18s | Summary: 2/152 PASSED, 0 SKIPPED, 0/0 FAILED |
+| bpf_cubic | PASS | 32s | Summary: 3/17 PASSED, 0 SKIPPED, 0/0 FAILED |
+| bpf_iter_bpf_array_map | PASS | 40s | Summary: 5/44 PASSED, 0 SKIPPED, 0/0 FAILED |
+| bpf_iter_bpf_percpu_array_map | PASS | 32s | Summary: 4/39 PASSED, 0 SKIPPED, 0/0 FAILED |
+| bpf_iter_bpf_sk_storage_map | PASS | 25s | Summary: 4/39 PASSED, 0 SKIPPED, 0/0 FAILED |
+| bpf_iter_netlink | PASS | 22s | Summary: 4/39 PASSED, 0 SKIPPED, 0/0 FAILED |
+| bpf_iter_task_btf | PASS | 23s | Summary: 4/38 PASSED, 1 SKIPPED, 0/0 FAILED |
+| bpf_iter_tasks | PASS | 24s | Summary: 4/39 PASSED, 0 SKIPPED, 0/0 FAILED |
+| bpf_iter_test_kern2 | PASS | 23s | Summary: 4/39 PASSED, 0 SKIPPED, 0/0 FAILED |
+| bpf_iter_test_kern6 | PASS | 30s | Summary: 4/39 PASSED, 0 SKIPPED, 0/0 FAILED |
+| bpf_iter_vma_offset | PASS | 28s | Summary: 4/39 PASSED, 0 SKIPPED, 0/0 FAILED |
+| bpf_qdisc_fail__incompl_ops | PASS | 29s | Summary: 2/10 PASSED, 0 SKIPPED, 0/0 FAILED |
+| bprm_opts | PASS | 27s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| btf_type_tag_percpu | PASS | 26s | Summary: 1/2 PASSED, 7 SKIPPED, 0/0 FAILED |
+| cg_storage_multi_shared | PASS | 17s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
+| cgroup_getset_retval_setsockopt | PASS | 21s | Summary: 1/11 PASSED, 0 SKIPPED, 0/0 FAILED |
+| cgroup_mprog | PASS | 15s | Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED |
+| cgroup_storage | PASS | 20s | Summary: 3/28 PASSED, 0 SKIPPED, 0/0 FAILED |
+| cgrp_ls_negative | PASS | 28s | Summary: 1/13 PASSED, 0 SKIPPED, 0/0 FAILED |
+| clone_attach_btf_id | PASS | 26s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| connect_force_port6 | PASS | 21s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| csum_diff_test | PASS | 20s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
+| dummy_st_ops_success | PASS | 23s | Summary: 2/20 PASSED, 0 SKIPPED, 0/0 FAILED |
+| exhandler_kern | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| fentry_recursive_target | PASS | 23s | Summary: 3/3 PASSED, 0 SKIPPED, 0/0 FAILED |
+| fexit_many_args | PASS | 26s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
+| file_reader | PASS | 27s | Summary: 1/8 PASSED, 0 SKIPPED, 0/0 FAILED |
+| for_each_array_map_elem | PASS | 30s | Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED |
+| for_each_multi_maps | PASS | 15s | Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED |
+| freplace_connect_v4_prog | PASS | 15s | Summary: 1/16 PASSED, 0 SKIPPED, 0/0 FAILED |
+| freplace_int_with_void | PASS | 12s | Summary: 1/16 PASSED, 0 SKIPPED, 0/0 FAILED |
+| fsession_test | PASS | 19s | Summary: 3/3 PASSED, 0 SKIPPED, 0/0 FAILED |
+| get_func_args_test | PASS | 16s | Summary: 2/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| getpeername4_prog | PASS | 21s | Summary: 2/152 PASSED, 0 SKIPPED, 0/0 FAILED |
+| getsockname6_prog | PASS | 22s | Summary: 2/152 PASSED, 0 SKIPPED, 0/0 FAILED |
+| icmp_send | PASS | 16s | Summary: 2/4 PASSED, 0 SKIPPED, 0/0 FAILED |
+| iters_css_task | PASS | 21s | Summary: 3/109 PASSED, 0 SKIPPED, 0/0 FAILED |
+| kfree_skb | PASS | 17s | Summary: 2/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| kfunc_call_test | FAIL | 9s | ; C-PASS |
+| kprobe_multi_empty | PASS | 51s | Summary: 3/23 PASSED, 0 SKIPPED, 0/0 FAILED |
+| kprobe_multi_sleepable | FAIL | 6s | ; C-PASS |
+| livepatch_trampoline | PASS | 18s | Summary: 1/0 PASSED, 1 SKIPPED, 0/0 FAILED |
+| loop2 | PASS | 23s | Summary: 27/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| loop6 | PASS | 18s | Summary: 27/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| lsm | PASS | 19s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
+| lwt_misc | PASS | 15s | Summary: 1/1 PASSED, 0 SKIPPED, 0/0 FAILED |
+| missed_kprobe | PASS | 19s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
+| modify_return | PASS | 17s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| mptcpify | PASS | 18s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
+| netcnt_prog | PASS | 16s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| prepare | PASS | 14s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
+| pro_epilogue | PASS | 17s | Summary: 1/18 PASSED, 0 SKIPPED, 0/0 FAILED |
+| profiler2 | PASS | 25s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| pyperf50 | PASS | 25s | Summary: 27/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| pyperf600_nounroll | PASS | 18s | Summary: 27/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| rbtree_btf_fail__add_wrong_type | PASS | 19s | Summary: 5/30 PASSED, 0 SKIPPED, 0/0 FAILED |
+| read_cgroupfs_xattr | PASS | 27s | Summary: 1/8 PASSED, 0 SKIPPED, 0/0 FAILED |
+| recvmsg_unix_prog | PASS | 30s | Summary: 2/152 PASSED, 0 SKIPPED, 0/0 FAILED |
+| sendmsg4_prog | PASS | 31s | Summary: 2/152 PASSED, 0 SKIPPED, 0/0 FAILED |
+| sk_storage_omem_uncharge | PASS | 14s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| sock_destroy_prog | PASS | 19s | Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED |
+| sockmap_parse_prog | NO-ORACLE | 2s |  |
+| sockopt_qos_to_cc | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| stacktrace_map | PASS | 28s | Summary: 3/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| string_kfuncs_failure2 | PASS | 30s | Summary: 1/138 PASSED, 0 SKIPPED, 0/0 FAILED |
+| strobemeta_nounroll1 | PASS | 34s | Summary: 27/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| struct_ops_assoc_reuse | PASS | 27s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
+| struct_ops_id_ops_mapping1 | PASS | 15s | Summary: 1/1 PASSED, 0 SKIPPED, 0/0 FAILED |
+| struct_ops_module | PASS | 16s | Summary: 1/7 PASSED, 0 SKIPPED, 0/0 FAILED |
+| struct_ops_private_stack_fail | PASS | 15s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
+| syscall | PASS | 30s | Summary: 5/15 PASSED, 1 SKIPPED, 0/0 FAILED |
+| tailcall4 | PASS | 21s | Summary: 1/40 PASSED, 0 SKIPPED, 0/0 FAILED |
+| tailcall_bpf2bpf2 | PASS | 29s | Summary: 1/40 PASSED, 0 SKIPPED, 0/0 FAILED |
+| tailcall_bpf2bpf_fentry | PASS | 21s | Summary: 1/40 PASSED, 0 SKIPPED, 0/0 FAILED |
+| tailcall_bpf2bpf_hierarchy3 | PASS | 16s | Summary: 1/40 PASSED, 0 SKIPPED, 0/0 FAILED |
+| tailcall_cgrp_storage_owner | PASS | 20s | Summary: 1/40 PASSED, 0 SKIPPED, 0/0 FAILED |
+| task_local_storage | PASS | 18s | Summary: 1/15 PASSED, 0 SKIPPED, 0/0 FAILED |
+| tc_bpf2bpf | PASS | 16s | Summary: 1/40 PASSED, 0 SKIPPED, 0/0 FAILED |
+| tcp_ca_unsupp_cong_op | PASS | 20s | Summary: 1/17 PASSED, 0 SKIPPED, 0/0 FAILED |
+| tcp_rtt | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_attach_probe_manual | PASS | 21s | Summary: 1/20 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_bpf_ma | PASS | 17s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_btf_map_in_map | PASS | 15s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_build_id | PASS | 26s | Summary: 3/3 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_cls_redirect | PASS | 21s | Summary: 1/45 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_core_read_macros | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_core_reloc_kernel | PASS | 38s | Summary: 3/145 PASSED, 14 SKIPPED, 0/0 FAILED |
+| test_core_reloc_nesting | PASS | 39s | Summary: 3/145 PASSED, 14 SKIPPED, 0/0 FAILED |
+| test_ctx | PASS | 27s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_deny_namespace | PASS | 24s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_get_stack_rawtp | PASS | 12s | Summary: 2/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_global_func16 | PASS | 22s | Summary: 1/29 PASSED, 1 SKIPPED, 0/0 FAILED |
+| test_global_func8 | PASS | 14s | Summary: 1/29 PASSED, 1 SKIPPED, 0/0 FAILED |
+| test_global_map_resize | PASS | 16s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_ksyms | FAIL | 3s | ; C-NOCONSUMER |
+| test_l4lb_noinline_dynptr | PASS | 11s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_link_pinning | PASS | 14s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_lwt_ip_encap | PASS | 177s | Summary: 6/8 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_map_in_map_invalid | NO-ORACLE | 1s |  |
+| test_map_ops | PASS | 14s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_module_attach | PASS | 15s | Summary: 1/14 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_overhead | PASS | 12s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_perf_branches | PASS | 14s | Summary: 1/1 PASSED, 1 SKIPPED, 0/0 FAILED |
+| test_pinning | PASS | 11s | Summary: 5/8 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_pkt_access | PASS | 18s | Summary: 6/148 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_ptr_untrusted | FAIL | 2s | ; C-PASS |
+| test_ringbuf | PASS | 16s | Summary: 4/33 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_sig_in_xattr | PASS | 18s | Summary: 1/1 PASSED, 1 SKIPPED, 0/0 FAILED |
+| test_signed_loader_map | PASS | 27s | Summary: 1/30 PASSED, 2 SKIPPED, 0/0 FAILED |
+| test_sk_lookup_kern | PASS | 11s | Summary: 1/9 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_skmsg_load_helpers | PASS | 23s | Summary: 3/55 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_sockmap_change_tail | PASS | 14s | Summary: 1/35 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_sockmap_msg_pop_data | PASS | 15s | Summary: 1/35 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_sockmap_skb_verdict_attach | PASS | 14s | Summary: 1/35 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_stack_map | PASS | 11s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_static_linked2 | NO-ORACLE | 0s |  |
+| test_subskeleton_lib2 | NO-ORACLE | 0s |  |
+| test_task_local_data | PASS | 17s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_tc_change_tail | PASS | 14s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_tc_neigh | PASS | 59s | Summary: 1/8 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_tcp_custom_syncookie | PASS | 14s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_time_tai | PASS | 13s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_trampoline_count | PASS | 13s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_uprobe_autoattach | PASS | 14s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_verif_scale3 | PASS | 16s | Summary: 27/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_xdp | PASS | 126s | Summary: 32/156 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_xdp_bpf2bpf | PASS | 14s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_xdp_do_redirect | PASS | 21s | Summary: 2/3 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_xdp_meta | PASS | 29s | Summary: 4/21 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_xdp_vlan | PASS | 33s | Summary: 2/6 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_xdp_with_devmap_helpers | PASS | 15s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
+| timer_lockup | PASS | 13s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| token_kallsyms | PASS | 14s | Summary: 1/13 PASSED, 0 SKIPPED, 0/0 FAILED |
+| tracing_failure | FAIL | 13s | Summary: 0/4 PASSED, 0 SKIPPED, 1/1 FAILED; C-PASS |
+| tracing_struct | FAIL | 14s | Summary: 0/3 PASSED, 0 SKIPPED, 1/1 FAILED; C-FAIL |
+| update_map_in_htab | PASS | 14s | Summary: 3/20 PASSED, 0 SKIPPED, 0/0 FAILED |
+| uprobe_multi_session | PASS | 49s | Summary: 1/19 PASSED, 0 SKIPPED, 0/0 FAILED |
+| uprobe_multi_usdt | FAIL | 31s | Summary: 0/18 PASSED, 0 SKIPPED, 1/1 FAILED; C-PASS |
+| verifier_mtu | PASS | 35s | Summary: 129/2513 PASSED, 26 SKIPPED, 0/0 FAILED |
+| xdp_flowtable | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| xdp_redirect_multi_kern | PASS | 65s | Summary: 4/24 PASSED, 0 SKIPPED, 0/0 FAILED |
+| xsk_xdp_progs | PASS | 37s | Summary: 8/61 PASSED, 0 SKIPPED, 0/0 FAILED |

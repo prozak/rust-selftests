@@ -21,7 +21,7 @@ import re
 DEFAULT_HEADER = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__)))),
-    "uml-harness", ".build", "bpf-next", "include", "uapi", "linux", "bpf.h")
+    "uml-harness", ".build", "bpf-next-x86", "include", "uapi", "linux", "bpf.h")
 
 # scalar C spellings -> byte width
 _SCALARS = {

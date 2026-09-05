@@ -84,6 +84,27 @@ def _lint(source):
         os.unlink(path)
 
 
+def test_program_names_are_the_secd_global_funcs():
+    """A SEC()'d entry point is a GLOBAL FUNC outside .text; global
+    subprograms (in .text), static functions, kfunc externs (UND) and data
+    symbols are not programs."""
+    sys.path.insert(0, os.path.join(REPO, "scripts"))
+    import translint
+    from testkit import FakeElf, Section, Symbol, SHF_ALLOC, SHF_EXECINSTR
+    elf = FakeElf(b"\x95\x00\x00\x00\x00\x00\x00\x00", kfuncs=["bpf_kf"])
+    text_idx = len(elf.sections)
+    elf.sections.append(Section(text_idx, ".text", 1,
+                                SHF_ALLOC | SHF_EXECINSTR, 0, 8, 0, 0, 0,
+                                b"\x95" + b"\0" * 7))
+    n = len(elf.symbols)
+    elf.symbols += [
+        Symbol(n, "global_subprog", 0, 8, 1, 2, text_idx),      # .text
+        Symbol(n + 1, "static_helper", 8, 8, 0, 2, 1),          # LOCAL
+        Symbol(n + 2, "second_prog", 8, 8, 1, 2, 1),            # SEC'd
+    ]
+    assert translint.program_names(elf) == {"prog", "second_prog"}
+
+
 def test_lint_flags_branched_bool_global():
     out = _lint("static mut flag: bool = false;\n"
                 "fn f() -> i32 { if unsafe { flag } { 1 } else { 0 } }\n")

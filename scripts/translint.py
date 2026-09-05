@@ -6,6 +6,13 @@ any ERROR.
 
 Classes checked (suppress per file with `// translint: allow(<class>)`):
 
+  program-set    [ERROR] the compiled objects must define the same set of
+                 programs (GLOBAL FUNC symbols outside .text, i.e. every
+                 SEC()'d entry point). A program the C object has and the
+                 translation lacks is missing from the skeleton, so the
+                 prog_test does not even compile; an extra one changes what
+                 the loader loads. Global subprograms in .text are not
+                 compared (the translation may inline them).
   test-tags      [ERROR] the C object's test_loader decl tags (__failure /
                  __msg / ...) must be mirrored by a test_tags! declaration,
                  which scripts/btf_test_tags.py appends to the built object.
@@ -164,6 +171,42 @@ def normalize_msg(s):
     return s
 
 
+def program_names(elf):
+    """Names of the SEC()'d programs in a parsed object: GLOBAL FUNC symbols
+    defined outside .text (where global subprograms live)."""
+    text_idx = next((s.idx for s in elf.sections if s.name == ".text"), -1)
+    return {s.name for s in elf.symbols
+            if s.type == 2 and s.bind == 1 and s.shndx not in (0, text_idx)
+            and s.shndx < len(elf.sections)}
+
+
+def program_set(obj_path):
+    """program_names() of a compiled object; None when it can't be read."""
+    if not os.path.exists(obj_path):
+        return None
+    try:
+        return program_names(BpfElf(obj_path))
+    except Exception:
+        return None
+
+
+def check_program_set(name):
+    c_obj = os.path.join(C_OBJ_DIR, f"{name}.bpf.o")
+    if os.path.exists(c_obj + ".corig"):
+        c_obj = c_obj + ".corig"
+    want = program_set(c_obj)
+    got = program_set(os.path.join(REPO, "bld", f"{name}.bpf.o"))
+    if want is None or got is None:
+        return
+    missing, extra = sorted(want - got), sorted(got - want)
+    if missing:
+        yield ("ERROR", f"C object defines program(s) the translation "
+                        f"lacks: {', '.join(missing)}")
+    if extra:
+        yield ("ERROR", f"translation defines program(s) the C object "
+                        f"does not: {', '.join(extra)}")
+
+
 def check_test_tags(name, rs_raw):
     """The C object's decl tags are the ground truth for what the loader must
     assert. Yield (level, text) for any divergence."""
@@ -243,6 +286,8 @@ def lint(name):
         if cls not in allowed:
             msgs.append((level, cls, text))
 
+    for level, text in check_program_set(name):
+        emit(level, "program-set", text)
     for level, text in check_test_tags(name, rs_raw):
         emit(level, "test-tags", text)
 

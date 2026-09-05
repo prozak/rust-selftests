@@ -88,6 +88,8 @@ VALUED = {
     "__retval_unpriv": "test_retval_unpriv",
     "__arch": "test_arch",
     "__caps_unpriv": "test_caps_unpriv",
+    # bpf-next 2026-08: the loader skips the program, printing the reason
+    "__skip": "test_skip",
 }
 
 

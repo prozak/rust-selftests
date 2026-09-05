@@ -54,6 +54,20 @@ test_tags! {
                "test_expect_msg=y"])]
 
 
+def test_skip_and_arch_gates_pass_through(tmp_path):
+    # __skip(reason) landed in bpf_misc.h after the 520d7d7 pin; the
+    # __arch_* gates predate it. Both are plain payloads for the loader.
+    src = write(tmp_path, '''
+test_tags! {
+    a: __arch_x86_64, __success, __retval(0);
+    b: __skip("needs a KASAN kernel");
+}
+''')
+    assert T.parse_source(src) == [
+        ("a", ["test_arch=X86_64", "test_expect_success", "test_retval=0"]),
+        ("b", ["test_skip=needs a KASAN kernel"])]
+
+
 def test_no_declaration_is_not_an_error(tmp_path):
     assert T.parse_source(write(tmp_path, "fn main() {}\n")) == []
 

@@ -239,9 +239,9 @@ a register, keeps dead-arg-elim from dropping a function argument).
 
 ```sh
 make                     # bld/<name>.bpf.o  (compile gate)
-make verify              # kernel verifier gate (UML); skips __failure objects
+FLAVOR=uml make verify   # kernel verifier gate (UML flavor only); skips __failure objects
 make test-<name>         # swap in + kernel-Makefile skeleton regen +
-                         # affected test_progs tests in UML (oracle gate)
+                         # affected test_progs tests in the QEMU guest (oracle gate)
 make restore-<name>      # reinstate the clang-built object
 ```
 

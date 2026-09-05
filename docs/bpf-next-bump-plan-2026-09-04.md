@@ -179,7 +179,9 @@ merge window, or sooner when a translated object's C source changes.
 
 ## Open questions for the bump commit
 
-- Whether to keep the UML flavor at all while its pin diverges from the
-  QEMU flavor. The Makefile still defaults `FLAVOR` to uml.
+- ~~Whether to keep the UML flavor at all while its pin diverges from the
+  QEMU flavor. The Makefile still defaults `FLAVOR` to uml.~~ Decided
+  2026-09-05: the UML branch is parked, kept only as an explicit
+  `FLAVOR=uml` opt-in; QEMU is the default everywhere.
 - Whether `selftests-output-qemu.drifted` in the harness build dir is
   still needed; it looks like an earlier drift experiment.

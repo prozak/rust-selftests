@@ -19,12 +19,13 @@ those tests**; for how a translation is written see `TRANSLATING.md`.
 
 | FLAVOR | guest | notes |
 |---|---|---|
-| `qemu` | x86_64 bpf-next + virtme-ng/KVM | **the default choice for running tests** — ~10x faster, real kprobes/uprobes/stack unwinding, test kmods |
-| `uml` | UML bpf-next (`uml-harness`) | Makefile default; no KVM needed, but a patched kernel with a reduced feature set |
+| `qemu` | x86_64 bpf-next at `kernel-commit` + virtme-ng/KVM | **the default** — ~10x faster, real kprobes/uprobes/stack unwinding, test kmods |
+| `uml` | UML bpf-next (`uml-harness`) | parked: an older pin with a patched kernel and a reduced feature set; used only when asked for with `FLAVOR=uml` |
 
-Everything below assumes `FLAVOR=qemu`. The two flavors share
-`scripts/swap-and-test.sh` and the Makefile — the flavor only switches the
-kernel tree, the selftests output directory and the guest runner.
+Everything below is the QEMU flavor; nothing needs `FLAVOR=` unless UML is
+wanted explicitly. The two flavors share `scripts/swap-and-test.sh` and the
+Makefile — the flavor only switches the kernel tree, the selftests output
+directory and the guest runner.
 
 ## Prerequisites for the QEMU flavor
 
@@ -65,7 +66,7 @@ scripts/qemu-verify.sh                      # every progs/*.rs
 scripts/qemu-verify.sh fentry_test atomics  # just these
 ```
 
-`qemu-verify.sh` sets the QEMU flavor itself (no `FLAVOR=` needed) and for
+`qemu-verify.sh` pins the QEMU flavor's paths itself and for
 each program runs, serially:
 
 - `make test-<name>` — build `bld/<name>.bpf.o`, install it over
@@ -146,7 +147,7 @@ the environment):
 
 ```sh
 cd ../rust-selftests-lane1
-FLAVOR=qemu QEMU_CPUS=4 \
+QEMU_CPUS=4 \
   SELFTESTS_OUTPUT=../uml-harness/.build/selftests-output-qemu-lane1 \
   make test-<name> && make restore-<name>
 ```
@@ -160,8 +161,8 @@ script translates rather than verifies.)
 ## Running a single test
 
 ```sh
-FLAVOR=qemu make test-<name>      # swap Rust object in, run affected tests
-FLAVOR=qemu make restore-<name>   # reinstall pristine C object, run them again
+make test-<name>      # swap Rust object in, run affected tests
+make restore-<name>   # reinstall pristine C object, run them again
 ```
 
 `make test-<name>` reuses the harness verbatim by construction: the Rust
@@ -185,14 +186,14 @@ always-broken test cannot fail an otherwise-correct translation.
 ## Building objects without running tests
 
 ```sh
-FLAVOR=qemu make            # build bld/<name>.bpf.o for every progs/*.rs
-FLAVOR=qemu make status     # translation coverage vs the kernel progs/
-make clean                  # drop bld/
+make            # build bld/<name>.bpf.o for every progs/*.rs
+make status     # translation coverage vs the kernel progs/
+make clean      # drop bld/
 ```
 
-`make verify` (the standalone verifier gate) runs `uml-veristat` and is
-**UML-only** — it ignores `FLAVOR`. Under the QEMU flavor the acceptance
-gate is `test-<name>` itself.
+`make verify` (the standalone verifier gate) runs `uml-veristat` and only
+works under `FLAVOR=uml`; it refuses to run otherwise. Under the QEMU
+flavor the acceptance gate is `test-<name>` itself.
 
 ## When the output dir drifts
 

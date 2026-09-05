@@ -5,23 +5,35 @@
 # object (<name>.bpf.o.corig) as <name>.bpf.o in the selftests output, then
 # drive the KERNEL'S OWN selftests Makefile to regenerate every skeleton and
 # test object derived from it, relink test_progs, and run the affected tests
-# inside the UML guest. The prog_tests harness is reused verbatim.
+# inside the guest (TEST_RUNNER: QEMU by default). The prog_tests harness
+# is reused verbatim.
 #
 # The set of affected tests is discovered from the generated *.test.d
 # dependency files (which record skeleton-header inclusion), so prog-name /
 # test-name mismatches are handled without any hardcoded mapping.
 #
 # Expects env (exported by the Makefile): KERNEL_SRC SELFTESTS_SRC
-# SELFTESTS_OUTPUT LLVM_PREFIX UML_HARNESS UML_INSTALL_DIR
+# SELFTESTS_OUTPUT LLVM_PREFIX TEST_RUNNER; FLAVOR=uml adds UML_HARNESS and
+# UML_INSTALL_DIR.
 
 set -euo pipefail
 
 NAME="$1"
 WHICH="${2:-rust}"
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 : "${KERNEL_SRC:?}" "${SELFTESTS_SRC:?}" "${SELFTESTS_OUTPUT:?}"
-: "${LLVM_PREFIX:?}" "${UML_HARNESS:?}" "${UML_INSTALL_DIR:?}"
+: "${LLVM_PREFIX:?}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+FLAVOR="${FLAVOR:-qemu}"
+if [ "${FLAVOR}" = uml ]; then
+    : "${UML_HARNESS:?}" "${UML_INSTALL_DIR:?}"
+    TEST_RUNNER="${TEST_RUNNER:-${UML_HARNESS}/uml-test-progs}"
+    # the UML kernel's pt_regs layout, for any BPF C the harness rebuilds
+    FLAVOR_BPF_CFLAGS="EXTRA_BPF_CFLAGS=-D__UML_PT_REGS__"
+else
+    TEST_RUNNER="${TEST_RUNNER:-${HERE}/scripts/qemu-test-progs}"
+    FLAVOR_BPF_CFLAGS=
+fi
 
 OUT="${SELFTESTS_OUTPUT}"
 ORIG="${OUT}/${NAME}.bpf.o.corig"
@@ -39,7 +51,8 @@ esac
 cp "${SRC}" "${OUT}/${NAME}.bpf.o"
 echo "[swap] installed $(basename "${SRC}") as ${NAME}.bpf.o (${WHICH})"
 
-# The selftests make invocation, mirroring bpf-uml-selftests build.sh.
+# The selftests make invocation, mirroring build-qemu-selftests.sh (and
+# bpf-uml-selftests build.sh under FLAVOR=uml).
 # NOTE: TRUNNER target names contain a double slash (OUTPUT has a trailing
 # slash and the Makefile concatenates another) — goals must match exactly,
 # otherwise make falls back to builtin rules or reports "No rule".
@@ -52,7 +65,7 @@ sfmake() {
         BPFTOOL="$(dirname "${OUT}")/bpftool-output-$(basename "${OUT}" | sed 's/^selftests-output-//')/bpftool" \
         VMLINUX_BTF="${VMLINUX_BTF:-${KERNEL_SRC}/linux}" \
         ARCH=x86_64 TEST_KMODS= SKIP_LLVM=1 \
-        EXTRA_BPF_CFLAGS=-D__UML_PT_REGS__ BPF_STRICT_BUILD=0 \
+        ${FLAVOR_BPF_CFLAGS} BPF_STRICT_BUILD=0 \
         -j"$(nproc)" -k "$@"
 }
 
@@ -140,9 +153,9 @@ echo "[swap] affected tests: ${TESTS[*]}"
 [ -z "${SWAP_ONLY:-}" ] || { echo "[swap] SWAP_ONLY set — not running"; exit 0; }
 
 FILTER="$(IFS=,; echo "${TESTS[*]}")"
-# TEST_RUNNER selects the guest runner (default: UML). Any runner must
-# accept -t <comma-list> and honor TEST_PROGS/SELFTESTS_OUTPUT.
+# TEST_RUNNER selects the guest runner. Any runner must accept
+# -t <comma-list> and honor TEST_PROGS/SELFTESTS_OUTPUT.
 TEST_PROGS="${OUT}/test_progs" \
 SELFTESTS_OUTPUT="${OUT}" \
-UML_INSTALL_DIR="${UML_INSTALL_DIR}" \
-    "${TEST_RUNNER:-${UML_HARNESS}/uml-test-progs}" -t "${FILTER}"
+UML_INSTALL_DIR="${UML_INSTALL_DIR:-}" \
+    "${TEST_RUNNER}" -t "${FILTER}"

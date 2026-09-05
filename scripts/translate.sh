@@ -9,7 +9,7 @@
 #   1. compile         make bld/<name>.bpf.o
 #   2. kernel verifier / oracle   make test-<name>  (swap into selftests
 #      output, kernel-Makefile skeleton regen, affected test_progs tests
-#      run verbatim in UML — failures at load time are verifier failures,
+#      run verbatim in the guest — failures at load time are verifier failures,
 #      failures at run time are behavioral divergence)
 #
 # The agent is allowed and expected to run the same gates itself and

@@ -13,10 +13,11 @@
 #
 # Main targets:
 #   make [all]           build bld/<name>.bpf.o for every progs/*.rs
-#   make verify          run all built objects through the kernel verifier (UML)
+#   make verify          run all built objects through the kernel verifier
+#                        (UML flavor only)
 #   make test-<name>     swap Rust object into the selftests output, regenerate
 #                        skeletons + test_progs via the kernel Makefile, run the
-#                        affected test(s) in UML
+#                        affected test(s) in the guest
 #   make restore-<name>  put the original C object back and rebuild harness
 #   make status          translation coverage vs the kernel progs/ directory
 #
@@ -26,23 +27,31 @@
 #                     test_progs, generated skeletons)
 #   RUSTBPF           4ast/rust-bpf checkout with built bld_deps/ and tools
 #   LLVM_PREFIX       LLVM >= 22 install (llc/opt/llvm-link/llvm-readelf...)
-#   UML_HARNESS       bpf-uml-selftests checkout (uml-veristat/uml-test-progs)
-#   UML_INSTALL_DIR   uml-veristat install to boot (kernel, modules)
+#   UML_HARNESS       bpf-uml-selftests checkout (uml-veristat/uml-test-progs;
+#                     FLAVOR=uml only)
+#   UML_INSTALL_DIR   uml-veristat install to boot (FLAVOR=uml only)
 
-# FLAVOR selects the oracle: uml (default) or qemu (x86_64 kernel worktree
-# + vng runner; ~10x faster, has kprobes/uprobes/stack unwinding).
-FLAVOR ?= uml
+# FLAVOR selects the oracle. qemu (the default): the x86_64 worktree pinned
+# by kernel-commit, booted by virtme-ng/KVM. uml: the parked UML branch
+# (older pin, patched kernel, reduced feature set) -- only when asked for
+# explicitly.
+FLAVOR ?= qemu
 ifeq ($(FLAVOR),qemu)
 KERNEL_SRC ?= $(abspath $(CURDIR)/../uml-harness/.build/bpf-next-x86)
 SELFTESTS_OUTPUT ?= $(abspath $(CURDIR)/../uml-harness/.build/selftests-output-qemu)
 VMLINUX_BTF ?= $(KERNEL_SRC)/vmlinux
 TEST_RUNNER ?= $(CURDIR)/scripts/qemu-test-progs
-export VMLINUX_BTF TEST_RUNNER
-else
+else ifeq ($(FLAVOR),uml)
 KERNEL_SRC ?= $(abspath $(CURDIR)/../uml-harness/.build/bpf-next)
 SELFTESTS_OUTPUT ?= $(abspath $(CURDIR)/../uml-harness/.build/selftests-output-heimdall)
 VMLINUX_BTF ?= $(KERNEL_SRC)/linux
+UML_HARNESS ?= $(abspath $(CURDIR)/../uml-harness)
+UML_INSTALL_DIR ?= $(HOME)/.local/share/uml-veristat-heimdall
+TEST_RUNNER ?= $(UML_HARNESS)/uml-test-progs
+else
+$(error unknown FLAVOR '$(FLAVOR)' (qemu or uml))
 endif
+export FLAVOR VMLINUX_BTF TEST_RUNNER UML_HARNESS UML_INSTALL_DIR
 SELFTESTS_SRC := $(KERNEL_SRC)/tools/testing/selftests/bpf
 
 # The bpf-next commit the QEMU flavor kernel is built from. kernel-commit
@@ -59,8 +68,6 @@ BPFTOOL_BIN := $(dir $(SELFTESTS_OUTPUT))bpftool-output-$(patsubst selftests-out
 KSYM_BTF_FILES := $(VMLINUX_BTF) $(wildcard $(SELFTESTS_OUTPUT)/*.ko)
 RUSTBPF ?= $(abspath $(CURDIR)/../rust-bpf)
 LLVM_PREFIX ?= $(abspath $(CURDIR)/../uml-harness/.build/llvm-install)
-UML_HARNESS ?= $(abspath $(CURDIR)/../uml-harness)
-UML_INSTALL_DIR ?= $(HOME)/.local/share/uml-veristat-heimdall
 
 BLDDIR := $(CURDIR)/bld
 LLC := $(LLVM_PREFIX)/bin/llc
@@ -84,7 +91,7 @@ RUSTC_COMMON := --target $(TARGET) -C opt-level=$(OPT_LEVEL) -C panic=unwind -C 
 
 PROGS := $(patsubst progs/%.rs,%,$(wildcard progs/*.rs))
 
-export KERNEL_SRC SELFTESTS_SRC SELFTESTS_OUTPUT LLVM_PREFIX UML_HARNESS UML_INSTALL_DIR
+export KERNEL_SRC SELFTESTS_SRC SELFTESTS_OUTPUT LLVM_PREFIX
 
 all: $(addprefix $(BLDDIR)/,$(addsuffix .bpf.o,$(PROGS)))
 
@@ -167,10 +174,12 @@ $(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc
 	python3 scripts/btf_map_slots.py $@
 	python3 scripts/btf_test_tags.py $@ progs/$*.rs
 
-# --- Kernel verifier gate (all built objects) ---
+# --- Kernel verifier gate (all built objects), UML flavor only ---
 # Objects a translation declares must FAIL to load (test_tags! __failure) are
 # left out: the verifier rejecting them is the assertion, not a regression.
+# Under the QEMU flavor the acceptance gate is test-<name> itself.
 verify: all
+	@[ "$(FLAVOR)" = uml ] || { echo "verify runs uml-veristat: FLAVOR=uml make verify" >&2; exit 1; }
 	@neg=$$(python3 scripts/btf_test_tags.py --list-negative progs/*.rs); \
 	[ -z "$$neg" ] || echo "[verify] skipping must-fail object(s): $$(echo $$neg)"; \
 	objs=""; for n in $(PROGS); do \
@@ -178,7 +187,7 @@ verify: all
 	done; \
 	UML_INSTALL_DIR=$(UML_INSTALL_DIR) $(UML_HARNESS)/uml-veristat $$objs
 
-# --- Swap Rust object in, rebuild harness pieces, run affected tests in UML ---
+# --- Swap Rust object in, rebuild harness pieces, run affected tests in the guest ---
 test-%: $(BLDDIR)/%.bpf.o
 	scripts/swap-and-test.sh $* rust
 

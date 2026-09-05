@@ -39,7 +39,9 @@ import re
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-C_PROGS = os.path.join(REPO, "..", "uml-harness", ".build", "bpf-next",
+# The C side is the QEMU flavor: the x86 worktree pinned by kernel-commit
+# and the objects built from it. The UML tree stays on its own older pin.
+C_PROGS = os.path.join(REPO, "..", "uml-harness", ".build", "bpf-next-x86",
                        "tools", "testing", "selftests", "bpf", "progs")
 C_OBJ_DIR = os.path.join(REPO, "..", "uml-harness", ".build",
                          "selftests-output-qemu")

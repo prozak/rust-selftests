@@ -28,7 +28,8 @@ use core::ffi::c_void;
 
 use bpf_rs_core::ctx::{__sk_buff, TC_ACT_OK, TC_ACT_SHOT};
 use bpf_rs_core::helpers::{bpf_skb_adjust_room, bpf_skb_load_bytes, bpf_skb_store_bytes};
-use bpf_rs_core::{bpf_object, vload};
+use bpf_rs_core::vload;
+use btf_macros::btf;
 
 // ---- Unaligned packed-field access -----------------------------------
 
@@ -108,7 +109,105 @@ const BPF_F_ADJ_ROOM_ENCAP_L4_UDP: u64 = 1 << 4;
 const BPF_F_ADJ_ROOM_ENCAP_L2_ETH: u64 = 1 << 6;
 const BPF_F_ADJ_ROOM_DECAP_L3_IPV4: u64 = 1 << 7;
 const BPF_F_ADJ_ROOM_DECAP_L3_IPV6: u64 = 1 << 8;
+const BPF_F_ADJ_ROOM_DECAP_L4_GRE: u64 = 1 << 9;
+const BPF_F_ADJ_ROOM_DECAP_L4_UDP: u64 = 1 << 10;
+const BPF_F_ADJ_ROOM_DECAP_IPXIP4: u64 = 1 << 11;
+const BPF_F_ADJ_ROOM_DECAP_IPXIP6: u64 = 1 << 12;
+const BPF_F_ADJ_ROOM_DECAP_L4_MASK: u64 = BPF_F_ADJ_ROOM_DECAP_L4_UDP | BPF_F_ADJ_ROOM_DECAP_L4_GRE;
+const BPF_F_ADJ_ROOM_DECAP_IPXIP_MASK: u64 =
+    BPF_F_ADJ_ROOM_DECAP_IPXIP4 | BPF_F_ADJ_ROOM_DECAP_IPXIP6;
 const BPF_F_INVALIDATE_HASH: u64 = 1 << 1;
+
+// linux/skbuff.h enum SKB_GSO_*
+const SKB_GSO_GRE: u32 = 1 << 6;
+const SKB_GSO_GRE_CSUM: u32 = 1 << 7;
+const SKB_GSO_IPXIP4: u32 = 1 << 8;
+const SKB_GSO_IPXIP6: u32 = 1 << 9;
+const SKB_GSO_UDP_TUNNEL: u32 = 1 << 10;
+const SKB_GSO_UDP_TUNNEL_CSUM: u32 = 1 << 11;
+const SKB_GSO_ESP: u32 = 1 << 15;
+const SKB_GSO_UDP_TUNNEL_MASK: u32 = SKB_GSO_UDP_TUNNEL | SKB_GSO_UDP_TUNNEL_CSUM;
+const SKB_GSO_TUNNEL_MASK: u32 = SKB_GSO_UDP_TUNNEL_MASK
+    | SKB_GSO_GRE
+    | SKB_GSO_GRE_CSUM
+    | SKB_GSO_IPXIP4
+    | SKB_GSO_IPXIP6
+    | SKB_GSO_ESP;
+
+// C: `bpf_core_enum_value_exists(enum bpf_adj_room_flags, BPF_F_ADJ_ROOM_DECAP_*)`
+// is a BPF_CORE_ENUMVAL_EXISTS relocation libbpf resolves against the
+// running kernel's BTF; the pipeline only emits field relocations (see
+// netif_receive_skb.rs), and the pinned kernel defines all four flags, so
+// the probe is the constant it resolves to there. The decision structure
+// (TC_ACT_SHOT when absent) is kept so the shape matches the C.
+#[inline(always)]
+fn adj_room_flag_exists(_flag: u64) -> bool {
+    true
+}
+
+// The post-adjust GSO consistency check reads the kernel sk_buff behind
+// the ctx (bpf_cast_to_kern_ctx) and its skb_shared_info (bpf_core_cast,
+// i.e. bpf_rdonly_cast with the kernel BTF id of struct skb_shared_info).
+// `end` is sk_buff_data_t, an unsigned int on 64-bit.
+#[btf]
+struct sk_buff {
+    end: u32,
+    head: *mut u8,
+    __pkt_type_offset: [u8; 0],
+}
+
+#[btf]
+struct skb_shared_info {
+    gso_size: u16,
+    gso_type: u32,
+}
+
+extern "C" {
+    fn bpf_cast_to_kern_ctx(obj: *const c_void) -> *mut c_void;
+    fn bpf_rdonly_cast(obj: *const c_void, btf_id: u32) -> *mut c_void;
+}
+
+// bpf_core_cast()'s second argument is a BPF_CORE_TYPE_ID_TARGET relocation
+// (bpf_core_type_id_kernel(struct skb_shared_info)) the pipeline cannot
+// emit; as in mptcp_subflow.rs the value it resolves to is the pinned
+// kernel's vmlinux BTF id, read with
+//     bpftool btf dump file <bpf-next-x86>/vmlinux | grep "STRUCT 'skb_shared_info'"
+// on 3ccdb078. This is the #15 class of pin-dependent constant: it must be
+// refreshed at every kernel bump until the relocation is emitted.
+const SKB_SHARED_INFO_BTF_ID: u32 = 154954;
+
+#[inline(always)]
+fn kskb_head(kskb: &sk_buff) -> *mut u8 {
+    unsafe { *kskb.head().as_ptr() }
+}
+
+#[inline(always)]
+fn kskb_end(kskb: &sk_buff) -> u32 {
+    unsafe { *kskb.end().as_ptr() }
+}
+
+// `__u8 encapsulation:1` is a kernel bitfield; a `#[btf]` field relocation
+// cannot resolve one (see bpf_cc_cubic.rs), so the containing byte is
+// reached from the adjacent zero-length `__pkt_type_offset` anchor: on the
+// pinned kernel's layout encapsulation is bit 22 of the flag block that
+// starts at the anchor, i.e. bit 6 of the byte two past it (bpftool btf
+// dump of vmlinux, struct sk_buff's anonymous flags struct).
+#[inline(always)]
+fn kskb_encapsulation(kskb: &sk_buff) -> bool {
+    let anchor = kskb.__pkt_type_offset().as_ptr() as *const u8;
+    let byte = unsafe { *anchor.add(2) };
+    (byte >> 6) & 1 != 0
+}
+
+#[inline(always)]
+fn shinfo_gso_size(shinfo: &skb_shared_info) -> u16 {
+    unsafe { *shinfo.gso_size().as_ptr() }
+}
+
+#[inline(always)]
+fn shinfo_gso_type(shinfo: &skb_shared_info) -> u32 {
+    unsafe { *shinfo.gso_type().as_ptr() }
+}
 
 #[inline(always)]
 fn adj_room_encap_l2(len: i32) -> u64 {
@@ -774,16 +873,16 @@ fn encap_ipv6_ipip6(skb: *mut __sk_buff) -> i32 {
 
 // ---- Decapsulation --------------------------------------------------------
 
-fn decap_internal(skb: *mut __sk_buff, off: i32, len: i32, proto: u8) -> i32 {
+fn decap_internal(skb: *mut __sk_buff, off: i32, len: i32, proto: u8, ipxip_flag: u64) -> i32 {
     let mut flags: u64 = BPF_F_ADJ_ROOM_FIXED_GSO;
     let mut olen = len;
 
     match proto {
         IPPROTO_IPIP => {
-            flags |= BPF_F_ADJ_ROOM_DECAP_L3_IPV4;
+            flags |= BPF_F_ADJ_ROOM_DECAP_L3_IPV4 | ipxip_flag;
         }
         IPPROTO_IPV6 => {
-            flags |= BPF_F_ADJ_ROOM_DECAP_L3_IPV6;
+            flags |= BPF_F_ADJ_ROOM_DECAP_L3_IPV6 | ipxip_flag;
         }
         NEXTHDR_DEST => {
             let mut ip6_opt_hdr = Ipv6OptHdr { nexthdr: 0, hdrlen: 0 };
@@ -797,13 +896,18 @@ fn decap_internal(skb: *mut __sk_buff, off: i32, len: i32, proto: u8) -> i32 {
                 return TC_ACT_OK;
             }
             match pget!(ip6_opt_hdr.nexthdr) {
-                IPPROTO_IPIP => flags |= BPF_F_ADJ_ROOM_DECAP_L3_IPV4,
-                IPPROTO_IPV6 => flags |= BPF_F_ADJ_ROOM_DECAP_L3_IPV6,
+                IPPROTO_IPIP => flags |= BPF_F_ADJ_ROOM_DECAP_L3_IPV4 | ipxip_flag,
+                IPPROTO_IPV6 => flags |= BPF_F_ADJ_ROOM_DECAP_L3_IPV6 | ipxip_flag,
                 _ => return TC_ACT_OK,
             }
         }
         IPPROTO_GRE => {
             olen += core::mem::size_of::<GreHdr>() as i32;
+            if !adj_room_flag_exists(BPF_F_ADJ_ROOM_DECAP_L4_GRE) {
+                return TC_ACT_SHOT;
+            }
+            flags |= BPF_F_ADJ_ROOM_DECAP_L4_GRE;
+
             let mut greh = GreHdr { flags: 0, protocol: 0 };
             if bpf_skb_load_bytes(
                 skb as *const c_void,
@@ -822,6 +926,10 @@ fn decap_internal(skb: *mut __sk_buff, off: i32, len: i32, proto: u8) -> i32 {
         }
         IPPROTO_UDP => {
             olen += core::mem::size_of::<UdpHdr>() as i32;
+            if !adj_room_flag_exists(BPF_F_ADJ_ROOM_DECAP_L4_UDP) {
+                return TC_ACT_SHOT;
+            }
+            flags |= BPF_F_ADJ_ROOM_DECAP_L4_UDP;
             let mut udph = UdpHdr {
                 source: 0,
                 dest: 0,
@@ -851,10 +959,54 @@ fn decap_internal(skb: *mut __sk_buff, off: i32, len: i32, proto: u8) -> i32 {
         return TC_ACT_SHOT;
     }
 
+    let kskb = unsafe { bpf_cast_to_kern_ctx(skb as *const c_void) } as *const sk_buff;
+    let kskb_ref = unsafe { &*kskb };
+    let shinfo_addr = (kskb_head(kskb_ref) as u64).wrapping_add(kskb_end(kskb_ref) as u64);
+    let shinfo = unsafe { bpf_rdonly_cast(shinfo_addr as *const c_void, SKB_SHARED_INFO_BTF_ID) }
+        as *const skb_shared_info;
+    let shinfo_ref = unsafe { &*shinfo };
+    if shinfo_gso_size(shinfo_ref) != 0 {
+        let gso_type = shinfo_gso_type(shinfo_ref);
+        if (flags & BPF_F_ADJ_ROOM_DECAP_L4_UDP) != 0 && (gso_type & SKB_GSO_UDP_TUNNEL_MASK) != 0 {
+            return TC_ACT_SHOT;
+        }
+
+        if (flags & BPF_F_ADJ_ROOM_DECAP_L4_GRE) != 0
+            && (gso_type & (SKB_GSO_GRE | SKB_GSO_GRE_CSUM)) != 0
+        {
+            return TC_ACT_SHOT;
+        }
+
+        if (flags & BPF_F_ADJ_ROOM_DECAP_IPXIP4) != 0 && (gso_type & SKB_GSO_IPXIP4) != 0 {
+            return TC_ACT_SHOT;
+        }
+
+        if (flags & BPF_F_ADJ_ROOM_DECAP_IPXIP6) != 0 && (gso_type & SKB_GSO_IPXIP6) != 0 {
+            return TC_ACT_SHOT;
+        }
+
+        if (flags & (BPF_F_ADJ_ROOM_DECAP_L4_MASK | BPF_F_ADJ_ROOM_DECAP_IPXIP_MASK)) != 0 {
+            if (gso_type & SKB_GSO_TUNNEL_MASK) != 0 && !kskb_encapsulation(kskb_ref) {
+                return TC_ACT_SHOT;
+            }
+            if (gso_type & SKB_GSO_TUNNEL_MASK) == 0 && kskb_encapsulation(kskb_ref) {
+                return TC_ACT_SHOT;
+            }
+        }
+    } else if (flags & (BPF_F_ADJ_ROOM_DECAP_L4_MASK | BPF_F_ADJ_ROOM_DECAP_IPXIP_MASK)) != 0
+        && kskb_encapsulation(kskb_ref)
+    {
+        return TC_ACT_SHOT;
+    }
+
     TC_ACT_OK
 }
 
 fn decap_ipv4(skb: *mut __sk_buff) -> i32 {
+    if !adj_room_flag_exists(BPF_F_ADJ_ROOM_DECAP_IPXIP4) {
+        return TC_ACT_SHOT;
+    }
+
     let mut iph_outer = IpHdr {
         ihl_version: 0,
         tos: 0,
@@ -886,10 +1038,15 @@ fn decap_ipv4(skb: *mut __sk_buff) -> i32 {
         ETH_HLEN as i32,
         core::mem::size_of::<IpHdr>() as i32,
         pget!(iph_outer.protocol),
+        BPF_F_ADJ_ROOM_DECAP_IPXIP4,
     )
 }
 
 fn decap_ipv6(skb: *mut __sk_buff) -> i32 {
+    if !adj_room_flag_exists(BPF_F_ADJ_ROOM_DECAP_IPXIP6) {
+        return TC_ACT_SHOT;
+    }
+
     let mut iph_outer = Ipv6Hdr {
         priority_version: 0,
         flow_lbl: [0; 3],
@@ -914,6 +1071,7 @@ fn decap_ipv6(skb: *mut __sk_buff) -> i32 {
         ETH_HLEN as i32,
         core::mem::size_of::<Ipv6Hdr>() as i32,
         pget!(iph_outer.nexthdr),
+        BPF_F_ADJ_ROOM_DECAP_IPXIP6,
     )
 }
 
@@ -1112,4 +1270,19 @@ extern "C" fn decap_f(skb: *mut __sk_buff) -> i32 {
     }
 }
 
-bpf_object!("GPL");
+// bpf_object!("GPL") emits a static named `_license`, but this C source
+// declares its license global as `__license` (matched against `bld/*.keep`
+// derived from the pristine clang object's global symbols), so the macro's
+// static is internalized away and the object loads as non-GPL; that was
+// invisible until decap_internal started calling the GPL-only
+// bpf_cast_to_kern_ctx / bpf_rdonly_cast kfuncs ("cannot call kernel
+// function from non-GPL compatible program"). Hand-write it under the
+// C-correct name, as decap_sanity.rs does.
+#[link_section = "license"]
+#[no_mangle]
+static __license: [u8; 4] = *b"GPL\0";
+
+#[panic_handler]
+fn panic(_: &core::panic::PanicInfo) -> ! {
+    loop {}
+}

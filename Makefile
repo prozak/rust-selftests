@@ -97,15 +97,25 @@ all: $(addprefix $(BLDDIR)/,$(addsuffix .bpf.o,$(PROGS)))
 
 # --- Keep-list: the global FUNC/OBJECT symbols of the C-built object are the
 # --- ABI the harness sees; keep exactly those through internalize/globaldce.
-$(BLDDIR)/%.keep: $(SELFTESTS_OUTPUT)/%.bpf.o.corig
+# The prerequisite is the installed object, which always exists, but the
+# symbols are read from the pristine .corig backup when a swap has put the
+# Rust object in its place. It used to depend on the .corig alone: that file
+# is an intermediate with no prerequisites, so once a fresh selftests output
+# had no backups make treated every stale keep as up to date and a program
+# the C object gained after the bump was internalized and dropped. The keep
+# is only replaced when its content changes, so a swap/restore (which bumps
+# the object's mtime) does not rebuild the translation. Static pattern rule
+# rather than a plain one: a keep matched only by a pattern is an
+# intermediate file, and make does not recreate a missing intermediate
+# unless its prerequisite is newer than the final object.
+KEEPS := $(addprefix $(BLDDIR)/,$(addsuffix .keep,$(PROGS)))
+$(KEEPS): $(BLDDIR)/%.keep: $(SELFTESTS_OUTPUT)/%.bpf.o
 	@mkdir -p $(BLDDIR)
-	$(LLVM_READELF) -s $< | \
+	@src=$<; [ -f $<.corig ] && src=$<.corig; \
+	$(LLVM_READELF) -s $$src | \
 		awk '$$4 ~ /FUNC|OBJECT/ && $$5 == "GLOBAL" && $$7 != "UND" {print $$8}' | \
-		sort -u > $@
-
-# The .corig backup of the pristine C object is created on first use.
-$(SELFTESTS_OUTPUT)/%.bpf.o.corig:
-	cp $(SELFTESTS_OUTPUT)/$*.bpf.o $@
+		sort -u > $@.tmp; \
+	if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv $@.tmp $@; echo "[keep] $*: $$(tr '\n' ' ' < $@)"; fi
 
 # --- Support crate: header-only by construction (macros/generics/inline),
 # --- so its bodies monomorphize into each program's bitcode and the

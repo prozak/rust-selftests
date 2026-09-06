@@ -29,7 +29,7 @@
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::ctx::__sk_buff;
-use bpf_rs_core::helpers::{bpf_get_prandom_u32, bpf_sk_fullsock};
+use bpf_rs_core::helpers::{bpf_get_prandom_u32, bpf_sk_fullsock, bpf_spin_lock, bpf_spin_unlock};
 use bpf_rs_core::maps::{self, BpfMap};
 use bpf_rs_core::vload;
 use core::ffi::c_void;
@@ -57,6 +57,19 @@ struct CtxVal {
 }
 
 type CtxMap = BpfMap<i32, CtxVal, { maps::ARRAY }, 1>;
+
+/// struct bpf_spin_lock { __u32 val; }; -- matched by BTF struct name.
+#[allow(non_camel_case_types)]
+#[repr(C)]
+struct bpf_spin_lock {
+    val: u32,
+}
+
+// C: `static struct bpf_spin_lock kfunc_call_lock SEC(".data.A");` -- a
+// private static keeps the BTF_VAR_STATIC linkage (see res_spin_lock.rs).
+#[allow(non_upper_case_globals)]
+#[link_section = ".data.A"]
+static mut kfunc_call_lock: bpf_spin_lock = bpf_spin_lock { val: 0 };
 
 #[link_section = ".maps"]
 #[no_mangle]
@@ -91,6 +104,21 @@ extern "C" {
     fn bpf_kfunc_call_test_static_unused_arg(arg: u32, unused: u32) -> u32;
     fn bpf_testmod_ctx_create(err: *mut i32) -> *mut BpfTestmodCtx;
     fn bpf_testmod_ctx_release(ctx: *mut BpfTestmodCtx);
+    fn bpf_testmod_test_mod_kfunc(i: i32);
+}
+
+/// bpf_testmod_test_mod_kfunc is registered KF_SPINLOCK_SAFE, so calling
+/// it under a bpf_spin_lock must be accepted (contrast
+/// kfunc_call_fail.rs's kfunc_call_test_spin_lock_unsafe).
+#[link_section = "tc"]
+#[no_mangle]
+extern "C" fn kfunc_call_test_spin_lock_safe(_skb: *const __sk_buff) -> i32 {
+    unsafe {
+        bpf_spin_lock(core::ptr::addr_of_mut!(kfunc_call_lock));
+        bpf_testmod_test_mod_kfunc(42);
+        bpf_spin_unlock(core::ptr::addr_of_mut!(kfunc_call_lock));
+    }
+    0
 }
 
 /// Shared with kfunc_call_test5's third call and kfunc_call_test5_asm:

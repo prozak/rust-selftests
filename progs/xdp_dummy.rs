@@ -44,4 +44,14 @@ extern "C" fn xdp_dummy_prog(_ctx: *const xdp_md) -> i32 {
     XDP_PASS
 }
 
+/// Named after a syscall stub so prog_tests/fexit_bpf2bpf.c's
+/// fentry_to_xdp_prog can attach a `fentry/__x64_sys_nop` tracing program
+/// to THIS XDP program by fd, proving a tracing prog can target a BPF prog
+/// whose name shadows a kernel symbol. Same signature rule as above.
+#[link_section = "xdp"]
+#[no_mangle]
+extern "C" fn __x64_sys_nop(_ctx: *const xdp_md) -> i32 {
+    XDP_PASS
+}
+
 bpf_object!("GPL");

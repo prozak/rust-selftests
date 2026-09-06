@@ -6,23 +6,18 @@
 // (bpf-rs-core idiom).
 //
 // prog_tests/stream.c drives this object three ways:
-//  - test_stream_success() -> RUN_TESTS(stream): per-program isolated load
-//    (test_loader.c). Since rustc can't emit BTF_KIND_DECL_TAG, none of the
-//    __success/__retval/__stderr/__stdout decl tags on the C source parse;
-//    parse_test_spec() finds zero tags, mode_mask defaults to PRIV with
-//    expect_failure=false and execute=false (see
-//    [[negative-verifier-tests-need-loadable-translation]] for the general
-//    shape of this default). So every program below just needs to load
-//    (pass the verifier) under RUN_TESTS - no actual execution/output is
-//    checked there.
-//  - test_stream_syscall() and test_stream_arena_fault_address() instead
-//    call stream__open_and_load() directly (the *whole* object, every
-//    program autoloaded together) and then bpf_prog_test_run_opts +
-//    bpf_prog_stream_read on specific programs (stream_syscall,
-//    stream_arena_read_fault, stream_arena_write_fault), asserting real
-//    retval/stdout/stderr content. Those three programs' behavior must
-//    match the C original exactly; everything else just needs to load
-//    alongside them in the same object.
+//  - test_stream_success() -> RUN_TESTS(stream): per-program isolated
+//    load AND run (test_loader.c) against the __success/__retval/__stderr/
+//    __stdout decl tags. rustc emits no decl tags, so they are mirrored in
+//    the test_tags! block below (scripts/btf_test_tags.py appends them to
+//    the built object); the __stderr expectations are carried verbatim,
+//    including the arch gates and the "Call trace" regex.
+//  - test_stream_syscall(), test_stream_oversize() and
+//    test_stream_arena_fault_address() instead call stream__open_and_load()
+//    directly (the *whole* object, every program autoloaded together) and
+//    then bpf_prog_test_run_opts + bpf_prog_stream_read on specific
+//    programs, asserting real retval/stdout/stderr content and the faulting
+//    address.
 //
 // bpf_stream_vprintk/bpf_stream_print_stack are KF_IMPLICIT_ARGS kfuncs
 // (kernel/bpf/stream.c, kernel/bpf/helpers.c): the verifier auto-appends
@@ -60,11 +55,66 @@ use bpf_rs_core::helpers::{
     bpf_timer_start,
 };
 use bpf_rs_core::maps::{self, BpfMap};
+use bpf_rs_core::test_tags;
 use core::ffi::c_void;
+
+test_tags! {
+    stream_exhaust: __success, __retval(0);
+    stream_cond_break: __arch_x86_64, __arch_arm64, __arch_s390x, __arch_riscv64, __arch_loongarch,
+        __success, __retval(0),
+        __stderr("ERROR: Timeout detected for may_goto instruction"),
+        __stderr("CPU: {{[0-9]+}} UID: 0 PID: {{[0-9]+}} Comm: {{.*}}"),
+        __stderr("Call trace:\n{{([a-zA-Z_][a-zA-Z0-9_]*\\+0x[0-9a-fA-F]+/0x[0-9a-fA-F]+\n|[ \t]+[^\n]+\n)*}}");
+    stream_deadlock: __success, __retval(0),
+        __stderr("ERROR: AA or ABBA deadlock detected for bpf_res_spin_lock"),
+        __stderr("{{Attempted lock   = (0x[0-9a-fA-F]+)\nTotal held locks = 1\nHeld lock\\[ 0\\] = \\1}}"),
+        __stderr("..."),
+        __stderr("CPU: {{[0-9]+}} UID: 0 PID: {{[0-9]+}} Comm: {{.*}}"),
+        __stderr("Call trace:\n{{([a-zA-Z_][a-zA-Z0-9_]*\\+0x[0-9a-fA-F]+/0x[0-9a-fA-F]+\n|[ \t]+[^\n]+\n)*}}");
+    stream_syscall: __success, __retval(0);
+    stream_oversize: __success, __retval(0);
+    stream_arena_write_fault: __arch_x86_64, __arch_arm64, __success, __retval(0),
+        __stderr("ERROR: Arena WRITE access at unmapped address 0x{{.*}}"),
+        __stderr("CPU: {{[0-9]+}} UID: 0 PID: {{[0-9]+}} Comm: {{.*}}"),
+        __stderr("Call trace:\n{{([a-zA-Z_][a-zA-Z0-9_]*\\+0x[0-9a-fA-F]+/0x[0-9a-fA-F]+\n|[ \t]+[^\n]+\n)*}}");
+    stream_arena_read_fault: __arch_x86_64, __arch_arm64, __success, __retval(0),
+        __stderr("ERROR: Arena READ access at unmapped address 0x{{.*}}"),
+        __stderr("CPU: {{[0-9]+}} UID: 0 PID: {{[0-9]+}} Comm: {{.*}}"),
+        __stderr("Call trace:\n{{([a-zA-Z_][a-zA-Z0-9_]*\\+0x[0-9a-fA-F]+/0x[0-9a-fA-F]+\n|[ \t]+[^\n]+\n)*}}");
+    stream_arena_load_acquire_fault: __arch_x86_64, __arch_arm64, __success, __retval(0),
+        __stderr("ERROR: Arena READ access at unmapped address 0x{{.*}}"),
+        __stderr("CPU: {{[0-9]+}} UID: 0 PID: {{[0-9]+}} Comm: {{.*}}"),
+        __stderr("Call trace:\n{{([a-zA-Z_][a-zA-Z0-9_]*\\+0x[0-9a-fA-F]+/0x[0-9a-fA-F]+\n|[ \t]+[^\n]+\n)*}}");
+    stream_arena_xchg_fault: __arch_x86_64, __arch_arm64, __success, __retval(0),
+        __stderr("ERROR: Arena WRITE access at unmapped address 0x{{.*}}"),
+        __stderr("CPU: {{[0-9]+}} UID: 0 PID: {{[0-9]+}} Comm: {{.*}}"),
+        __stderr("Call trace:\n{{([a-zA-Z_][a-zA-Z0-9_]*\\+0x[0-9a-fA-F]+/0x[0-9a-fA-F]+\n|[ \t]+[^\n]+\n)*}}");
+    stream_arena_cmpxchg_fault: __arch_x86_64, __arch_arm64, __success, __retval(0),
+        __stderr("ERROR: Arena WRITE access at unmapped address 0x{{.*}}"),
+        __stderr("CPU: {{[0-9]+}} UID: 0 PID: {{[0-9]+}} Comm: {{.*}}"),
+        __stderr("Call trace:\n{{([a-zA-Z_][a-zA-Z0-9_]*\\+0x[0-9a-fA-F]+/0x[0-9a-fA-F]+\n|[ \t]+[^\n]+\n)*}}");
+    stream_arena_subprog_fault: __arch_x86_64, __arch_arm64, __success, __retval(0),
+        __stderr("ERROR: Arena WRITE access at unmapped address 0x{{.*}}"),
+        __stderr("CPU: {{[0-9]+}} UID: 0 PID: {{[0-9]+}} Comm: {{.*}}"),
+        __stderr("Call trace:\n{{([a-zA-Z_][a-zA-Z0-9_]*\\+0x[0-9a-fA-F]+/0x[0-9a-fA-F]+\n|[ \t]+[^\n]+\n)*}}");
+    stream_arena_callback_fault: __arch_x86_64, __arch_arm64, __success, __retval(0),
+        __stderr("ERROR: Arena WRITE access at unmapped address 0x{{.*}}"),
+        __stderr("CPU: {{[0-9]+}} UID: 0 PID: {{[0-9]+}} Comm: {{.*}}"),
+        __stderr("Call trace:\n{{([a-zA-Z_][a-zA-Z0-9_]*\\+0x[0-9a-fA-F]+/0x[0-9a-fA-F]+\n|[ \t]+[^\n]+\n)*}}");
+    stream_print_stack_kfunc: __arch_x86_64, __arch_arm64, __success, __retval(0),
+        __stderr("CPU: {{[0-9]+}} UID: 0 PID: {{[0-9]+}} Comm: {{.*}}"),
+        __stderr("Call trace:\n{{([a-zA-Z_][a-zA-Z0-9_]*\\+0x[0-9a-fA-F]+/0x[0-9a-fA-F]+\n|[ \t]+[^\n]+\n)*}}");
+    stream_print_stack_invalid_id: __success, __retval(-2);
+    stream_print_kfuncs_locked: __arch_x86_64, __arch_arm64, __success, __retval(0),
+        __stdout("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
+        __stderr("CPU: {{[0-9]+}} UID: 0 PID: {{[0-9]+}} Comm: {{.*}}"),
+        __stderr("Call trace:\n{{([a-zA-Z_][a-zA-Z0-9_]*\\+0x[0-9a-fA-F]+/0x[0-9a-fA-F]+\n|[ \t]+[^\n]+\n)*}}");
+}
 
 const BPF_STDOUT: i32 = 1;
 const BPF_STDERR: i32 = 2;
 const ENOSPC: i32 = 28;
+const E2BIG: i32 = 7;
 const BPF_MAX_LOOPS: i32 = 8 * 1024 * 1024;
 // byte offset of `struct bpf_arena.user_vm_start` in *this* kernel build's
 // vmlinux BTF (`bpftool btf dump file vmlinux -j`: bits_offset=3904 / 8 =
@@ -77,6 +127,15 @@ const USER_VM_START_OFFSET: i16 = 488;
 // string constant materialized locally wherever the C source used it).
 const STR_LEN: usize = 54;
 const STR: [u8; STR_LEN + 1] = *b"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\0";
+
+// #define _BIG_STR (_X64 x16): 1024 x's, truncated by bstr_printf, so
+// bpf_stream_printk must return -E2BIG.
+const BIG_STR_LEN: usize = 1024;
+const BIG_STR: [u8; BIG_STR_LEN + 1] = {
+    let mut b = [b'x'; BIG_STR_LEN + 1];
+    b[BIG_STR_LEN] = 0;
+    b
+};
 
 // struct bpf_res_spin_lock { u32 val; } __aligned(alignof(struct rqspinlock))
 // (asm-generic/rqspinlock.h) - matched by BTF struct name in
@@ -339,6 +398,43 @@ extern "C" fn stream_syscall(_ctx: *const c_void) -> i32 {
 
 #[link_section = "syscall"]
 #[no_mangle]
+extern "C" fn stream_oversize(_ctx: *const c_void) -> i32 {
+    let ret = unsafe { stream_printk0(BPF_STDOUT, BIG_STR.as_ptr()) };
+    if ret != -E2BIG {
+        return if ret != 0 { ret } else { 1 };
+    }
+
+    // The oversized output must not reduce the remaining stream capacity.
+    unsafe {
+        size = 0;
+    }
+    let mut it = bpf_iter_num { __opaque: [0; 1] };
+    unsafe { bpf_iter_num_new(&mut it, 0, BPF_MAX_LOOPS) };
+    let mut ret: i32 = 1;
+    loop {
+        let v = unsafe { bpf_iter_num_next(&mut it) };
+        if v.is_null() {
+            break;
+        }
+        let r = unsafe { stream_printk0(BPF_STDOUT, STR.as_ptr()) };
+        if r == -ENOSPC {
+            ret = if unsafe { size } == 99954 { 0 } else { 1 };
+            break;
+        }
+        if r != 0 {
+            ret = r;
+            break;
+        }
+        unsafe {
+            size += STR_LEN as i32;
+        }
+    }
+    unsafe { bpf_iter_num_destroy(&mut it) };
+    ret
+}
+
+#[link_section = "syscall"]
+#[no_mangle]
 extern "C" fn stream_arena_write_fault(_ctx: *const c_void) -> i32 {
     unsafe {
         let map_addr = core::ptr::addr_of!(arena) as u64;
@@ -365,6 +461,94 @@ extern "C" fn stream_arena_read_fault(_ctx: *const c_void) -> i32 {
         core::ptr::read_volatile(target);
     }
     0
+}
+
+// The three atomic fault programs hand-encode the faulting instruction as
+// the C source does (a `struct bpf_insn` spliced in with `.8byte`), with
+// the same fixed registers, since the point is which register the arena
+// exception handler has to clear: BPF_STX | BPF_ATOMIC | BPF_W (0xc3),
+// off 0x7fff, and the atomic op in imm. The C's `bpf_addr_space_cast(
+// user_vm_start, 0, 1)` is `cast_kern` as in the read/write faults above.
+
+#[link_section = "syscall"]
+#[no_mangle]
+extern "C" fn stream_arena_load_acquire_fault(_ctx: *const c_void) -> i32 {
+    let val: u64;
+    unsafe {
+        let map_addr = core::ptr::addr_of!(arena) as u64;
+        let user_vm_start = arena_base_ldx(map_addr);
+        fault_addr = (user_vm_start + 0x7fff) as usize;
+        let kptr = cast_kern(user_vm_start as *mut u8);
+        // r0 = load_acquire((u32 *)(r1 + 0x7fff)): dst r0, src r1, BPF_LOAD_ACQ
+        core::arch::asm!(
+            "r0 = 1",
+            ".byte 0xc3, 0x10",
+            ".short 0x7fff",
+            ".long 0x100",
+            in("r1") kptr,
+            out("r0") val,
+            options(nostack, preserves_flags),
+        );
+    }
+    val as i32
+}
+
+#[link_section = "syscall"]
+#[no_mangle]
+extern "C" fn stream_arena_xchg_fault(_ctx: *const c_void) -> i32 {
+    let val: u64;
+    unsafe {
+        let map_addr = core::ptr::addr_of!(arena) as u64;
+        let user_vm_start = arena_base_ldx(map_addr);
+        fault_addr = (user_vm_start + 0x7fff) as usize;
+        let kptr = cast_kern(user_vm_start as *mut u8);
+        // A read-modify-write carrying BPF_FETCH writes to memory, so the
+        // fault has to be reported as a WRITE from the dst_reg address, but
+        // it also reads the old value into src_reg, so the exception handler
+        // has to clear src_reg. Poison it up front, the returned value must
+        // be 0.
+        // r2 = xchg((u32 *)(r1 + 0x7fff), r2): dst r1, src r2, BPF_XCHG
+        core::arch::asm!(
+            "r2 = 1",
+            ".byte 0xc3, 0x21",
+            ".short 0x7fff",
+            ".long 0xe1",
+            in("r1") kptr,
+            out("r2") val,
+            options(nostack, preserves_flags),
+        );
+    }
+    val as i32
+}
+
+#[link_section = "syscall"]
+#[no_mangle]
+extern "C" fn stream_arena_cmpxchg_fault(_ctx: *const c_void) -> i32 {
+    let val: u64;
+    unsafe {
+        let map_addr = core::ptr::addr_of!(arena) as u64;
+        let user_vm_start = arena_base_ldx(map_addr);
+        fault_addr = (user_vm_start + 0x7fff) as usize;
+        let kptr = cast_kern(user_vm_start as *mut u8);
+        // Same as the exchange above, except that a BPF_CMPXCHG reads the
+        // old value into r0 rather than into src_reg, so r0 is the register
+        // the exception handler has to clear. It doubles as the compare
+        // value, but the comparison never happens since the access faults
+        // first.
+        // r0 = cmpxchg((u32 *)(r1 + 0x7fff), r0, r2): dst r1, src r2, BPF_CMPXCHG
+        core::arch::asm!(
+            "r0 = 1",
+            "r2 = 2",
+            ".byte 0xc3, 0x21",
+            ".short 0x7fff",
+            ".long 0xf1",
+            in("r1") kptr,
+            out("r0") val,
+            out("r2") _,
+            options(nostack, preserves_flags),
+        );
+    }
+    val as i32
 }
 
 #[inline(never)]

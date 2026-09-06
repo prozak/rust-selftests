@@ -183,6 +183,7 @@ $(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc
 	python3 scripts/btf_rename.py $@
 	python3 scripts/btf_map_slots.py $@
 	python3 scripts/btf_test_tags.py $@ progs/$*.rs
+	python3 scripts/btf_type_tags.py $@ progs/$*.rs
 
 # --- Kernel verifier gate (all built objects), UML flavor only ---
 # Objects a translation declares must FAIL to load (test_tags! __failure) are

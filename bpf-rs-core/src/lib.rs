@@ -74,3 +74,26 @@ pub const fn __lic_bytes<const N: usize>(s: &str) -> [u8; N] {
 macro_rules! test_tags {
     ($($func:ident : $($tag:expr),+ $(,)? );+ $(;)?) => {};
 }
+
+/// Declare the BTF type tags (`__kptr`, `__kptr_untrusted`, `__percpu_kptr`,
+/// `__uptr`) the C source puts on a struct member's pointer type.
+///
+/// The kernel classifies a map-value field as a kptr by finding a
+/// BTF_KIND_TYPE_TAG between the member's PTR and the pointee STRUCT
+/// (kernel/bpf/btf.c:btf_find_kptr); clang emits it from the
+/// `__attribute__((btf_type_tag("kptr")))` behind bpf_misc.h's `__kptr`.
+/// rustc cannot attach that annotation to a pointer type, so, like
+/// [`test_tags!`], this macro expands to NOTHING and scripts/btf_type_tags.py
+/// reads the declaration from the source and rewrites the built object's
+/// .BTF: it appends a TYPE_TAG and a PTR through it and repoints the named
+/// member at the new PTR.
+///
+/// ```ignore
+/// btf_type_tags! {
+///     rcu_node_stash.node: kptr;
+/// }
+/// ```
+#[macro_export]
+macro_rules! btf_type_tags {
+    ($($ty:ident . $field:ident : $tag:ident);+ $(;)?) => {};
+}

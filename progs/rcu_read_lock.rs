@@ -22,9 +22,11 @@ use core::ffi::c_void;
 
 use bpf_rs_core::helpers::{
     bpf_copy_from_user, bpf_copy_from_user_task, bpf_get_current_task_btf, bpf_get_prandom_u32,
-    bpf_task_pt_regs, bpf_task_storage_get, sink_val,
+    bpf_map_lookup_elem, bpf_task_pt_regs, bpf_task_storage_get, sink_val,
 };
-use bpf_rs_core::{bpf_map, bpf_object};
+use bpf_rs_core::maps::{self, BpfMap};
+use bpf_rs_core::progs::fentry_arg;
+use bpf_rs_core::{bpf_map, bpf_object, btf_type_tags};
 use btf_macros::btf;
 
 const BPF_MAP_TYPE_TASK_STORAGE: i32 = 29;
@@ -52,6 +54,19 @@ struct cgroup {
 #[btf]
 struct kernfs_node {
     id: u64,
+}
+
+// sk_wq sits in a two-member anonymous union of struct sock; the CO-RE
+// access string is matched by member NAME, and libbpf descends into
+// anonymous members, so the flat local shape is enough.
+#[btf]
+struct sock {
+    sk_wq: *mut socket_wq,
+}
+
+#[btf]
+struct socket_wq {
+    flags: u64,
 }
 
 // Opaque marker type: only ever passed through as a pointer between the
@@ -638,6 +653,108 @@ extern "C" fn rcu_read_lock_sleepable_global_subprog_indirect(_ctx: *const u64) 
     ret = ret.wrapping_add(global_subprog_calling_sleepable_global(ret));
     unsafe { bpf_rcu_read_unlock() };
     sink_val(ret);
+    0
+}
+
+// --- bpf-next 3ccdb078: untrusted-pointer loads that must get the
+// --- BPF_PROBE_MEM rewrite -------------------------------------------------
+
+/// uapi struct bpf_rb_node: 4 opaque u64s (linux/bpf.h).
+#[allow(non_camel_case_types)]
+#[repr(C, align(8))]
+struct bpf_rb_node {
+    __opaque: [u64; 4],
+}
+
+#[allow(non_camel_case_types)]
+#[repr(C)]
+struct rcu_node_data {
+    key: i64,
+    node: bpf_rb_node,
+}
+
+#[allow(non_camel_case_types)]
+#[repr(C)]
+struct rcu_node_stash {
+    node: *mut rcu_node_data,
+}
+
+// C: `struct rcu_node_data __kptr *node;` -- rustc cannot put the
+// BTF_KIND_TYPE_TAG on the pointer, scripts/btf_type_tags.py adds it to the
+// built object so the kernel classifies the field as a kptr and the load
+// below yields a PTR_TO_BTF_ID | MEM_ALLOC instead of a scalar.
+btf_type_tags! {
+    rcu_node_stash.node: kptr;
+}
+
+/// Necessary so that LLVM emits BTF for rcu_node_data rather than just a
+/// fwd reference to it, same as in progs/local_kptr_stash.c.
+#[no_mangle]
+static mut just_here_because_btf_bug: *mut rcu_node_data = core::ptr::null_mut();
+
+#[link_section = ".maps"]
+#[no_mangle]
+static node_stash: BpfMap<i32, rcu_node_stash, { maps::ARRAY }, 1> = BpfMap::new();
+
+#[no_mangle]
+static mut non_own_ref_key: i64 = 0;
+
+#[link_section = "?fentry.s/__x64_sys_getpgid"]
+#[no_mangle]
+extern "C" fn non_own_ref_untrusted_ld(_ctx: *const u64) -> i32 {
+    let key: i32 = 0;
+
+    let stash = bpf_map_lookup_elem(&node_stash, &key) as *mut rcu_node_stash;
+    if stash.is_null() {
+        return 0;
+    }
+    unsafe { bpf_rcu_read_lock() };
+    let node = unsafe { (*stash).node };
+    if node.is_null() {
+        unsafe { bpf_rcu_read_unlock() };
+        return 0;
+    }
+    unsafe { bpf_rcu_read_unlock() };
+    // The unlock leaves node as PTR_TO_BTF_ID | MEM_ALLOC | PTR_UNTRUSTED
+    // | NON_OWN_REF, and the load below has to get the BPF_PROBE_MEM
+    // rewrite for it, otherwise a bad address panics the kernel.
+    unsafe { non_own_ref_key = (*node).key };
+    0
+}
+
+#[no_mangle]
+static mut rcu_untrusted_wq_flags: i64 = 0;
+
+#[inline(never)]
+fn sock_sk_wq(sk: *mut sock) -> *mut socket_wq {
+    *unsafe { &*sk }.sk_wq().get().unwrap()
+}
+
+#[inline(never)]
+fn wq_flags(wq: *mut socket_wq) -> u64 {
+    *unsafe { &*wq }.flags().get().unwrap()
+}
+
+#[link_section = "?tp_btf/tcp_probe"]
+#[no_mangle]
+extern "C" fn rcu_untrusted_union_ld(ctx: *const u64) -> i32 {
+    let sk = fentry_arg(ctx, 0) as *mut sock;
+
+    // sk_wq sits in a two member union, so btf_struct_walk() marks the
+    // pointer PTR_UNTRUSTED, and the __rcu tag on the member adds MEM_RCU
+    // on top of it. struct sock is not on the __safe_rcu_or_null allow
+    // list, hence the two stay combined and the load below has to get the
+    // BPF_PROBE_MEM rewrite for PTR_TO_BTF_ID | PTR_UNTRUSTED | MEM_RCU,
+    // otherwise a bad address panics the kernel.
+    //
+    // The __rcu tag only reaches BTF on a clang built kernel, that is, one
+    // with CONFIG_PAHOLE_HAS_BTF_TAG. On a gcc built kernel the walk yields
+    // a plain untrusted pointer, which is rewritten either way.
+    let wq = sock_sk_wq(sk);
+    if wq.is_null() {
+        return 0;
+    }
+    unsafe { rcu_untrusted_wq_flags = wq_flags(wq) as i64 };
     0
 }
 

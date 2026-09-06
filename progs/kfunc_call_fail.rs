@@ -13,12 +13,25 @@
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::ctx::__sk_buff;
+use bpf_rs_core::helpers::{bpf_spin_lock, bpf_spin_unlock};
 use core::ffi::c_void;
 
 #[repr(C)]
 struct prog_test_ref_kfunc {
     _opaque: [u8; 0],
 }
+
+/// struct bpf_spin_lock { __u32 val; }; -- matched by BTF struct name.
+#[repr(C)]
+struct bpf_spin_lock {
+    val: u32,
+}
+
+// C: `static struct bpf_spin_lock kfunc_call_lock SEC(".data.A");` -- a
+// private static keeps the BTF_VAR_STATIC linkage (see res_spin_lock.rs).
+#[allow(non_upper_case_globals)]
+#[link_section = ".data.A"]
+static mut kfunc_call_lock: bpf_spin_lock = bpf_spin_lock { val: 0 };
 
 struct syscall_test_args {
     data: [u8; 16],
@@ -34,6 +47,21 @@ extern "C" {
     fn bpf_kfunc_call_test_acq_rdonly_mem(p: *mut prog_test_ref_kfunc, size: i32) -> *mut i32;
     fn bpf_kfunc_call_int_mem_release(p: *mut i32);
     fn bpf_kfunc_call_test_pass_ctx(skb: *mut __sk_buff);
+    fn bpf_kfunc_trigger_ctx_check();
+}
+
+/// bpf_kfunc_trigger_ctx_check is not KF_SPINLOCK_SAFE, so the call under
+/// the lock is rejected: "function calls are not allowed while holding a
+/// lock" (prog_tests/kfunc_call.c TC_FAIL row).
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn kfunc_call_test_spin_lock_unsafe(_skb: *const __sk_buff) -> i32 {
+    unsafe {
+        bpf_spin_lock(core::ptr::addr_of_mut!(kfunc_call_lock));
+        bpf_kfunc_trigger_ctx_check();
+        bpf_spin_unlock(core::ptr::addr_of_mut!(kfunc_call_lock));
+    }
+    0
 }
 
 #[link_section = "?syscall"]
@@ -119,6 +147,30 @@ extern "C" fn kfunc_call_test_get_mem_fail_oob(_skb: *const __sk_buff) -> i32 {
             let p = bpf_kfunc_call_test_get_rdonly_mem(pt, (2 * core::mem::size_of::<i32>()) as i32);
             if !p.is_null() {
                 ret = *p.add(2 * core::mem::size_of::<i32>()); /* oob access, so -EACCES */
+            } else {
+                ret = -1;
+            }
+            bpf_kfunc_call_test_release(pt);
+        }
+    }
+    ret
+}
+
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn kfunc_call_test_get_mem_fail_zero_size(_skb: *const __sk_buff) -> i32 {
+    let mut s: u64 = 0;
+    let mut ret: i32 = 0;
+    unsafe {
+        let pt = bpf_kfunc_call_test_acquire(&mut s);
+        if !pt.is_null() {
+            // An explicit rdwr_buf_size of 0 gives R0 a zero-sized buffer,
+            // so any access is out of bounds, hence -EACCES. Previously the
+            // verifier treated a zero size as "no size argument" and sized
+            // R0 after the pointed-to return type, wrongly allowing the read.
+            let p = bpf_kfunc_call_test_get_rdwr_mem(pt, 0);
+            if !p.is_null() {
+                ret = *p;
             } else {
                 ret = -1;
             }

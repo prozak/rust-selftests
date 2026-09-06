@@ -115,7 +115,7 @@
 | fexit_many_args | PASS | 26s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | fexit_sleep | PASS | 27s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | fexit_test | PASS | 22s | Summary: 2/2 PASSED, 0 SKIPPED, 0/0 FAILED |
-| fib_lookup | FAIL | 2s | ; C-PASS |
+| fib_lookup | PASS | 28s | Summary: 3/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | file_reader | PASS | 27s | Summary: 1/8 PASSED, 0 SKIPPED, 0/0 FAILED |
 | find_vma_fail1 | PASS | 26s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | find_vma_fail2 | PASS | 14s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -162,9 +162,9 @@
 | jit_probe_mem | PASS | 16s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | kfree_skb | PASS | 17s | Summary: 2/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | kfunc_call_destructive | PASS | 21s | Summary: 1/26 PASSED, 0 SKIPPED, 0/0 FAILED |
-| kfunc_call_fail | FAIL | 21s | Summary: 0/24 PASSED, 0 SKIPPED, 1/2 FAILED; C-PASS |
+| kfunc_call_fail | PASS | 16s | Summary: 1/26 PASSED, 0 SKIPPED, 0/0 FAILED |
 | kfunc_call_race | PASS | 17s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
-| kfunc_call_test | FAIL | 9s | ; C-PASS |
+| kfunc_call_test | PASS | 17s | Summary: 2/26 PASSED, 0 SKIPPED, 0/0 FAILED |
 | kfunc_module_order | PASS | 26s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | kmem_cache_iter | PASS | 16s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
 | kprobe_multi | PASS | 40s | Summary: 4/34 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -234,7 +234,7 @@
 | raw_tp_null | PASS | 22s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | rbtree_btf_fail__add_wrong_type | PASS | 19s | Summary: 5/30 PASSED, 0 SKIPPED, 0/0 FAILED |
 | rbtree_btf_fail__wrong_node_type | PASS | 17s | Summary: 5/30 PASSED, 0 SKIPPED, 0/0 FAILED |
-| rcu_read_lock | FAIL | 3s | ; C-PASS |
+| rcu_read_lock | PASS | 14s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
 | rcu_tasks_trace_gp | PASS | 16s | Summary: 2/28 PASSED, 0 SKIPPED, 0/0 FAILED |
 | read_cgroupfs_xattr | PASS | 27s | Summary: 1/8 PASSED, 0 SKIPPED, 0/0 FAILED |
 | read_vsyscall | PASS | 26s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -266,7 +266,7 @@
 | stack_arg_kfunc | PASS | 17s | Summary: 5/0 PASSED, 8 SKIPPED, 0/0 FAILED |
 | stacktrace_map | PASS | 28s | Summary: 3/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | stacktrace_map_skip | PASS | 28s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
-| stream | FAIL | 6s | ; C-PASS |
+| stream | PASS | 14s | Summary: 6/23 PASSED, 0 SKIPPED, 0/0 FAILED |
 | string_kfuncs_failure1 | PASS | 32s | Summary: 1/138 PASSED, 0 SKIPPED, 0/0 FAILED |
 | string_kfuncs_failure2 | PASS | 30s | Summary: 1/138 PASSED, 0 SKIPPED, 0/0 FAILED |
 | string_kfuncs_success | PASS | 30s | Summary: 1/138 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -544,7 +544,7 @@
 | token_lsm | PASS | 15s | Summary: 1/13 PASSED, 0 SKIPPED, 0/0 FAILED |
 | trace_dummy_st_ops | PASS | 15s | Summary: 1/7 PASSED, 0 SKIPPED, 0/0 FAILED |
 | trace_printk | PASS | 13s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
-| tracing_failure | FAIL | 13s | Summary: 0/4 PASSED, 0 SKIPPED, 1/1 FAILED; C-PASS |
+| tracing_failure | PASS | 15s | Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tracing_multi_bench | PASS | 35s | Summary: 3/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tracing_multi_fail | PASS | 36s | Summary: 3/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tracing_multi_rollback | PASS | 37s | Summary: 3/16 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -567,7 +567,7 @@
 | verifier_mtu | PASS | 35s | Summary: 129/2513 PASSED, 26 SKIPPED, 0/0 FAILED |
 | vrf_socket_lookup | PASS | 15s | Summary: 1/6 PASSED, 0 SKIPPED, 0/0 FAILED |
 | wq | PASS | 15s | Summary: 4/12 PASSED, 0 SKIPPED, 0/0 FAILED |
-| xdp_dummy | FAIL | 3s | ; C-PASS |
+| xdp_dummy | FAIL | 76s | Summary: 11/65 PASSED, 0 SKIPPED, 1/1 FAILED; C-PASS |
 | xdp_flowtable | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | xdp_metadata | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | xdp_metadata2 | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |

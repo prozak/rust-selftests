@@ -1,0 +1,229 @@
+[swap] installed fib_lookup.bpf.o as fib_lookup.bpf.o (rust)
+  GEN-SKEL     [test_progs] fib_lookup.skel.h
+  LINK-BPF     [test_progs] test_static_linked.bpf.o
+  LINK-BPF     [test_progs] linked_funcs.bpf.o
+  LINK-BPF     [test_progs] linked_vars.bpf.o
+  LINK-BPF     [test_progs] linked_maps.bpf.o
+  LINK-BPF     [test_progs] test_subskeleton.bpf.o
+  LINK-BPF     [test_progs] test_subskeleton_lib.bpf.o
+  LINK-BPF     [test_progs] test_usdt.bpf.o
+  LINK-BPF     [test_progs] tracing_multi.bpf.o
+  LINK-BPF     [test_progs] tracing_multi_module.bpf.o
+  LINK-BPF     [test_progs] tracing_multi_intersect.bpf.o
+  LINK-BPF     [test_progs] tracing_multi_session.bpf.o
+  GEN-SKEL     [test_progs] test_static_linked.skel.h
+  GEN-SKEL     [test_progs] linked_vars.skel.h
+  GEN-SKEL     [test_progs] linked_maps.skel.h
+  GEN-SKEL     [test_progs] test_subskeleton_lib.skel.h
+  GEN-SKEL     [test_progs] linked_funcs.skel.h
+  GEN-SKEL     [test_progs] test_subskeleton.skel.h
+  GEN-SKEL     [test_progs] tracing_multi.skel.h
+  GEN-SKEL     [test_progs] tracing_multi_intersect.skel.h
+  GEN-SKEL     [test_progs] test_usdt.skel.h
+  GEN-SKEL     [test_progs] tracing_multi_session.skel.h
+  GEN-SKEL     [test_progs] tracing_multi_module.skel.h
+  LINK-BPF     [test_progs-cpuv4] test_static_linked.bpf.o
+  LINK-BPF     [test_progs-cpuv4] linked_funcs.bpf.o
+  LINK-BPF     [test_progs-cpuv4] linked_vars.bpf.o
+  LINK-BPF     [test_progs-cpuv4] linked_maps.bpf.o
+  LINK-BPF     [test_progs-cpuv4] test_subskeleton.bpf.o
+  LINK-BPF     [test_progs-cpuv4] test_subskeleton_lib.bpf.o
+  LINK-BPF     [test_progs-cpuv4] test_usdt.bpf.o
+  LINK-BPF     [test_progs-cpuv4] tracing_multi.bpf.o
+  LINK-BPF     [test_progs-cpuv4] tracing_multi_module.bpf.o
+  LINK-BPF     [test_progs-cpuv4] tracing_multi_intersect.bpf.o
+  LINK-BPF     [test_progs-cpuv4] tracing_multi_session.bpf.o
+  GEN-SKEL     [test_progs-cpuv4] test_static_linked.skel.h
+  GEN-SKEL     [test_progs-cpuv4] tracing_multi.skel.h
+  GEN-SKEL     [test_progs-cpuv4] linked_maps.skel.h
+  GEN-SKEL     [test_progs-cpuv4] linked_vars.skel.h
+  GEN-SKEL     [test_progs-cpuv4] test_subskeleton.skel.h
+  GEN-SKEL     [test_progs-cpuv4] test_subskeleton_lib.skel.h
+  GEN-SKEL     [test_progs-cpuv4] tracing_multi_module.skel.h
+  GEN-SKEL     [test_progs-cpuv4] tracing_multi_session.skel.h
+  GEN-SKEL     [test_progs-cpuv4] test_usdt.skel.h
+  GEN-SKEL     [test_progs-cpuv4] linked_funcs.skel.h
+  GEN-SKEL     [test_progs-cpuv4] tracing_multi_intersect.skel.h
+  LINK-BPF     [test_progs-no_alu32] test_static_linked.bpf.o
+  LINK-BPF     [test_progs-no_alu32] linked_funcs.bpf.o
+  LINK-BPF     [test_progs-no_alu32] linked_vars.bpf.o
+  LINK-BPF     [test_progs-no_alu32] linked_maps.bpf.o
+  LINK-BPF     [test_progs-no_alu32] test_subskeleton.bpf.o
+  LINK-BPF     [test_progs-no_alu32] test_subskeleton_lib.bpf.o
+  LINK-BPF     [test_progs-no_alu32] test_usdt.bpf.o
+  LINK-BPF     [test_progs-no_alu32] tracing_multi.bpf.o
+  LINK-BPF     [test_progs-no_alu32] tracing_multi_module.bpf.o
+  LINK-BPF     [test_progs-no_alu32] tracing_multi_intersect.bpf.o
+  LINK-BPF     [test_progs-no_alu32] tracing_multi_session.bpf.o
+  GEN-SKEL     [test_progs-no_alu32] test_static_linked.skel.h
+  GEN-SKEL     [test_progs-no_alu32] linked_maps.skel.h
+  GEN-SKEL     [test_progs-no_alu32] test_subskeleton.skel.h
+  GEN-SKEL     [test_progs-no_alu32] test_subskeleton_lib.skel.h
+  GEN-SKEL     [test_progs-no_alu32] tracing_multi_module.skel.h
+  GEN-SKEL     [test_progs-no_alu32] test_usdt.skel.h
+  GEN-SKEL     [test_progs-no_alu32] tracing_multi.skel.h
+  GEN-SKEL     [test_progs-no_alu32] linked_funcs.skel.h
+  GEN-SKEL     [test_progs-no_alu32] linked_vars.skel.h
+  GEN-SKEL     [test_progs-no_alu32] tracing_multi_intersect.skel.h
+  GEN-SKEL     [test_progs-no_alu32] tracing_multi_session.skel.h
+  LINK-BPF     [test_progs] test_static_linked.bpf.o
+  LINK-BPF     [test_progs] linked_funcs.bpf.o
+  LINK-BPF     [test_progs] linked_vars.bpf.o
+  LINK-BPF     [test_progs] linked_maps.bpf.o
+  LINK-BPF     [test_progs] test_subskeleton.bpf.o
+  LINK-BPF     [test_progs] test_subskeleton_lib.bpf.o
+  LINK-BPF     [test_progs] test_usdt.bpf.o
+  LINK-BPF     [test_progs] tracing_multi.bpf.o
+  LINK-BPF     [test_progs] tracing_multi_module.bpf.o
+  LINK-BPF     [test_progs] tracing_multi_intersect.bpf.o
+  LINK-BPF     [test_progs] tracing_multi_session.bpf.o
+  GEN-SKEL     [test_progs] test_static_linked.skel.h
+  GEN-SKEL     [test_progs] linked_maps.skel.h
+  GEN-SKEL     [test_progs] linked_vars.skel.h
+  GEN-SKEL     [test_progs] test_subskeleton.skel.h
+  GEN-SKEL     [test_progs] linked_funcs.skel.h
+  GEN-SKEL     [test_progs] test_subskeleton_lib.skel.h
+  GEN-SKEL     [test_progs] tracing_multi.skel.h
+  GEN-SKEL     [test_progs] test_usdt.skel.h
+  GEN-SKEL     [test_progs] tracing_multi_module.skel.h
+  GEN-SKEL     [test_progs] tracing_multi_session.skel.h
+  GEN-SKEL     [test_progs] tracing_multi_intersect.skel.h
+  LINK-BPF     [test_progs-cpuv4] test_static_linked.bpf.o
+  LINK-BPF     [test_progs-cpuv4] linked_funcs.bpf.o
+  LINK-BPF     [test_progs-cpuv4] linked_vars.bpf.o
+  LINK-BPF     [test_progs-cpuv4] linked_maps.bpf.o
+  LINK-BPF     [test_progs-cpuv4] test_subskeleton.bpf.o
+  LINK-BPF     [test_progs-cpuv4] test_subskeleton_lib.bpf.o
+  LINK-BPF     [test_progs-cpuv4] test_usdt.bpf.o
+  LINK-BPF     [test_progs-cpuv4] tracing_multi.bpf.o
+  LINK-BPF     [test_progs-cpuv4] tracing_multi_module.bpf.o
+  LINK-BPF     [test_progs-cpuv4] tracing_multi_intersect.bpf.o
+  LINK-BPF     [test_progs-cpuv4] tracing_multi_session.bpf.o
+  GEN-SKEL     [test_progs-cpuv4] test_static_linked.skel.h
+  GEN-SKEL     [test_progs-cpuv4] linked_vars.skel.h
+  GEN-SKEL     [test_progs-cpuv4] linked_maps.skel.h
+  GEN-SKEL     [test_progs-cpuv4] tracing_multi.skel.h
+  GEN-SKEL     [test_progs-cpuv4] tracing_multi_module.skel.h
+  GEN-SKEL     [test_progs-cpuv4] tracing_multi_intersect.skel.h
+  GEN-SKEL     [test_progs-cpuv4] test_usdt.skel.h
+  GEN-SKEL     [test_progs-cpuv4] tracing_multi_session.skel.h
+  GEN-SKEL     [test_progs-cpuv4] test_subskeleton_lib.skel.h
+  GEN-SKEL     [test_progs-cpuv4] linked_funcs.skel.h
+  GEN-SKEL     [test_progs-cpuv4] test_subskeleton.skel.h
+  LINK-BPF     [test_progs-no_alu32] test_static_linked.bpf.o
+  LINK-BPF     [test_progs-no_alu32] linked_funcs.bpf.o
+  LINK-BPF     [test_progs-no_alu32] linked_vars.bpf.o
+  LINK-BPF     [test_progs-no_alu32] linked_maps.bpf.o
+  LINK-BPF     [test_progs-no_alu32] test_subskeleton.bpf.o
+  LINK-BPF     [test_progs-no_alu32] test_subskeleton_lib.bpf.o
+  LINK-BPF     [test_progs-no_alu32] test_usdt.bpf.o
+  LINK-BPF     [test_progs-no_alu32] tracing_multi.bpf.o
+  LINK-BPF     [test_progs-no_alu32] tracing_multi_module.bpf.o
+  LINK-BPF     [test_progs-no_alu32] tracing_multi_intersect.bpf.o
+  LINK-BPF     [test_progs-no_alu32] tracing_multi_session.bpf.o
+  GEN-SKEL     [test_progs-no_alu32] test_static_linked.skel.h
+  GEN-SKEL     [test_progs-no_alu32] linked_vars.skel.h
+  GEN-SKEL     [test_progs-no_alu32] linked_maps.skel.h
+  GEN-SKEL     [test_progs-no_alu32] tracing_multi_module.skel.h
+  GEN-SKEL     [test_progs-no_alu32] tracing_multi.skel.h
+  GEN-SKEL     [test_progs-no_alu32] test_subskeleton_lib.skel.h
+  GEN-SKEL     [test_progs-no_alu32] test_subskeleton.skel.h
+  GEN-SKEL     [test_progs-no_alu32] test_usdt.skel.h
+  GEN-SKEL     [test_progs-no_alu32] tracing_multi_intersect.skel.h
+  GEN-SKEL     [test_progs-no_alu32] linked_funcs.skel.h
+  GEN-SKEL     [test_progs-no_alu32] tracing_multi_session.skel.h
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c: In function ‘test_fib_lookup’:
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:711:46: error: ‘struct <anonymous>’ has no member named ‘fib_lookup_xdp’; did you mean ‘fib_lookup’?
+  711 |         xdp_fd = bpf_program__fd(skel->progs.fib_lookup_xdp);
+      |                                              ^~~~~~~~~~~~~~
+      |                                              fib_lookup
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c: In function ‘test_fib_lookup_vlan_netns’:
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:888:46: error: ‘struct <anonymous>’ has no member named ‘fib_lookup_xdp’; did you mean ‘fib_lookup’?
+  888 |         xdp_fd = bpf_program__fd(skel->progs.fib_lookup_xdp);
+      |                                              ^~~~~~~~~~~~~~
+      |                                              fib_lookup
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c: In function ‘test_fib_lookup_vlan_redirect’:
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1026:50: error: ‘struct <anonymous>’ has no member named ‘fib_lookup_redirect’
+ 1026 |         redirect_fd = bpf_program__fd(skel->progs.fib_lookup_redirect);
+      |                                                  ^
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1047:68: error: ‘struct <anonymous>’ has no member named ‘xdp_count’
+ 1047 |         err = bpf_xdp_attach(veth2_idx, bpf_program__fd(skel->progs.xdp_count),
+      |                                                                    ^
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1064:18: error: ‘struct fib_lookup__bss’ has no member named ‘redirected’
+ 1064 |         skel->bss->redirected = 0;
+      |                  ^~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1065:18: error: ‘struct fib_lookup__bss’ has no member named ‘passed’
+ 1065 |         skel->bss->passed = 0;
+      |                  ^~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1066:18: error: ‘struct fib_lookup__bss’ has no member named ‘delivered’
+ 1066 |         skel->bss->delivered = 0;
+      |                  ^~
+In file included from /home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:9:
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1071:28: error: ‘struct fib_lookup__bss’ has no member named ‘redirected’
+ 1071 |         ASSERT_EQ(skel->bss->redirected, REDIRECT_NPKTS, "reducible egress redirected");
+      |                            ^~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/test_progs.h:254:16: note: in definition of macro ‘ASSERT_EQ’
+  254 |         typeof(actual) ___act = (actual);                               \
+      |                ^~~~~~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1071:28: error: ‘struct fib_lookup__bss’ has no member named ‘redirected’
+ 1071 |         ASSERT_EQ(skel->bss->redirected, REDIRECT_NPKTS, "reducible egress redirected");
+      |                            ^~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/test_progs.h:254:34: note: in definition of macro ‘ASSERT_EQ’
+  254 |         typeof(actual) ___act = (actual);                               \
+      |                                  ^~~~~~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1072:28: error: ‘struct fib_lookup__bss’ has no member named ‘passed’
+ 1072 |         ASSERT_EQ(skel->bss->passed, 0, "reducible egress not passed");
+      |                            ^~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/test_progs.h:254:16: note: in definition of macro ‘ASSERT_EQ’
+  254 |         typeof(actual) ___act = (actual);                               \
+      |                ^~~~~~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1072:28: error: ‘struct fib_lookup__bss’ has no member named ‘passed’
+ 1072 |         ASSERT_EQ(skel->bss->passed, 0, "reducible egress not passed");
+      |                            ^~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/test_progs.h:254:34: note: in definition of macro ‘ASSERT_EQ’
+  254 |         typeof(actual) ___act = (actual);                               \
+      |                                  ^~~~~~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1073:28: error: ‘struct fib_lookup__bss’ has no member named ‘delivered’
+ 1073 |         ASSERT_GT(skel->bss->delivered, 0, "reducible egress delivered to veth2");
+      |                            ^~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/test_progs.h:298:16: note: in definition of macro ‘ASSERT_GT’
+  298 |         typeof(actual) ___act = (actual);                               \
+      |                ^~~~~~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1073:28: error: ‘struct fib_lookup__bss’ has no member named ‘delivered’
+ 1073 |         ASSERT_GT(skel->bss->delivered, 0, "reducible egress delivered to veth2");
+      |                            ^~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/test_progs.h:298:34: note: in definition of macro ‘ASSERT_GT’
+  298 |         typeof(actual) ___act = (actual);                               \
+      |                                  ^~~~~~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1094:18: error: ‘struct fib_lookup__bss’ has no member named ‘redirected’
+ 1094 |         skel->bss->redirected = 0;
+      |                  ^~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1095:18: error: ‘struct fib_lookup__bss’ has no member named ‘passed’
+ 1095 |         skel->bss->passed = 0;
+      |                  ^~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1100:28: error: ‘struct fib_lookup__bss’ has no member named ‘passed’
+ 1100 |         ASSERT_EQ(skel->bss->passed, REDIRECT_NPKTS, "qinq egress passed");
+      |                            ^~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/test_progs.h:254:16: note: in definition of macro ‘ASSERT_EQ’
+  254 |         typeof(actual) ___act = (actual);                               \
+      |                ^~~~~~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1100:28: error: ‘struct fib_lookup__bss’ has no member named ‘passed’
+ 1100 |         ASSERT_EQ(skel->bss->passed, REDIRECT_NPKTS, "qinq egress passed");
+      |                            ^~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/test_progs.h:254:34: note: in definition of macro ‘ASSERT_EQ’
+  254 |         typeof(actual) ___act = (actual);                               \
+      |                                  ^~~~~~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1101:28: error: ‘struct fib_lookup__bss’ has no member named ‘redirected’
+ 1101 |         ASSERT_EQ(skel->bss->redirected, 0, "qinq egress not redirected");
+      |                            ^~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/test_progs.h:254:16: note: in definition of macro ‘ASSERT_EQ’
+  254 |         typeof(actual) ___act = (actual);                               \
+      |                ^~~~~~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/prog_tests/fib_lookup.c:1101:28: error: ‘struct fib_lookup__bss’ has no member named ‘redirected’
+ 1101 |         ASSERT_EQ(skel->bss->redirected, 0, "qinq egress not redirected");
+      |                            ^~
+/home/prozak/sources/heimdall_experiment/uml-harness/.build/bpf-next-x86/tools/testing/selftests/bpf/test_progs.h:254:34: note: in definition of macro ‘ASSERT_EQ’
+  254 |         typeof(actual) ___act = (actual);                               \
+      |                                  ^~~~~~
+  SKIP-TEST    fib_lookup.test.o
+failed to rebuild fib_lookup.test.o

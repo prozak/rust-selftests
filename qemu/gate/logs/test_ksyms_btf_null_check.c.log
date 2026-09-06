@@ -1,0 +1,2 @@
+[swap] installed test_ksyms_btf_null_check.bpf.o.corig as test_ksyms_btf_null_check.bpf.o (c)
+no prog_tests consume test_ksyms_btf_null_check

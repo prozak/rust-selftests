@@ -1,0 +1,2 @@
+[swap] installed ksym_race.bpf.o.corig as ksym_race.bpf.o (c)
+no prog_tests consume ksym_race

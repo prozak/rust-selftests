@@ -1,0 +1,2 @@
+[swap] installed test_subskeleton_lib2.bpf.o as test_subskeleton_lib2.bpf.o (rust)
+no prog_tests consume test_subskeleton_lib2

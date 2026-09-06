@@ -1,0 +1,2 @@
+[swap] installed test_static_linked2.bpf.o.corig as test_static_linked2.bpf.o (c)
+no prog_tests consume test_static_linked2

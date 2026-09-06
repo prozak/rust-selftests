@@ -1,0 +1,2 @@
+[swap] installed test_subskeleton_lib2.bpf.o.corig as test_subskeleton_lib2.bpf.o (c)
+no prog_tests consume test_subskeleton_lib2

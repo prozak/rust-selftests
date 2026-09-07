@@ -92,7 +92,11 @@ def prove(name, timeout_s, solver_ms):
             capture_output=True, text=True, timeout=timeout_s)
     except subprocess.TimeoutExpired:
         return "TIMEOUT", f"killed after {timeout_s}s"
-    out = p.stdout + p.stderr
+    return classify(p.stdout + p.stderr, p.returncode)
+
+
+def classify(out, returncode):
+    """Classify a completed checker log (also used by the nightly runner)."""
     counts = {k: sum(1 for line in out.splitlines()
                      if line.startswith(f"  {k} "))
               for k in ("EQUIV", "EQUIV32", "INEQUIV", "BAIL", "UNKNOWN",
@@ -104,13 +108,15 @@ def prove(name, timeout_s, solver_ms):
         bad = [line.strip() for line in out.splitlines()
                if line.startswith("  INEQUIV")]
         return "INEQUIV", "; ".join(bad)[:400]
+    if not total_line or returncode not in (0, 1) or "Traceback (most recent call last)" in out:
+        return "ERROR", out.strip().splitlines()[-1][:200] if out.strip() else ""
     if counts["BAIL"]:
         return "BAIL", total_line.strip()
     if counts["UNKNOWN"] or counts["UNPAIRED"]:
         return "UNKNOWN", total_line.strip()
-    if n_eq and p.returncode == 0:
+    if n_eq and returncode == 0:
         return "EQUIV", total_line.strip()
-    if "0/0 program" in out:
+    if "0/0 program" in out and returncode == 0:
         return "NOPROGS", ""
     return "ERROR", out.strip().splitlines()[-1][:200] if out.strip() else ""
 

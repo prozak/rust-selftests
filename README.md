@@ -16,6 +16,10 @@ passing consumers can include skipped subtests. See the
 and environment limits. This README is about **running those tests**;
 for how a translation is written see `TRANSLATING.md`.
 
+For a fresh rebuild, full proof sweep, serial QEMU gate, and codegen report,
+run `make ci-nightly`. See [the nightly guide](docs/ci-nightly.md) for
+prerequisites, artifacts, and failure semantics.
+
 ## The two guest flavors
 
 `FLAVOR` selects the oracle the harness runs the tests in:

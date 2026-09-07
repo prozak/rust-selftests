@@ -67,8 +67,9 @@ conflicts. Patch files come from the reviewed harness commit
 deliberately changing the x86 patch stack.
 
 This is the weekly gap-reporting portion of the CI plan in issue #23.
-It does not implement the remaining whole-stack `ci-nightly` build,
-equivalence, runtime, and codegen pipeline. It never advances the kernel
+The separate [local nightly pipeline](ci-nightly.md) runs the rebuild,
+equivalence, runtime, and codegen stages; scheduling that pipeline remains
+separate work. Kernel-gap reporting never advances the kernel
 pin or opens/posts issues automatically. A bump remains a reviewed
 decision based on changed translations, shared contracts, and patch status.
 

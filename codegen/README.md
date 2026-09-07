@@ -32,6 +32,10 @@ Two exclusions keep it honest:
 ../z3-venv/bin/python codegen/compare.py --show test_lwt_ip_encap:encap_gre6
 ```
 
+`--baseline <path>` selects a different proof baseline. `make ci-nightly`
+uses its fresh sweep's baseline and writes the report/TSV into the run's
+artifact directory, leaving the committed codegen reports untouched.
+
 `--show` prints the two instruction streams side by side, which is how each
 finding below was pinned down.
 

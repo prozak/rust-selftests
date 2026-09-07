@@ -255,8 +255,9 @@ translint:
 # --- Rust-vs-Rust). Safe to run any time.
 restore-all:
 	@n=0; for f in $(SELFTESTS_OUTPUT)/*.bpf.o.corig; do \
+		[ -f "$$f" ] || continue; \
 		b=$${f%.corig}; \
-		cmp -s "$$b" "$$f" || { cp "$$f" "$$b"; n=$$((n+1)); }; \
+		cmp -s "$$b" "$$f" || { cp "$$f" "$$b" || exit 1; n=$$((n+1)); }; \
 	done; echo "restored $$n C object(s)"
 
 .PHONY: restore-all
@@ -281,6 +282,16 @@ ci-local: restore-all ci-fast check-kernel-commit
 	$(PYZ3) equiv/guard.py
 
 .PHONY: ci-fast ci-local semantics
+
+# Fresh whole-corpus validation on the pinned QEMU stack. The Python driver
+# sequences recursive make calls even when the caller supplies -j.
+NIGHTLY_JOBS ?= 8
+NIGHTLY_BUILD_JOBS ?= 4
+NIGHTLY_OUT ?=
+ci-nightly:
+	$(PYZ3) scripts/ci_nightly.py --jobs $(NIGHTLY_JOBS) --build-jobs $(NIGHTLY_BUILD_JOBS) $(if $(NIGHTLY_OUT),--out "$(NIGHTLY_OUT)")
+
+.PHONY: ci-nightly
 
 # --- codegen study: what rustc emits vs clang, over proved-equivalent pairs
 codegen:

@@ -35,12 +35,12 @@ KINDS = ["alu64", "alu32", "ldx_stack", "stx_stack", "ldx_mem", "stx_mem",
          "call_kfunc", "atomic", "endian", "exit", "ld_abs_ind", "other"]
 
 
-def proved_objects():
+def proved_objects(baseline=BASELINE):
     """Objects whose every program the checker proved equivalent."""
-    if not os.path.exists(BASELINE):
+    if not os.path.exists(baseline):
         return None
     out = set()
-    for line in open(BASELINE):
+    for line in open(baseline):
         if line.startswith("#"):
             continue
         f = line.rstrip("\n").split("\t")
@@ -294,9 +294,11 @@ def main():
                     help="print a side-by-side instruction listing")
     ap.add_argument("--out", default=os.path.join(HERE, "REPORT.md"))
     ap.add_argument("--tsv", default=os.path.join(HERE, "pairs.tsv"))
+    ap.add_argument("--baseline", default=BASELINE,
+                    help="proof baseline to select equivalent objects")
     args = ap.parse_args()
 
-    proved = proved_objects()
+    proved = proved_objects(args.baseline)
     names = [f[:-len(".bpf.o")] for f in os.listdir(R_DIR)
              if f.endswith(".bpf.o")]
     if not args.all:

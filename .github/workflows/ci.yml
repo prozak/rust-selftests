@@ -4,9 +4,9 @@ name: ci
 # fixtures. Everything here runs from a bare checkout with pip-installable
 # dependencies, in about a minute.
 #
-# The heavy gates (proving the real 550-object corpus, the QEMU runtime
-# tests) need the pinned kernel tree and cannot run here; they live in
-# `make ci-local` on a machine that has uml-harness/.build.
+# The heavy gates (fresh proofs and QEMU runtime tests for all translations)
+# need the pinned kernel tree and run via `make ci-nightly` on a machine
+# that has uml-harness/.build. `make ci-local` is the cached proof/lint tier.
 
 on:
   push:

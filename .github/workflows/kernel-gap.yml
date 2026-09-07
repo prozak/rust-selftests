@@ -1,0 +1,75 @@
+name: kernel-gap
+
+# The weekly drift-reporting portion of #23. The full ci-nightly build,
+# proof, QEMU, and codegen pipeline remains separate work.
+on:
+  schedule:
+    - cron: '23 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: rust-selftests
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check out the reviewed x86 patch stack
+        uses: actions/checkout@v4
+        with:
+          repository: mykola-lysenko/uml-veristat
+          ref: 7983e26bb213526c768b24170d5a6fb5bb1964a4
+          path: harness-patches
+          sparse-checkout: patches/bpf-selftests-uml
+
+      - name: Fetch upstream tip and the recorded pin
+        shell: bash
+        run: |
+          git clone --depth=1 --filter=blob:none --sparse \
+            https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git kernel-tip
+          git -C kernel-tip sparse-checkout set tools/testing/selftests/bpf tools/lib/bpf
+          pin=$(cat rust-selftests/kernel-commit)
+          git -C kernel-tip fetch --depth=1 origin "$pin"
+
+      - name: Report gap and patch applicability
+        working-directory: rust-selftests
+        shell: bash
+        run: |
+          mkdir -p kernel-gap-report
+          set +e
+          scripts/kernel-gap.sh ../kernel-tip --base-repo ../kernel-tip \
+            --patch-dir ../harness-patches/patches/bpf-selftests-uml \
+            --format json > kernel-gap-report/report.json 2> kernel-gap-report/errors.log
+          result=$?
+          set -e
+          if [ -s kernel-gap-report/report.json ]; then
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, "scripts")
+          from kernel_gap import markdown
+          root = Path("kernel-gap-report")
+          report = json.loads((root / "report.json").read_text())
+          (root / "report.md").write_text(markdown(report))
+          PY
+          fi
+          cat kernel-gap-report/errors.log
+          exit "$result"
+
+      - name: Preserve report, including patch conflicts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-gap-report
+          path: rust-selftests/kernel-gap-report/
+          if-no-files-found: warn

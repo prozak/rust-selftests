@@ -215,6 +215,10 @@ Then re-run the affected programs (results for them must be removed from
 
 ## Result files
 
+To compare the pinned upstream corpus with a candidate kernel checkout,
+run `scripts/kernel-gap.sh /path/to/tip`. The [kernel-gap guide](docs/kernel-gap.md)
+describes the report, patch checks, and weekly CI artifacts.
+
 | file | what |
 |---|---|
 | `qemu/results.md` | 63-program QEMU verification pass (the pre-sweep corpus) |

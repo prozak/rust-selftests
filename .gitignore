@@ -2,3 +2,4 @@ bld/
 __pycache__/
 qemu/gate/logs/
 qemu/phase3/*.log
+kernel-gap-report/

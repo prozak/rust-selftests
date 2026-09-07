@@ -221,10 +221,11 @@ Then re-run the affected programs (results for them must be removed from
 | `qemu/results-postmerge.md` | 24 programs re-verified on a freshly built output dir after the helper-crate merge |
 | `qemu/results-pre-elffix.md` | historical, before the BTF/ELF append fix |
 | `sweep/lane-results/lane*.md` | the 4-lane translation sweep: 484 PASS / 117 FAIL of 608 candidates, each verdict from a QEMU test run in its lane |
-| `qemu/gate/results.md` | the whole corpus re-run in one pass on bpf-next 3ccdb078 (`scripts/qemu-gate.sh`, 2026-09-05): 547 PASS / 22 FAIL / 8 NO-ORACLE, FAILs classified in commit 2757f2b |
+| `qemu/gate/results.md` | recorded gate on bpf-next 3ccdb078: 571 PASS / 17 FAIL / 8 NO-ORACLE; combines the 2026-09-05 full run with Phase 2 repairs and Phase 3 additions; see `docs/phase3-results-2026-09-06.md` for validation limits |
 | `sweep/results.md`, `docs/` | earlier sample sweep and the failure taxonomy |
 
-Every program in `progs/` has passed the kernel's tests in the QEMU guest
-at the time it was added; `scripts/qemu-gate.sh` re-runs the whole corpus
-in one pass over the four lane outputs (`qemu/gate/`), which is how a
-kernel bump is re-validated.
+Translations include documented runtime failures and objects without a
+runtime oracle; passing consumers can also skip assertions. Consult the
+gate and phase reports for each object's validation status.
+`scripts/qemu-gate.sh` re-runs the whole corpus over the four lane outputs
+(`qemu/gate/`), which is how a kernel bump is re-validated.

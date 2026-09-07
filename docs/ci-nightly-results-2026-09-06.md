@@ -73,9 +73,11 @@ All C hashes and the proof tool hash match the committed baseline. Five
 Rust hashes changed after the forced rebuild: `bpf_iter_netlink`,
 `bpf_iter_tcp4`, `bpf_smc`, `btf_dump_test_case_syntax`, and
 `test_task_local_data`. Their proof verdicts are unchanged and all five
-pass their runtime consumers. The cause of those byte-level build
-changes was not established; the committed hash baseline remains intact
-for deliberate review.
+pass their runtime consumers. The cause was not established during the run.
+The subsequent [September 7 review](ci-nightly-hash-review-2026-09-07.md)
+reproduced all five old hashes and isolated the differences to reordered
+BTF forward declarations, their pointer references, and associated strings.
+It deliberately refreshes the five Rust-hash fields without changing verdicts.
 
 The run began while final lock, reporting, and diagnostic hardening was
 being finished. The final implementation passes 127 hermetic tests.

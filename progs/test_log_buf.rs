@@ -9,14 +9,9 @@
 // (prog_tests/log_buf.c checks the verifier log the failure produces). Only
 // `good_prog` is loaded successfully.
 //
-// KNOWN GAP: prog_tests/log_buf.c loads the whole object and libbpf stops
-// at the first program that fails, so it needs good_prog to come BEFORE
-// bad_prog in the section — which is the order the C source declares them
-// in. This pipeline emits functions in alphabetical symbol order instead
-// ("bad_prog" < "good_prog"), and swapping the declarations here does not
-// change it, so good_prog is never reached and good_log_buf stays empty:
-// log_buf/obj_load_log_buf FAILS its `good_log_verbose` assertion. Both
-// programs are otherwise byte-identical to the C and prove equivalent.
+// libbpf stops at the first failed load; preserve the C declaration order
+// so the consumer gets good_prog's successful verifier log before bad_prog.
+// BPF_PROGRAM_ORDER: good_prog bad_prog
 
 #![allow(non_upper_case_globals)]
 

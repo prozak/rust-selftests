@@ -158,6 +158,12 @@ $(BLDDIR)/%-reloc.bc: $(BLDDIR)/%-linked.bc
 # --- Internalize (keep = C object ABI) + optimize ---
 KSYM_VAR_SRCS := $(shell grep -l '^// BTF_KSYM:' progs/*.rs)
 $(patsubst progs/%.rs,$(BLDDIR)/%-opt.bc,$(KSYM_VAR_SRCS)): scripts/ksym_vars.py
+TYPE_ID_SRCS := $(shell grep -l '^// BTF_TYPE_ID:' progs/*.rs)
+$(patsubst progs/%.rs,$(BLDDIR)/%-opt.bc,$(TYPE_ID_SRCS)): scripts/type_id.py
+# usdt.bpf.h's weak maps are ABI exports even though the handler does not
+# reference them. The ordinary C keep list deliberately selects GLOBAL only.
+$(BLDDIR)/uprobe_multi_usdt-opt.bc: Makefile
+$(BLDDIR)/uprobe_multi_usdt-opt.bc: PUBLIC_API_EXTRA = --internalize-public-api-list=__bpf_usdt_specs,__bpf_usdt_ip_to_spec_id
 
 $(BLDDIR)/%-opt.bc: $(BLDDIR)/%-reloc.bc $(BLDDIR)/%.keep
 	@set -e; src=$<; \
@@ -166,10 +172,16 @@ $(BLDDIR)/%-opt.bc: $(BLDDIR)/%-reloc.bc $(BLDDIR)/%.keep
 		python3 scripts/ksym_vars.py $@.ksyms.ll progs/$*.rs $(SELFTESTS_OUTPUT)/$*.bpf.o; \
 		src=$@.ksyms.ll; \
 	fi; \
-	$(OPT) $$(sed 's/^/--internalize-public-api-list=/' $(BLDDIR)/$*.keep | tr '\n' ' ') \
+	if grep -q '^// BTF_TYPE_ID:' progs/$*.rs; then \
+		if [ "$$src" = "$<" ]; then $(LLVM_DIS) $$src -o $@.types.ll; \
+		else cp $$src $@.types.ll; fi; \
+		python3 scripts/type_id.py $@.types.ll progs/$*.rs $(SELFTESTS_OUTPUT)/$*.bpf.o; \
+		src=$@.types.ll; \
+	fi; \
+	$(OPT) $(PUBLIC_API_EXTRA) $$(sed 's/^/--internalize-public-api-list=/' $(BLDDIR)/$*.keep | tr '\n' ' ') \
 		--force-remove-attribute=cold \
 		-passes='forceattrs,internalize,globaldce,default<O2>' $$src -o $@; \
-	rm -f $@.ksyms.ll
+	rm -f $@.ksyms.ll $@.types.ll
 
 # --- invoke->call, unreachable->ret, .ksyms ---
 $(BLDDIR)/%-ksyms.bc: $(BLDDIR)/%-opt.bc
@@ -185,9 +197,12 @@ $(BLDDIR)/%-ksyms.bc: $(BLDDIR)/%-opt.bc
 	@rm -f $@.ll $@.tmp.bc $@.tmp2.bc
 
 # --- Final BPF object ---
+ORDER_SRCS := $(shell grep -l '^// BPF_PROGRAM_ORDER:' progs/*.rs)
+$(patsubst progs/%.rs,$(BLDDIR)/%.bpf.o,$(ORDER_SRCS)): scripts/program_order.py
 $(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc scripts/naked_abi.py
 	$(LLVM_DIS) $< -o $@.abi.ll
 	python3 scripts/naked_abi.py $@.abi.ll progs/$*.rs
+	@if grep -q '^// BPF_PROGRAM_ORDER:' progs/$*.rs; then python3 scripts/program_order.py $@.abi.ll progs/$*.rs; fi
 	$(LLC) -march=bpfel -mcpu=v4 -filetype=obj -o $@.tmp $@.abi.ll
 	$(LLVM_OBJCOPY) \
 		--remove-section=.eh_frame --remove-section=.rel.eh_frame \

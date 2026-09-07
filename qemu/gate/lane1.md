@@ -140,7 +140,7 @@
 | tracing_struct | FAIL | 14s | Summary: 0/3 PASSED, 0 SKIPPED, 1/1 FAILED; C-FAIL |
 | update_map_in_htab | PASS | 14s | Summary: 3/20 PASSED, 0 SKIPPED, 0/0 FAILED |
 | uprobe_multi_session | PASS | 49s | Summary: 1/19 PASSED, 0 SKIPPED, 0/0 FAILED |
-| uprobe_multi_usdt | FAIL | 31s | Summary: 0/18 PASSED, 0 SKIPPED, 1/1 FAILED; C-PASS |
+| uprobe_multi_usdt | PASS | — | Summary: 1/19 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; repaired 2026-09-07 |
 | verifier_mtu | PASS | 35s | Summary: 129/2513 PASSED, 26 SKIPPED, 0/0 FAILED |
 | xdp_flowtable | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | xdp_redirect_multi_kern | PASS | 65s | Summary: 4/24 PASSED, 0 SKIPPED, 0/0 FAILED |

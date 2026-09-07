@@ -10,10 +10,11 @@ harness: the real `prog_tests/*.c`, the real skeleton generation, the real
 x86 worktree's merge-base with upstream is a different commit).
 
 Current corpus: 596 translated C objects in `progs/`. The recorded
-[QEMU gate](qemu/gate/results.md) has 581 PASS / 7 FAIL / 8 NO-ORACLE;
+[QEMU gate](qemu/gate/results.md) has 585 PASS / 3 FAIL / 8 NO-ORACLE;
 passing consumers can include skipped subtests. See the
-[BTF repair report](docs/btf-repairs-2026-09-07.md) for the ten latest
-repairs and remaining failures. This README is about **running those tests**;
+[runtime repair report](docs/runtime-repairs-2026-09-07.md) for the four latest
+repairs and the three remaining tracing environment failures.
+This README is about **running those tests**;
 for how a translation is written see `TRANSLATING.md`.
 
 For a fresh rebuild, full proof sweep, serial QEMU gate, and codegen report,
@@ -229,7 +230,7 @@ describes the report, patch checks, and weekly CI artifacts.
 | `qemu/results-postmerge.md` | 24 programs re-verified on a freshly built output dir after the helper-crate merge |
 | `qemu/results-pre-elffix.md` | historical, before the BTF/ELF append fix |
 | `sweep/lane-results/lane*.md` | the 4-lane translation sweep: 484 PASS / 117 FAIL of 608 candidates, each verdict from a QEMU test run in its lane |
-| `qemu/gate/results.md` | recorded gate on bpf-next 3ccdb078: 581 PASS / 7 FAIL / 8 NO-ORACLE; the September 6 nightly confirmed the previous table, and September 7 BTF repairs refreshed ten rows; see `docs/btf-repairs-2026-09-07.md` for validation limits |
+| `qemu/gate/results.md` | recorded gate on bpf-next 3ccdb078: 585 PASS / 3 FAIL / 8 NO-ORACLE; the September 6 nightly confirmed the previous table, and September 7 repairs refreshed fourteen rows; see `docs/runtime-repairs-2026-09-07.md` for validation limits |
 | `sweep/results.md`, `docs/` | earlier sample sweep and the failure taxonomy |
 
 Translations include documented runtime failures and objects without a

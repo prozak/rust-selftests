@@ -52,7 +52,7 @@
 | missed_kprobe_recursion | PASS | 15s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
 | mptcp_sock | PASS | 19s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
 | nested_acquire | PASS | 20s | Summary: 1/7 PASSED, 0 SKIPPED, 0/0 FAILED |
-| netif_receive_skb | FAIL | 15s | Summary: 0/0 PASSED, 0 SKIPPED, 1/0 FAILED; C-PASS |
+| netif_receive_skb | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; repaired 2026-09-07 |
 | priv_freplace_prog | PASS | 15s | Summary: 1/13 PASSED, 0 SKIPPED, 0/0 FAILED |
 | pro_epilogue_goto_start | PASS | 18s | Summary: 1/18 PASSED, 0 SKIPPED, 0/0 FAILED |
 | profiler3 | PASS | 24s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -99,7 +99,7 @@
 | test_hash_large_key | PASS | 16s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_ksyms_btf_null_check | FAIL | 3s | ; C-NOCONSUMER |
 | test_ldsx_insn | PASS | 14s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
-| test_log_buf | FAIL | 17s | Summary: 1/8 PASSED, 0 SKIPPED, 1/1 FAILED; C-PASS |
+| test_log_buf | PASS | — | Summary: 2/9 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; repaired 2026-09-07 |
 | test_lwt_redirect | PASS | 28s | Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_map_init | PASS | 14s | Summary: 2/14 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_migrate_reuseport | PASS | 18s | Summary: 1/8 PASSED, 0 SKIPPED, 0/0 FAILED |

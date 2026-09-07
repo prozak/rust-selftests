@@ -201,6 +201,35 @@ types. An address-only Rust `c_void` extern can therefore represent a
 typed kernel symbol, as in `test_ksyms_btf_null_check`. `test_ksyms`
 also demonstrates the C oracle's weak, typeless symbol resolving to zero.
 
+## Kernel type IDs and program load order
+
+For C's `bpf_core_type_id_kernel(T)`, declare an `extern "C"` function
+returning `u64` with no arguments and annotate its C type identity:
+
+```rust
+// BTF_TYPE_ID: tid_sock struct mptcp_sock
+extern "C" {
+    fn tid_sock() -> u64;
+}
+```
+
+Use `unsafe { tid_sock() as u32 }` at the original type-ID use site.
+`scripts/type_id.py` requires that the pristine C object has a
+TYPE_ID_TARGET relocation for that exact kind/name, then lowers the call
+to LLVM's `llvm.bpf.btf.type.id` intrinsic. libbpf resolves the emitted
+CO-RE relocation at load time. Supported roots are `struct`, `union`,
+`enum` (32-bit), `typedef`, and `int`; unsupported shapes fail the build.
+Only type identity is imported from C, never program instructions or a
+resolved kernel ID. Field accesses still use the Rust CO-RE paths below.
+See `mptcp_subflow.rs` for `bpf_rdonly_cast` plus field relocations.
+
+When the consumer depends on program load order (libbpf stops at the first
+rejection), add `// BPF_PROGRAM_ORDER: first_prog second_prog`.
+`scripts/program_order.py` reorders whole LLVM definitions immediately
+before code generation, preserving their bodies and debug info. List
+every program in each selected section. `test_log_buf.rs` uses this to
+load its valid program before its deliberately invalid one.
+
 ## Kernel-struct field access (CO-RE)
 
 Only when the C source reads kernel struct fields via BTF pointers /

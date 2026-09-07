@@ -25,19 +25,8 @@
 //   3. (would) compare the rendered string against a hardcoded expected
 //      string.
 //
-// rustc has no equivalent builtin, and this pipeline's `#[btf]` CO-RE macro
-// only implements field-access relocations (byte offset / exists), not the
-// type-id-target relocation kind — see TRANSLATING.md and prior work on
-// core-reloc-enumval/bitfields. Emitting the relocation itself is not
-// possible.
-//
-// However the *value* such a relocation resolves to is just a plain u32
-// kernel-BTF type id, constant for a given (pinned) test kernel. This repo
-// already hardcodes other kernel-pinned constants when the relocation
-// mechanism to derive them isn't emittable (e.g. CONFIG_HZ). The ids below
-// were read directly out of the UML flavor's kernel image
-// (`$KERNEL_SRC/linux`, the same file `VMLINUX_BTF` points test loads at)
-// via `bpftool btf dump file`, matching each C type by name/kind/size.
+// Type-ID polyfills below lower to standard CO-RE TYPE_ID_TARGET relocations.
+// libbpf resolves each type against the loading kernel.
 //
 // Also load-bearing: `TEST_BTF`'s comparison step is dead code in the C
 // source as written — `if (ret) break;` fires on ANY nonzero
@@ -68,23 +57,32 @@ const BTF_F_ZERO: u64 = 8;
 
 const ERANGE: isize = -34;
 
-// Kernel BTF type ids for the pinned QEMU test kernel (FLAVOR=qemu; see
-// module doc). Read via `bpftool btf dump file <KERNEL_SRC>/vmlinux` against
-// this repo's ../uml-harness/.build/bpf-next-x86/vmlinux, matching each C
-// type by name/kind/size (distinct from the UML flavor's kernel BTF, whose
-// ids these superseded).
-const TID_SK_BUFF: u32 = 154033; // struct sk_buff
-const TID_SK_BUFF_UAPI: u32 = 83155; // struct __sk_buff
-const TID_INT: u32 = 122495; // int
-const TID_CHAR: u32 = 99265; // char
-const TID_UINT64_T: u32 = 167568; // uint64_t (typedef)
-const TID_U64: u32 = 167166; // u64 (typedef)
-const TID_ATOMIC_T: u32 = 90985; // atomic_t (typedef)
-const TID_BPF_CMD: u32 = 93016; // enum bpf_cmd
-const TID_BTF_ENUM: u32 = 95772; // struct btf_enum
-const TID_LIST_HEAD: u32 = 130480; // struct list_head
-const TID_BPF_PROG_INFO: u32 = 94645; // struct bpf_prog_info
-const TID_BPF_INSN: u32 = 93398; // struct bpf_insn
+// BTF_TYPE_ID: tid_sk_buff struct sk_buff
+// BTF_TYPE_ID: tid_sk_buff_uapi struct __sk_buff
+// BTF_TYPE_ID: tid_int int int
+// BTF_TYPE_ID: tid_char int char
+// BTF_TYPE_ID: tid_uint64_t typedef uint64_t
+// BTF_TYPE_ID: tid_u64 typedef u64
+// BTF_TYPE_ID: tid_atomic_t typedef atomic_t
+// BTF_TYPE_ID: tid_bpf_cmd enum bpf_cmd
+// BTF_TYPE_ID: tid_btf_enum struct btf_enum
+// BTF_TYPE_ID: tid_list_head struct list_head
+// BTF_TYPE_ID: tid_bpf_prog_info struct bpf_prog_info
+// BTF_TYPE_ID: tid_bpf_insn struct bpf_insn
+extern "C" {
+    fn tid_sk_buff() -> u64;
+    fn tid_sk_buff_uapi() -> u64;
+    fn tid_int() -> u64;
+    fn tid_char() -> u64;
+    fn tid_uint64_t() -> u64;
+    fn tid_u64() -> u64;
+    fn tid_atomic_t() -> u64;
+    fn tid_bpf_cmd() -> u64;
+    fn tid_btf_enum() -> u64;
+    fn tid_list_head() -> u64;
+    fn tid_bpf_prog_info() -> u64;
+    fn tid_bpf_insn() -> u64;
+}
 
 #[repr(C)]
 struct BtfPtr {
@@ -168,7 +166,7 @@ extern "C" fn trace_netif_receive_skb(ctx: *const u64) -> i32 {
     // Ensure we can write skb string representation.
     let p = BtfPtr {
         ptr: skb,
-        type_id: TID_SK_BUFF,
+        type_id: unsafe { tid_sk_buff() as u32 },
         flags: 0,
     };
     let mut i = 0;
@@ -203,7 +201,7 @@ extern "C" fn trace_netif_receive_skb(ctx: *const u64) -> i32 {
     // Check invalid ptr value.
     let bad = BtfPtr {
         ptr: core::ptr::null(),
-        type_id: TID_SK_BUFF,
+        type_id: unsafe { tid_sk_buff() as u32 },
         flags: 0,
     };
     let bad_ret = bpf_snprintf_btf(
@@ -228,76 +226,76 @@ extern "C" fn trace_netif_receive_skb(ctx: *const u64) -> i32 {
     }
 
     // simple int
-    test_btf(str_buf, TID_INT, 0, addr(&ZERO4));
-    test_btf(str_buf, TID_INT, BTF_F_NONAME, addr(&ZERO4));
-    test_btf(str_buf, TID_INT, 0, addr(&ZERO4));
-    test_btf(str_buf, TID_INT, BTF_F_NONAME, addr(&ZERO4));
-    test_btf(str_buf, TID_INT, BTF_F_ZERO, addr(&ZERO4));
-    test_btf(str_buf, TID_INT, BTF_F_NONAME | BTF_F_ZERO, addr(&ZERO4));
-    test_btf(str_buf, TID_INT, 0, addr(&ZERO4));
-    test_btf(str_buf, TID_INT, BTF_F_NONAME, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_int() as u32 }, 0, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_int() as u32 }, BTF_F_NONAME, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_int() as u32 }, 0, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_int() as u32 }, BTF_F_NONAME, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_int() as u32 }, BTF_F_ZERO, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_int() as u32 }, BTF_F_NONAME | BTF_F_ZERO, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_int() as u32 }, 0, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_int() as u32 }, BTF_F_NONAME, addr(&ZERO4));
 
     // simple char
-    test_btf(str_buf, TID_CHAR, 0, addr(&ZERO1));
-    test_btf(str_buf, TID_CHAR, BTF_F_NONAME, addr(&ZERO1));
-    test_btf(str_buf, TID_CHAR, 0, addr(&ZERO1));
-    test_btf(str_buf, TID_CHAR, BTF_F_NONAME, addr(&ZERO1));
-    test_btf(str_buf, TID_CHAR, BTF_F_ZERO, addr(&ZERO1));
-    test_btf(str_buf, TID_CHAR, BTF_F_NONAME | BTF_F_ZERO, addr(&ZERO1));
+    test_btf(str_buf, unsafe { tid_char() as u32 }, 0, addr(&ZERO1));
+    test_btf(str_buf, unsafe { tid_char() as u32 }, BTF_F_NONAME, addr(&ZERO1));
+    test_btf(str_buf, unsafe { tid_char() as u32 }, 0, addr(&ZERO1));
+    test_btf(str_buf, unsafe { tid_char() as u32 }, BTF_F_NONAME, addr(&ZERO1));
+    test_btf(str_buf, unsafe { tid_char() as u32 }, BTF_F_ZERO, addr(&ZERO1));
+    test_btf(str_buf, unsafe { tid_char() as u32 }, BTF_F_NONAME | BTF_F_ZERO, addr(&ZERO1));
 
     // simple typedef
-    test_btf(str_buf, TID_UINT64_T, 0, addr(&ZERO8));
-    test_btf(str_buf, TID_U64, BTF_F_NONAME, addr(&ZERO8));
-    test_btf(str_buf, TID_U64, 0, addr(&ZERO8));
-    test_btf(str_buf, TID_U64, BTF_F_NONAME, addr(&ZERO8));
-    test_btf(str_buf, TID_U64, BTF_F_ZERO, addr(&ZERO8));
-    test_btf(str_buf, TID_U64, BTF_F_NONAME | BTF_F_ZERO, addr(&ZERO8));
+    test_btf(str_buf, unsafe { tid_uint64_t() as u32 }, 0, addr(&ZERO8));
+    test_btf(str_buf, unsafe { tid_u64() as u32 }, BTF_F_NONAME, addr(&ZERO8));
+    test_btf(str_buf, unsafe { tid_u64() as u32 }, 0, addr(&ZERO8));
+    test_btf(str_buf, unsafe { tid_u64() as u32 }, BTF_F_NONAME, addr(&ZERO8));
+    test_btf(str_buf, unsafe { tid_u64() as u32 }, BTF_F_ZERO, addr(&ZERO8));
+    test_btf(str_buf, unsafe { tid_u64() as u32 }, BTF_F_NONAME | BTF_F_ZERO, addr(&ZERO8));
 
     // typedef struct
-    test_btf(str_buf, TID_ATOMIC_T, 0, addr(&ZERO4));
-    test_btf(str_buf, TID_ATOMIC_T, BTF_F_NONAME, addr(&ZERO4));
-    test_btf(str_buf, TID_ATOMIC_T, 0, addr(&ZERO4));
-    test_btf(str_buf, TID_ATOMIC_T, BTF_F_NONAME, addr(&ZERO4));
-    test_btf(str_buf, TID_ATOMIC_T, BTF_F_ZERO, addr(&ZERO4));
-    test_btf(str_buf, TID_ATOMIC_T, BTF_F_NONAME | BTF_F_ZERO, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_atomic_t() as u32 }, 0, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_atomic_t() as u32 }, BTF_F_NONAME, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_atomic_t() as u32 }, 0, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_atomic_t() as u32 }, BTF_F_NONAME, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_atomic_t() as u32 }, BTF_F_ZERO, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_atomic_t() as u32 }, BTF_F_NONAME | BTF_F_ZERO, addr(&ZERO4));
 
     // enum where enum value does (and does not) exist
-    test_btf(str_buf, TID_BPF_CMD, 0, addr(&ZERO4));
-    test_btf(str_buf, TID_BPF_CMD, 0, addr(&ZERO4));
-    test_btf(str_buf, TID_BPF_CMD, BTF_F_NONAME, addr(&ZERO4));
-    test_btf(str_buf, TID_BPF_CMD, BTF_F_NONAME | BTF_F_ZERO, addr(&ZERO4));
-    test_btf(str_buf, TID_BPF_CMD, BTF_F_ZERO, addr(&ZERO4));
-    test_btf(str_buf, TID_BPF_CMD, BTF_F_NONAME | BTF_F_ZERO, addr(&ZERO4));
-    test_btf(str_buf, TID_BPF_CMD, 0, addr(&ZERO4));
-    test_btf(str_buf, TID_BPF_CMD, BTF_F_NONAME, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_bpf_cmd() as u32 }, 0, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_bpf_cmd() as u32 }, 0, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_bpf_cmd() as u32 }, BTF_F_NONAME, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_bpf_cmd() as u32 }, BTF_F_NONAME | BTF_F_ZERO, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_bpf_cmd() as u32 }, BTF_F_ZERO, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_bpf_cmd() as u32 }, BTF_F_NONAME | BTF_F_ZERO, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_bpf_cmd() as u32 }, 0, addr(&ZERO4));
+    test_btf(str_buf, unsafe { tid_bpf_cmd() as u32 }, BTF_F_NONAME, addr(&ZERO4));
 
     // simple struct
-    test_btf(str_buf, TID_BTF_ENUM, 0, addr(&ZERO8));
-    test_btf(str_buf, TID_BTF_ENUM, BTF_F_NONAME, addr(&ZERO8));
-    test_btf(str_buf, TID_BTF_ENUM, BTF_F_NONAME, addr(&ZERO8));
-    test_btf(str_buf, TID_BTF_ENUM, BTF_F_NONAME | BTF_F_ZERO, addr(&ZERO8));
-    test_btf(str_buf, TID_BTF_ENUM, 0, addr(&ZERO8));
-    test_btf(str_buf, TID_BTF_ENUM, BTF_F_NONAME, addr(&ZERO8));
-    test_btf(str_buf, TID_BTF_ENUM, BTF_F_ZERO, addr(&ZERO8));
+    test_btf(str_buf, unsafe { tid_btf_enum() as u32 }, 0, addr(&ZERO8));
+    test_btf(str_buf, unsafe { tid_btf_enum() as u32 }, BTF_F_NONAME, addr(&ZERO8));
+    test_btf(str_buf, unsafe { tid_btf_enum() as u32 }, BTF_F_NONAME, addr(&ZERO8));
+    test_btf(str_buf, unsafe { tid_btf_enum() as u32 }, BTF_F_NONAME | BTF_F_ZERO, addr(&ZERO8));
+    test_btf(str_buf, unsafe { tid_btf_enum() as u32 }, 0, addr(&ZERO8));
+    test_btf(str_buf, unsafe { tid_btf_enum() as u32 }, BTF_F_NONAME, addr(&ZERO8));
+    test_btf(str_buf, unsafe { tid_btf_enum() as u32 }, BTF_F_ZERO, addr(&ZERO8));
 
     // struct with pointers
-    test_btf(str_buf, TID_LIST_HEAD, BTF_F_PTR_RAW, addr(&ZERO16));
-    test_btf(str_buf, TID_LIST_HEAD, BTF_F_PTR_RAW, addr(&ZERO16));
+    test_btf(str_buf, unsafe { tid_list_head() as u32 }, BTF_F_PTR_RAW, addr(&ZERO16));
+    test_btf(str_buf, unsafe { tid_list_head() as u32 }, BTF_F_PTR_RAW, addr(&ZERO16));
 
     // struct with char array
-    test_btf(str_buf, TID_BPF_PROG_INFO, 0, addr(&ZERO232));
-    test_btf(str_buf, TID_BPF_PROG_INFO, BTF_F_NONAME, addr(&ZERO232));
-    test_btf(str_buf, TID_BPF_PROG_INFO, 0, addr(&ZERO232));
-    test_btf(str_buf, TID_BPF_PROG_INFO, 0, addr(&ZERO232));
+    test_btf(str_buf, unsafe { tid_bpf_prog_info() as u32 }, 0, addr(&ZERO232));
+    test_btf(str_buf, unsafe { tid_bpf_prog_info() as u32 }, BTF_F_NONAME, addr(&ZERO232));
+    test_btf(str_buf, unsafe { tid_bpf_prog_info() as u32 }, 0, addr(&ZERO232));
+    test_btf(str_buf, unsafe { tid_bpf_prog_info() as u32 }, 0, addr(&ZERO232));
 
     // struct with non-char array
-    test_btf(str_buf, TID_SK_BUFF_UAPI, 0, addr(&ZERO192));
-    test_btf(str_buf, TID_SK_BUFF_UAPI, BTF_F_NONAME, addr(&ZERO192));
-    test_btf(str_buf, TID_SK_BUFF_UAPI, 0, addr(&ZERO192));
+    test_btf(str_buf, unsafe { tid_sk_buff_uapi() as u32 }, 0, addr(&ZERO192));
+    test_btf(str_buf, unsafe { tid_sk_buff_uapi() as u32 }, BTF_F_NONAME, addr(&ZERO192));
+    test_btf(str_buf, unsafe { tid_sk_buff_uapi() as u32 }, 0, addr(&ZERO192));
 
     // struct with bitfields
-    test_btf(str_buf, TID_BPF_INSN, 0, addr(&ZERO8));
-    test_btf(str_buf, TID_BPF_INSN, BTF_F_NONAME, addr(&ZERO8));
+    test_btf(str_buf, unsafe { tid_bpf_insn() as u32 }, 0, addr(&ZERO8));
+    test_btf(str_buf, unsafe { tid_bpf_insn() as u32 }, BTF_F_NONAME, addr(&ZERO8));
 
     0
 }

@@ -674,6 +674,13 @@ would not be distinguished.
   mptcp_subflow and netif_receive_skb hard-coded kernel BTF type ids
   from the old vmlinux (both BAIL here) and fail to load/run now.
 
+- Runtime repair follow-up (2026-09-07): `scripts/type_id.py` now lowers
+  explicit Rust polyfills to standard TYPE_ID_TARGET relocations.
+  `mptcp_subflow` and `netif_receive_skb` use it instead of pinned IDs;
+  MPTCP's list walk also uses field relocations and the C `can_loop` guard.
+  Both pass their unmodified QEMU consumers. Earlier observations above
+  describe the pipeline at the time of those sweeps.
+
 Results tables: `results/`. Remaining bail classes after tier 11:
 kfunc tail ×46 (dominated by POINTER RETURNS — dynptr slices); pointer
 provenance ×37 (spill tail, pointer-as-data, cross-region compares);

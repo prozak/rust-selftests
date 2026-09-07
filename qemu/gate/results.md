@@ -215,13 +215,13 @@
 | modify_return | PASS | 17s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | mptcp_sock | PASS | 19s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
 | mptcp_sockmap | PASS | 22s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
-| mptcp_subflow | FAIL | 21s | Summary: 0/3 PASSED, 0 SKIPPED, 1/1 FAILED; C-PASS |
+| mptcp_subflow | PASS | — | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; repaired 2026-09-07 |
 | mptcpify | PASS | 18s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
 | nested_acquire | PASS | 20s | Summary: 1/7 PASSED, 0 SKIPPED, 0/0 FAILED |
 | nested_trust_success | PASS | 17s | Summary: 1/7 PASSED, 0 SKIPPED, 0/0 FAILED |
 | net_timestamping | PASS | 22s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
 | netcnt_prog | PASS | 16s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
-| netif_receive_skb | FAIL | 15s | Summary: 0/0 PASSED, 0 SKIPPED, 1/0 FAILED; C-PASS |
+| netif_receive_skb | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; repaired 2026-09-07 |
 | netns_cookie_prog | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | perf_event_stackmap | PASS | 17s | Summary: 1/0 PASSED, 1 SKIPPED, 0/0 FAILED |
 | prepare | PASS | 14s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -414,7 +414,7 @@
 | test_legacy_printk | PASS | 20s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_libbpf_get_fd_by_id_opts | PASS | 14s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_link_pinning | PASS | 14s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
-| test_log_buf | FAIL | 17s | Summary: 1/8 PASSED, 0 SKIPPED, 1/1 FAILED; C-PASS |
+| test_log_buf | PASS | — | Summary: 2/9 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; repaired 2026-09-07 |
 | test_lookup_and_delete | PASS | 21s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_lookup_key | PASS | 13s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_lwt_ip_encap | PASS | 177s | Summary: 6/8 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -579,7 +579,7 @@
 | uprobe_multi_session_cookie | PASS | 49s | Summary: 1/19 PASSED, 0 SKIPPED, 0/0 FAILED |
 | uprobe_multi_session_recursive | PASS | 50s | Summary: 1/19 PASSED, 0 SKIPPED, 0/0 FAILED |
 | uprobe_multi_session_single | PASS | 47s | Summary: 1/19 PASSED, 0 SKIPPED, 0/0 FAILED |
-| uprobe_multi_usdt | FAIL | 31s | Summary: 0/18 PASSED, 0 SKIPPED, 1/1 FAILED; C-PASS |
+| uprobe_multi_usdt | PASS | — | Summary: 1/19 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; repaired 2026-09-07 |
 | uprobe_syscall | PASS | 15s | Summary: 1/13 PASSED, 1 SKIPPED, 0/0 FAILED |
 | user_ringbuf_success | PASS | 16s | Summary: 1/23 PASSED, 0 SKIPPED, 0/0 FAILED |
 | verifier_kfunc_prog_types | PASS | 13s | Summary: 1/12 PASSED, 0 SKIPPED, 0/0 FAILED |

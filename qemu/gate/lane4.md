@@ -50,7 +50,7 @@
 | lsm_tailcall | PASS | 18s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | metadata_used | FAIL | 2s | ; C-PASS |
 | mmap_inner_array | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
-| mptcp_subflow | FAIL | 21s | Summary: 0/3 PASSED, 0 SKIPPED, 1/1 FAILED; C-PASS |
+| mptcp_subflow | PASS | — | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; repaired 2026-09-07 |
 | net_timestamping | PASS | 22s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
 | perf_event_stackmap | PASS | 17s | Summary: 1/0 PASSED, 1 SKIPPED, 0/0 FAILED |
 | priv_prog | PASS | 16s | Summary: 1/13 PASSED, 0 SKIPPED, 0/0 FAILED |

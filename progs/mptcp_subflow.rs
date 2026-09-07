@@ -1,54 +1,17 @@
 #![no_std]
 #![no_main]
 
-// Direct translation of tools/testing/selftests/bpf/progs/mptcp_subflow.c
-// (bpf-rs-core idiom).
-//
-// `mptcp_subflow()` needs `msk = bpf_skc_to_mptcp_sock(sk)`, a real numbered
-// BPF helper (BPF_FUNC id 196, like the already-used bpf_skc_to_tcp_sock) --
-// no CO-RE involved, gives a genuinely-typed TRUSTED PTR_TO_BTF_ID(struct
-// mptcp_sock), so its own fields (`token`) are read with ordinary #[btf].
-//
-// `_getsockopt_subflow()` additionally needs that same cast (the C source
-// uses `bpf_core_cast(sk, struct mptcp_sock)` there instead, but the two are
-// interchangeable: `sk` is a genuine sock-family pointer either way, and
-// bpf_skc_to_mptcp_sock's arg check (ARG_PTR_TO_BTF_ID_SOCK_COMMON) accepts
-// PTR_TO_SOCKET/PTR_TO_SOCK_COMMON/PTR_TO_BTF_ID alike -- so reusing the
-// helper avoids `bpf_core_type_id_kernel()` entirely, which this pipeline
-// cannot emit (btf-macros only emits field byte_offset/field_exists
-// relocations, not BPF_TYPE_ID_TARGET casts; see getsockname_unix_prog.rs).
-//
-// `mptcp_for_each_subflow()` is a different problem: it's
-// `list_for_each_entry(subflow, &msk->conn_list, node)`, i.e. container_of
-// arithmetic on each `list_head*` walked off `msk->conn_list.next`. The C
-// re-types each `list_head*` back to `struct mptcp_subflow_context*` via
-// another `bpf_core_cast()` -- same unemittable relocation, and this time
-// there's no helper standing in for it. Once the pointer has gone through
-// that container_of step the verifier no longer accepts a CO-RE byte_offset
-// walk on it (btf_struct_walk would check the offset against `struct
-// list_head`, not `mptcp_subflow_context`). The fix used throughout this
-// repo for the same wall (see e.g. the pt_regs/GP_DI and arena-base-map-ptr
-// memories): stop asking the verifier to track the type at all, and read
-// through `bpf_probe_read_kernel` with byte offsets computed once, offline,
-// from this exact kernel's vmlinux BTF (`bpftool btf dump file vmlinux`):
-//   mptcp_subflow_context.node      = 0   (so a list_head* IS a subflow* --
-//                                           no container_of adjustment needed)
-//   mptcp_subflow_context.tcp_sock  = 224
-//   sock.sk_mark                    = 924
-//   inet_connection_sock.icsk_ca_ops = 2016 (== struct sock offset: icsk_inet
-//                                             is inet_connection_sock's first
-//                                             member, so a `struct sock *` and
-//                                             its `inet_connection_sock *`
-//                                             view share one address)
-//   tcp_congestion_ops.name         = 96
-// `bpf_probe_read_kernel`'s source arg is untyped (ARG_ANYTHING), so it
-// doesn't care that these addresses are plain scalars with no BTF provenance
-// by this point -- exactly the same idiom getsockname_unix_prog.rs already
-// uses for sockaddr_un.sun_path.
+#![feature(asm_experimental_arch)]
+
+// Translation of mptcp_subflow.c and mptcp_bpf.h. Type casts and every
+// kernel field use CO-RE; no kernel BTF IDs or layout offsets are pinned.
+// BTF_TYPE_ID: tid_mptcp_sock struct mptcp_sock
+// BTF_TYPE_ID: tid_subflow struct mptcp_subflow_context
+// BTF_TYPE_ID: tid_icsk struct inet_connection_sock
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::{
-    bpf_get_current_pid_tgid, bpf_map_lookup_elem, bpf_map_update_elem, bpf_probe_read_kernel,
+    bpf_get_current_pid_tgid, bpf_map_lookup_elem, bpf_map_update_elem,
     bpf_setsockopt, bpf_skc_to_mptcp_sock, sync_fetch_and_add_u32,
 };
 use bpf_rs_core::maps::{self, BpfMap};
@@ -56,6 +19,9 @@ use btf_macros::btf;
 use core::ffi::c_void;
 
 extern "C" {
+    fn tid_mptcp_sock() -> u64;
+    fn tid_subflow() -> u64;
+    fn tid_icsk() -> u64;
     fn bpf_rdonly_cast(obj: *const c_void, btf_id: u32) -> *mut c_void;
 }
 
@@ -67,31 +33,6 @@ const TCP_CONGESTION: i32 = 13;
 const TCP_CA_NAME_MAX: usize = 16;
 const IPPROTO_MPTCP: u32 = 262;
 const BPF_ANY: u64 = 0;
-
-// `BPF_PROG_TYPE_CGROUP_SOCKOPT` doesn't whitelist bpf_skc_to_mptcp_sock (see
-// cg_sockopt_func_proto in kernel/bpf/cgroup.c) -- confirmed by this file's
-// first build attempt: "program of this type cannot use helper
-// bpf_skc_to_mptcp_sock#196". That's exactly why the C original switches to
-// `bpf_core_cast()` (-> bpf_rdonly_cast kfunc) only inside
-// `_getsockopt_subflow()`, keeping the helper in the SEC("sockops") program
-// where it IS whitelisted. bpf_rdonly_cast's second argument is normally a
-// BPF_TYPE_ID_TARGET CO-RE relocation (bpf_core_type_id_kernel()), which
-// btf-macros can't emit -- but the *value* that relocation ultimately
-// resolves to is just this fixed kernel build's real vmlinux BTF id for
-// `struct mptcp_sock`, and that id is static per kernel image, not
-// per-boot: it's read straight out of the vmlinux ELF's .BTF section
-// (`bpftool btf dump file vmlinux -j`, matching `"kind": "STRUCT", "name":
-// "mptcp_sock"` -> `"id"`), the same blob the running kernel exposes at
-// /sys/kernel/btf/vmlinux. Hardcoding that resolved value sidesteps the
-// relocation machinery entirely, the same way SUBFLOW_TCP_SOCK_OFF and
-// friends below sidestep byte_offset relocations.
-const MPTCP_SOCK_BTF_ID: u32 = 133756;
-
-const MAX_SUBFLOWS: u32 = 16;
-const SUBFLOW_TCP_SOCK_OFF: usize = 224;
-const SK_MARK_OFF: usize = 924;
-const ICSK_CA_OPS_OFF: usize = 2016;
-const CA_OPS_NAME_OFF: usize = 96;
 
 #[no_mangle]
 static mut cc: [u8; TCP_CA_NAME_MAX] = *b"reno\0\0\0\0\0\0\0\0\0\0\0\0";
@@ -193,18 +134,49 @@ struct mptcp_sock {
     conn_list: list_head,
 }
 
+#[btf]
+struct mptcp_subflow_context {
+    node: list_head,
+    tcp_sock: *mut sock,
+}
+
+#[btf]
+struct sock {
+    sk_mark: u32,
+}
+
+#[btf]
+struct inet_connection_sock {
+    icsk_ca_ops: *const tcp_congestion_ops,
+}
+
+#[btf]
+struct tcp_congestion_ops {
+    name: [u8; TCP_CA_NAME_MAX],
+}
+
+// Match mptcp_bpf.h's can_loop guard using the same BPF may_goto opcode.
 #[inline(always)]
-fn read_u64(addr: usize) -> u64 {
-    let mut v: u64 = 0;
-    bpf_probe_read_kernel(&mut v, 8, addr as *const c_void);
-    v
+unsafe fn can_loop() -> bool {
+    let mut ret = true;
+    core::arch::asm!(
+        "1:",
+        ".byte 0xe5",
+        ".byte 0",
+        ".long (({0} - 1b - 8) / 8) & 0xffff",
+        ".short 0",
+        label { ret = false; },
+    );
+    ret
 }
 
 #[inline(always)]
-fn read_u32(addr: usize) -> u32 {
-    let mut v: u32 = 0;
-    bpf_probe_read_kernel(&mut v, 4, addr as *const c_void);
-    v
+unsafe fn subflow_from_node(node: *const list_head) -> *const mptcp_subflow_context {
+    // container_of: calculate the CO-RE node offset without dereferencing
+    // this temporary view, then restore the type with bpf_core_cast.
+    let view = &*(node as *const mptcp_subflow_context);
+    let offset = view.node().field.as_ptr() as usize - node as usize;
+    bpf_rdonly_cast((node as *const u8).wrapping_sub(offset).cast(), tid_subflow() as u32).cast()
 }
 
 #[link_section = "sockops"]
@@ -266,73 +238,49 @@ extern "C" fn mptcp_subflow(ctx: *mut bpf_sock_ops) -> i32 {
     1
 }
 
-#[inline(always)]
+// Keep the two checks separate until field-polyfill lowering: rustc can
+// otherwise merge their initial field queries and discard path debug types.
+#[inline(never)]
 fn check_getsockopt_subflow_mark(msk: &mptcp_sock, ctx: &mut bpf_sockopt) -> i32 {
-    let head = msk.conn_list().field.as_ptr() as usize;
-    let mut pos = read_u64(head) as usize;
+    let head = msk.conn_list().field.as_ptr();
+    let mut pos = unsafe { *(*head).next().as_ptr() };
     let mut i: u32 = 0;
-    let mut n: u32 = 0;
-
-    while pos != head && n < MAX_SUBFLOWS {
-        n += 1;
+    while pos as *const list_head != head && unsafe { can_loop() } {
+        let subflow = unsafe { &*subflow_from_node(pos) };
+        let ssk = unsafe { &**subflow.tcp_sock().as_ptr() };
         i += 1;
-
-        let tcp_sock_ptr = read_u64(pos + SUBFLOW_TCP_SOCK_OFF) as usize;
-        let sk_mark = read_u32(tcp_sock_ptr + SK_MARK_OFF);
-        if sk_mark != i {
+        if unsafe { *ssk.sk_mark().as_ptr() } != i {
             ctx.retval = -2;
             break;
         }
-
-        pos = read_u64(pos) as usize;
+        pos = unsafe { *subflow.node().next().as_ptr() };
     }
-
     1
 }
 
-#[inline(always)]
+#[inline(never)]
 fn check_getsockopt_subflow_cc(msk: &mptcp_sock, ctx: &mut bpf_sockopt) -> i32 {
-    let head = msk.conn_list().field.as_ptr() as usize;
-    let mut pos = read_u64(head) as usize;
-    let mut n: u32 = 0;
-
-    while pos != head && n < MAX_SUBFLOWS {
-        n += 1;
-
-        let tcp_sock_ptr = read_u64(pos + SUBFLOW_TCP_SOCK_OFF) as usize;
-        let sk_mark = read_u32(tcp_sock_ptr + SK_MARK_OFF);
-
-        if sk_mark == 2 {
-            let ca_ops_ptr = read_u64(tcp_sock_ptr + ICSK_CA_OPS_OFF) as usize;
-            let mut name = [0u8; TCP_CA_NAME_MAX];
-            bpf_probe_read_kernel(
-                &mut name,
-                TCP_CA_NAME_MAX as u32,
-                (ca_ops_ptr + CA_OPS_NAME_OFF) as *const c_void,
-            );
-
-            // __builtin_memcmp(icsk_ca_ops->name, cc, TCP_CA_NAME_MAX) in the
-            // C original: not bpf_strncmp, since `cc` is a plain writable
-            // global (matches the C source's non-const `char cc[]`), and
-            // bpf_strncmp's needle arg requires a read-only map value.
-            let mut equal = true;
-            let mut j = 0usize;
+    let head = msk.conn_list().field.as_ptr();
+    let mut pos = unsafe { *(*head).next().as_ptr() };
+    while pos as *const list_head != head && unsafe { can_loop() } {
+        let subflow = unsafe { &*subflow_from_node(pos) };
+        let ssk = unsafe { &**subflow.tcp_sock().as_ptr() };
+        let icsk = unsafe { &*(bpf_rdonly_cast(ssk as *const sock as *const c_void,
+                                            tid_icsk() as u32) as *const inet_connection_sock) };
+        if unsafe { *ssk.sk_mark().as_ptr() } == 2 {
+            let ops = unsafe { &**icsk.icsk_ca_ops().as_ptr() };
+            let name = ops.name().as_ptr().cast::<u8>();
+            let mut j = 0;
             while j < TCP_CA_NAME_MAX {
-                if name[j] != unsafe { cc[j] } {
-                    equal = false;
-                    break;
+                if unsafe { *name.add(j) != cc[j] } {
+                    ctx.retval = -2;
+                    return 1;
                 }
                 j += 1;
             }
-            if !equal {
-                ctx.retval = -2;
-                break;
-            }
         }
-
-        pos = read_u64(pos) as usize;
+        pos = unsafe { *subflow.node().next().as_ptr() };
     }
-
     1
 }
 
@@ -358,7 +306,7 @@ extern "C" fn _getsockopt_subflow(ctx: *mut bpf_sockopt) -> i32 {
     }
 
     let msk_ptr =
-        unsafe { bpf_rdonly_cast(c.sk as *const c_void, MPTCP_SOCK_BTF_ID) } as *const mptcp_sock;
+        unsafe { bpf_rdonly_cast(c.sk as *const c_void, tid_mptcp_sock() as u32) } as *const mptcp_sock;
     if msk_ptr.is_null() {
         return 1;
     }

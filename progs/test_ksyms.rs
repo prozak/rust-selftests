@@ -1,6 +1,12 @@
 #![no_std]
 #![no_main]
 
+// BTF_KSYM: bpf_link_fops
+// BTF_KSYM: __start_BTF
+// BTF_KSYM: __stop_BTF
+// BTF_KSYM: __per_cpu_start
+// BTF_KSYM: bpf_link_fops1
+
 // Direct translation of tools/testing/selftests/bpf/progs/test_ksyms.c
 // (bpf-rs-core idiom).
 //

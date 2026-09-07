@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
 
+// BTF_KSYM: bpf_prog_active
+
 // Direct translation of
 // tools/testing/selftests/bpf/progs/test_d_path_check_types.c (bpf-rs-core
 // idiom).

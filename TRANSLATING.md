@@ -186,6 +186,21 @@ relocation libbpf resolves via BTF:
 extern "C" { fn bpf_task_from_pid(pid: i32) -> *mut task_struct; }
 ```
 
+For an external **data** symbol, retain its Rust `extern` declaration and
+add `// BTF_KSYM: symbol_name` on its own line. `scripts/ksym_vars.py`
+supplies the missing `.ksyms` debug declaration before the pipeline's
+internalization/optimization step. The pristine C object's undefined
+`.ksyms` variable is the ABI source for its type, const qualifiers, and
+weak linkage. A missing symbol, an existing Rust definition, or an
+unsupported type is an error; the pass never imports C instructions.
+
+Integer descriptors preserve width and signedness. Struct/union
+descriptors preserve the kernel type's name and size, with no copied
+fields; translated field accesses still need their own `#[btf]` CO-RE
+types. An address-only Rust `c_void` extern can therefore represent a
+typed kernel symbol, as in `test_ksyms_btf_null_check`. `test_ksyms`
+also demonstrates the C oracle's weak, typeless symbol resolving to zero.
+
 ## Kernel-struct field access (CO-RE)
 
 Only when the C source reads kernel struct fields via BTF pointers /

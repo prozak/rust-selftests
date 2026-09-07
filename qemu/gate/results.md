@@ -182,11 +182,11 @@
 | kprobe_multi_override | PASS | 51s | Summary: 3/23 PASSED, 0 SKIPPED, 0/0 FAILED |
 | kprobe_multi_session | PASS | 36s | Summary: 3/23 PASSED, 0 SKIPPED, 0/0 FAILED |
 | kprobe_multi_session_cookie | PASS | 52s | Summary: 3/23 PASSED, 0 SKIPPED, 0/0 FAILED |
-| kprobe_multi_sleepable | FAIL | 6s | ; C-PASS |
+| kprobe_multi_sleepable | PASS | — | Summary: 3/23 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; BTF repair 2026-09-07 |
 | kprobe_write_ctx | PASS | 51s | Summary: 4/43 PASSED, 0 SKIPPED, 0/0 FAILED |
 | ksock_lsm | PASS | — | Summary: 2/1 PASSED, 0 SKIPPED, 0/0 FAILED |
 | ksock_wq | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
-| ksym_race | FAIL | 6s | ; C-NOCONSUMER |
+| ksym_race | PASS | — | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; BTF repair 2026-09-07 |
 | lirc_mode2 | PASS | 26s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | livepatch_trampoline | PASS | 18s | Summary: 1/0 PASSED, 1 SKIPPED, 0/0 FAILED |
 | load_bytes_relative | PASS | 12s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -206,8 +206,8 @@
 | lsm_tailcall | PASS | 18s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | lwt_misc | PASS | 15s | Summary: 1/1 PASSED, 0 SKIPPED, 0/0 FAILED |
 | map_excl | PASS | 19s | Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED |
-| metadata_unused | FAIL | 3s | ; C-PASS |
-| metadata_used | FAIL | 2s | ; C-PASS |
+| metadata_unused | PASS | — | Summary: 3/4 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; BTF repair 2026-09-07 |
+| metadata_used | PASS | — | Summary: 3/4 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; BTF repair 2026-09-07 |
 | missed_kprobe | PASS | 19s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
 | missed_kprobe_recursion | PASS | 15s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
 | missed_tp_recursion | PASS | 16s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -382,8 +382,8 @@
 | test_core_retro | PASS | 26s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_ctx | PASS | 27s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_custom_sec_handlers | PASS | 26s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
-| test_d_path_check_rdonly_mem | FAIL | 4s | ; C-NOCONSUMER |
-| test_d_path_check_types | FAIL | 6s | ; C-NOCONSUMER |
+| test_d_path_check_rdonly_mem | PASS | — | Summary: 2/6 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; BTF repair 2026-09-07 |
+| test_d_path_check_types | PASS | — | Summary: 2/6 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; BTF repair 2026-09-07 |
 | test_deny_namespace | PASS | 24s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_dst_clear | PASS | 25s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_enable_stats | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -405,8 +405,8 @@
 | test_hash_large_key | PASS | 16s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_helper_restricted | PASS | 26s | Summary: 2/8 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_kernel_flag | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
-| test_ksyms | FAIL | 3s | ; C-NOCONSUMER |
-| test_ksyms_btf_null_check | FAIL | 3s | ; C-NOCONSUMER |
+| test_ksyms | PASS | — | Summary: 3/8 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; BTF repair 2026-09-07 |
+| test_ksyms_btf_null_check | PASS | — | Summary: 1/6 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; BTF repair 2026-09-07 |
 | test_l4lb | PASS | 22s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_l4lb_noinline | PASS | 11s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_l4lb_noinline_dynptr | PASS | 11s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -449,7 +449,7 @@
 | test_pkt_md_access | PASS | 14s | Summary: 3/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_probe_read_user_str | PASS | 14s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_probe_user | PASS | 11s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
-| test_ptr_untrusted | FAIL | 2s | ; C-PASS |
+| test_ptr_untrusted | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; BTF repair 2026-09-07 |
 | test_queue_map | PASS | 11s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_raw_tp_test_run | PASS | 14s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_rdonly_maps | PASS | 11s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -586,7 +586,7 @@
 | verifier_mtu | PASS | 35s | Summary: 129/2513 PASSED, 26 SKIPPED, 0/0 FAILED |
 | vrf_socket_lookup | PASS | 15s | Summary: 1/6 PASSED, 0 SKIPPED, 0/0 FAILED |
 | wq | PASS | 15s | Summary: 4/12 PASSED, 0 SKIPPED, 0/0 FAILED |
-| xdp_dummy | FAIL | 76s | Summary: 11/65 PASSED, 0 SKIPPED, 1/1 FAILED; C-PASS |
+| xdp_dummy | PASS | — | Summary: 12/66 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; BTF repair 2026-09-07 |
 | xdp_flowtable | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | xdp_metadata | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | xdp_metadata2 | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |

@@ -1,6 +1,9 @@
 #![no_std]
 #![no_main]
 
+// BTF_KSYM: runqueues
+// BTF_KSYM: bpf_prog_active
+
 // Direct translation of
 // tools/testing/selftests/bpf/progs/test_ksyms_btf_null_check.c
 // (bpf-rs-core idiom).
@@ -17,6 +20,7 @@ use btf_macros::btf;
 use core::ffi::c_void;
 
 unsafe extern "C" {
+    // Address-only Rust declaration; BTF_KSYM preserves C's const struct rq.
     static runqueues: c_void;
     static bpf_prog_active: i32;
 }

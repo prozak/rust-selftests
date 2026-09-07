@@ -1,9 +1,11 @@
 #![no_std]
 #![no_main]
 
+// BTF_KSYM: bpf_testmod_ksym_percpu
+
 // Direct translation of tools/testing/selftests/bpf/progs/ksym_race.c
 // (bpf-rs-core idiom). The program is expected to FAIL to load once the
-// testmod is unloaded — prog_tests/ksyms_module.c races the two — so what
+// testmod is unloaded — prog_tests/bpf_mod_race.c races the two — so what
 // matters is that it references the module's percpu ksym at all.
 
 use bpf_rs_core::bpf_object;

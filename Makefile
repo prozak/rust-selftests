@@ -156,10 +156,20 @@ $(BLDDIR)/%-reloc.bc: $(BLDDIR)/%-linked.bc
 	$(BPF_POSTPROC) $< $@
 
 # --- Internalize (keep = C object ABI) + optimize ---
+KSYM_VAR_SRCS := $(shell grep -l '^// BTF_KSYM:' progs/*.rs)
+$(patsubst progs/%.rs,$(BLDDIR)/%-opt.bc,$(KSYM_VAR_SRCS)): scripts/ksym_vars.py
+
 $(BLDDIR)/%-opt.bc: $(BLDDIR)/%-reloc.bc $(BLDDIR)/%.keep
+	@set -e; src=$<; \
+	if grep -q '^// BTF_KSYM:' progs/$*.rs; then \
+		$(LLVM_DIS) $$src -o $@.ksyms.ll; \
+		python3 scripts/ksym_vars.py $@.ksyms.ll progs/$*.rs $(SELFTESTS_OUTPUT)/$*.bpf.o; \
+		src=$@.ksyms.ll; \
+	fi; \
 	$(OPT) $$(sed 's/^/--internalize-public-api-list=/' $(BLDDIR)/$*.keep | tr '\n' ' ') \
 		--force-remove-attribute=cold \
-		-passes='forceattrs,internalize,globaldce,default<O2>' $< -o $@
+		-passes='forceattrs,internalize,globaldce,default<O2>' $$src -o $@; \
+	rm -f $@.ksyms.ll
 
 # --- invoke->call, unreachable->ret, .ksyms ---
 $(BLDDIR)/%-ksyms.bc: $(BLDDIR)/%-opt.bc

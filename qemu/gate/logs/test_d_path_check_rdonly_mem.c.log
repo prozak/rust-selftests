@@ -1,2 +1,0 @@
-[swap] installed test_d_path_check_rdonly_mem.bpf.o.corig as test_d_path_check_rdonly_mem.bpf.o (c)
-no prog_tests consume test_d_path_check_rdonly_mem

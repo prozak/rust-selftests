@@ -6,6 +6,12 @@ LLVM, rust-bpf, Python/Z3, virtme-ng, and `/dev/kvm` access as normal local
 validation. It does not fetch or rebuild the kernel, advance pins, publish
 results, or update the committed proof/runtime baselines.
 
+For an existing output built with the pahole v1.31 release, prepare the
+[repaired tracing environment](tracing-environment-2026-09-07.md) first.
+The normal QEMU selftests build now uses `pahole-commit` and refreshes
+module BTF automatically. Module BTF changes invalidate the guard cache;
+nightly already proves every object freshly and records module hashes.
+
 ```sh
 make ci-nightly
 make ci-nightly NIGHTLY_OUT=nightly/my-run NIGHTLY_JOBS=8 NIGHTLY_BUILD_JOBS=4

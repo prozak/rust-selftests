@@ -14,10 +14,12 @@ LLVM_PREFIX="${LLVM_PREFIX:-${BUILD}/llvm-install}"
 
 [ -f "${KSRC}/vmlinux" ] || { echo "x86_64 kernel not built yet (${KSRC}/vmlinux)" >&2; exit 1; }
 
-# The harness-built pahole (1.31) must be used everywhere: the stock 1.25
-# lacks kfunc decl-tag support, which silently drops the extern __ksym
-# kfunc declarations from the generated vmlinux.h (libarena etc. need them).
-export PATH="${BUILD}/pahole-install/bin:${PATH}"
+# Use the pinned upstream pahole: 1.31 drops the int128 tracing target's
+# BTF because its parameter analysis does not account for register pairs.
+bash "${REPO}/scripts/build-qemu-pahole.sh"
+PAHOLE="${REPO}/bld/pahole-$(cat "${REPO}/pahole-commit")/install/bin/pahole"
+export PAHOLE
+export PATH="$(dirname "${PAHOLE}"):${PATH}"
 
 mkdir -p "${OUT}"
 # bpftool flavor dir expected by swap-and-test.sh's BPFTOOL derivation.
@@ -60,5 +62,8 @@ make -C "${KSRC}/tools/testing/selftests/bpf" \
     -j"$(nproc)" -k || true
 
 echo "=== selftests-output-qemu build finished (partial failures tolerated) ==="
+# Kbuild does not track changes to the pahole executable. Regenerate the
+# test module's BTF even when its compiler/linker inputs were already current.
+python3 "${REPO}/scripts/refresh-qemu-testmod-btf.py" --install
 ls "${OUT}/test_progs"
 ls "${OUT}"/test_kmods/bpf_testmod.ko 2>/dev/null || ls "${OUT}"/bpf_testmod.ko 2>/dev/null || echo "WARNING: bpf_testmod.ko missing"

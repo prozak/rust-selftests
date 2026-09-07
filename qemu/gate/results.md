@@ -566,9 +566,9 @@
 | tracing_multi_bench | PASS | 35s | Summary: 3/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tracing_multi_fail | PASS | 36s | Summary: 3/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tracing_multi_rollback | PASS | 37s | Summary: 3/16 PASSED, 0 SKIPPED, 0/0 FAILED |
-| tracing_struct | FAIL | 14s | Summary: 0/3 PASSED, 0 SKIPPED, 1/1 FAILED; C-FAIL |
-| tracing_struct_int128 | FAIL | — | Summary: 0/3 PASSED, 0 SKIPPED, 1/1 FAILED; C-FAIL: bpf_testmod_test_int128_arg absent from module BTF |
-| tracing_struct_many_args | FAIL | 14s | Summary: 0/3 PASSED, 0 SKIPPED, 1/1 FAILED; C-FAIL |
+| tracing_struct | PASS | — | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; module BTF repaired 2026-09-07 |
+| tracing_struct_int128 | PASS | — | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; module BTF repaired 2026-09-07 |
+| tracing_struct_many_args | PASS | — | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; module BTF repaired 2026-09-07 |
 | twfw | PASS | 17s | Summary: 27/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | udp_limit | PASS | 14s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | update_map_in_htab | PASS | 14s | Summary: 3/20 PASSED, 0 SKIPPED, 0/0 FAILED |

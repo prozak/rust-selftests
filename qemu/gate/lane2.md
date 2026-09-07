@@ -137,7 +137,7 @@
 | timer_mim_reject | PASS | 14s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | token_lsm | PASS | 15s | Summary: 1/13 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tracing_multi_bench | PASS | 35s | Summary: 3/16 PASSED, 0 SKIPPED, 0/0 FAILED |
-| tracing_struct_many_args | FAIL | 14s | Summary: 0/3 PASSED, 0 SKIPPED, 1/1 FAILED; C-FAIL |
+| tracing_struct_many_args | PASS | — | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; module BTF repaired 2026-09-07 |
 | uprobe_multi_bench | PASS | 48s | Summary: 1/19 PASSED, 0 SKIPPED, 0/0 FAILED |
 | uprobe_multi_session_cookie | PASS | 49s | Summary: 1/19 PASSED, 0 SKIPPED, 0/0 FAILED |
 | uprobe_syscall | PASS | 15s | Summary: 1/13 PASSED, 1 SKIPPED, 0/0 FAILED |

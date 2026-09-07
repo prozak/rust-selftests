@@ -20,12 +20,13 @@ Usage:
   equiv/guard.py --reseed sweep-summary.tsv   # rebuild baseline verdicts
                                 # from an existing sweep summary + hashes
 
-A toolchain change (equiv/*.py, waivers.tsv, kernel BTF) invalidates every
+A toolchain change (equiv/*.py, waivers.tsv, kernel/module BTF) invalidates every
 row, which means a full re-sweep; the guard says so instead of silently
 re-proving 550 programs — pass --all to actually do it.
 """
 import argparse
 import concurrent.futures as cf
+import glob
 import hashlib
 import os
 import subprocess
@@ -57,6 +58,16 @@ def tool_hash():
     kbtf = os.path.join(REPO, "bld", "vmlinux.btf")
     if os.path.exists(kbtf):
         h.update(md5(kbtf).encode())
+    # check.py resolves CO-RE and kfunc signatures against these modules.
+    # Hash only their BTF inputs, not unrelated ELF timestamps/debug data.
+    from bpfelf import BpfElf
+    for module in sorted(glob.glob(os.path.join(DEFAULT_C_DIR, '*.ko'))):
+        h.update(os.path.basename(module).encode() + b'\0')
+        elf = BpfElf(module)
+        for name in ('.BTF', '.BTF.base'):
+            section = elf.section_by_name(name)
+            h.update(name.encode() + b'\0')
+            h.update(hashlib.sha256(section.data if section else b'').digest())
     return h.hexdigest()
 
 
@@ -171,7 +182,7 @@ def main():
                   if n in baseline and baseline[n]["t"] != thash]
     if stale_tool and not args.all:
         print(f"TOOLCHAIN CHANGED: {len(stale_tool)} baseline rows are "
-              f"stale (equiv/*.py, waivers.tsv or kernel BTF differ).")
+              f"stale (equiv/*.py, waivers.tsv or kernel/module BTF differ).")
         print("A full re-sweep is required: rerun with --all "
               "(or sweep.sh + --reseed).")
         return 2

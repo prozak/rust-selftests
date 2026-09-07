@@ -10,10 +10,10 @@ harness: the real `prog_tests/*.c`, the real skeleton generation, the real
 x86 worktree's merge-base with upstream is a different commit).
 
 Current corpus: 596 translated C objects in `progs/`. The recorded
-[QEMU gate](qemu/gate/results.md) has 585 PASS / 3 FAIL / 8 NO-ORACLE;
+[QEMU gate](qemu/gate/results.md) has 588 PASS / 0 FAIL / 8 NO-ORACLE;
 passing consumers can include skipped subtests. See the
-[runtime repair report](docs/runtime-repairs-2026-09-07.md) for the four latest
-repairs and the three remaining tracing environment failures.
+[tracing environment report](docs/tracing-environment-2026-09-07.md) for the
+final three repairs and validation limits.
 This README is about **running those tests**;
 for how a translation is written see `TRANSLATING.md`.
 
@@ -51,10 +51,14 @@ directory and the guest runner.
    `scripts/build-qemu-selftests.sh`. It builds `bpftool` from the x86
    tree into `../uml-harness/.build/bpftool-output-qemu`, `modules` in the
    x86 tree, and then the selftests into
-   `../uml-harness/.build/selftests-output-qemu` with the harness-built
-   pahole 1.31 on `PATH`, in keep-going mode (a partial `test_progs` is
+   `../uml-harness/.build/selftests-output-qemu` with the upstream revision
+   in `pahole-commit`, in keep-going mode (a partial `test_progs` is
    expected and fine). After a pin bump: move the old output aside,
    `REBUILD_BPFTOOL=1`, and re-run `scripts/setup-lanes.sh`.
+   The build also refreshes `bpf_testmod` BTF so tool updates cannot leave
+   the int128 tracing target missing. For an existing prepared output,
+   run `bash scripts/build-qemu-pahole.sh` followed by
+   `python3 scripts/refresh-qemu-testmod-btf.py --install`.
 4. **Toolchain for building the Rust objects**: a built
    [4ast/rust-bpf](../rust-bpf) checkout (`bld_deps/` rlibs,
    `bld/bpf-postproc`, `bld/libbtf_macros.so`), LLVM >= 22 at
@@ -230,7 +234,7 @@ describes the report, patch checks, and weekly CI artifacts.
 | `qemu/results-postmerge.md` | 24 programs re-verified on a freshly built output dir after the helper-crate merge |
 | `qemu/results-pre-elffix.md` | historical, before the BTF/ELF append fix |
 | `sweep/lane-results/lane*.md` | the 4-lane translation sweep: 484 PASS / 117 FAIL of 608 candidates, each verdict from a QEMU test run in its lane |
-| `qemu/gate/results.md` | recorded gate on bpf-next 3ccdb078: 585 PASS / 3 FAIL / 8 NO-ORACLE; the September 6 nightly confirmed the previous table, and September 7 repairs refreshed fourteen rows; see `docs/runtime-repairs-2026-09-07.md` for validation limits |
+| `qemu/gate/results.md` | recorded gate on bpf-next 3ccdb078: 588 PASS / 0 FAIL / 8 NO-ORACLE; the September 6 nightly confirmed the previous table, and September 7 repairs refreshed seventeen rows; see `docs/tracing-environment-2026-09-07.md` for validation limits |
 | `sweep/results.md`, `docs/` | earlier sample sweep and the failure taxonomy |
 
 Translations include documented runtime failures and objects without a

@@ -705,4 +705,6 @@ provenance ×37 (spill tail, pointer-as-data, cross-region compares);
    checks in under a second when nothing changed, alarms on INEQUIV and
    on verdict downgrades. Paired with `scripts/translint.py`, which
    mechanically checks new translations for every divergence class the
-   prover has caught (see TRANSLATING.md).
+   prover has caught (see TRANSLATING.md). The cache includes kernel BTF
+   and each test module's `.BTF`/`.BTF.base`, since the checker uses both
+   for CO-RE resolution and kfunc signatures.

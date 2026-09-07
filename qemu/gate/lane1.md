@@ -137,7 +137,7 @@
 | timer_lockup | PASS | 13s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | token_kallsyms | PASS | 14s | Summary: 1/13 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tracing_failure | FAIL | 13s | Summary: 0/4 PASSED, 0 SKIPPED, 1/1 FAILED; C-PASS |
-| tracing_struct | FAIL | 14s | Summary: 0/3 PASSED, 0 SKIPPED, 1/1 FAILED; C-FAIL |
+| tracing_struct | PASS | — | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; module BTF repaired 2026-09-07 |
 | update_map_in_htab | PASS | 14s | Summary: 3/20 PASSED, 0 SKIPPED, 0/0 FAILED |
 | uprobe_multi_session | PASS | 49s | Summary: 1/19 PASSED, 0 SKIPPED, 0/0 FAILED |
 | uprobe_multi_usdt | PASS | — | Summary: 1/19 PASSED, 0 SKIPPED, 0/0 FAILED; C-PASS; repaired 2026-09-07 |

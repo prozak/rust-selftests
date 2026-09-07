@@ -92,8 +92,13 @@ def elf_find_section(buf, want):
 def main(path, objcopy=None, source=None):
     # Rust has no one-byte C `char`. An explicit per-object declaration
     # selects its u8 storage representation without changing other objects.
-    c_char = source is not None and re.search(
-        r'^// BTF_C_CHAR: u8\s*$', open(source, encoding="utf-8").read(), re.M)
+    source_text = ""
+    if source is not None:
+        with open(source, encoding="utf-8") as f:
+            source_text = f.read()
+    c_char = re.search(r'^// BTF_C_CHAR: u8\s*$', source_text, re.M)
+    anonymous = set(re.findall(r'^// BTF_ANON: ([A-Za-z_]\w*)\s*$', source_text, re.M))
+    found_anonymous = set()
     buf = bytearray(open(path, "rb").read())
     shdr_base, btf_off, btf_size, btf_align = elf_find_section(buf, ".BTF")
     data = bytearray(buf[btf_off:btf_off + btf_size])
@@ -130,7 +135,11 @@ def main(path, objcopy=None, source=None):
         vlen = info & 0xFFFF
         if name_off:
             name = get_str(name_off)
-            if kind == BTF_KIND_INT and name in RENAME:
+            if name in anonymous and kind in (4, 5):
+                struct.pack_into("<I", data, pos, 0)
+                found_anonymous.add(name)
+                renamed += 1
+            elif kind == BTF_KIND_INT and name in RENAME:
                 struct.pack_into("<I", data, pos, intern("char" if c_char and name == "u8" else RENAME[name]))
                 if c_char and name == "u8":
                     struct.pack_into("<I", data, pos + 12, 0x01000008)
@@ -152,6 +161,8 @@ def main(path, objcopy=None, source=None):
             extra = vlen * PER_VLEN[kind]
         pos += 12 + extra
 
+    if anonymous - found_anonymous:
+        raise ValueError(f"missing BTF struct/union for BTF_ANON: {sorted(anonymous - found_anonymous)}")
     if not renamed and not sanitized:
         return
 

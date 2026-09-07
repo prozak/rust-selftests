@@ -10,6 +10,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from btf_rename import main, elf_find_section
 from bpfelf import BpfElf
 from test_test_tags import synth_object
+from test_type_tags import synth_struct_object
 
 
 @pytest.mark.parametrize('enabled', [False, True])
@@ -35,3 +36,26 @@ def test_byte_type_override(tmp_path, enabled):
     raw = pathlib.Path(obj).read_bytes()
     _, off, _, _ = elf_find_section(raw, '.BTF')
     assert struct.unpack_from('<I', raw, off + 24 + 12)[0] == (0x01000008 if enabled else 8)
+
+
+def test_anonymous_struct_keeps_layout_and_references(tmp_path):
+    obj = str(tmp_path / 'anon.bpf.o')
+    synth_struct_object(obj)
+    before = BpfElf(obj).btf_types()
+    source = tmp_path / 'anon.rs'
+    source.write_text('// BTF_ANON: data\n')
+    main(obj, source=str(source))
+    after = BpfElf(obj).btf_types()
+    assert after[2][0] == 4 and after[2][1] == ''
+    assert after[2][2:] == before[2][2:]
+    assert after[3] == before[3]
+    assert after[4] == before[4]
+
+
+def test_misspelled_anonymous_struct_is_rejected(tmp_path):
+    obj = str(tmp_path / 'anon.bpf.o')
+    synth_struct_object(obj)
+    source = tmp_path / 'anon.rs'
+    source.write_text('// BTF_ANON: typo\n')
+    with pytest.raises(ValueError, match='missing BTF struct'):
+        main(obj, source=str(source))

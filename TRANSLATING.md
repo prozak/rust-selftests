@@ -308,6 +308,10 @@ assertion compiled with `-Werror=pointer-sign`), declare byte storage with
 names that object's `u8` type `char` with the pinned x86 C signed-char
 encoding. This applies to all `u8` uses in the object, so use it only when
 that matches the object's C ABI. It does not change storage or code.
+For a C anonymous struct stored in a global, declare its Rust layout and
+add `// BTF_ANON: RustTypeName`. This removes only the BTF struct's name so
+the generated skeleton embeds its definition instead of referring to an
+undefined named C type. Members, offsets and references stay unchanged.
 
 ## Divergence classes the equivalence prover has caught (lint before submitting)
 

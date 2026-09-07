@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
 
+// BTF_C_CHAR: u8
+
 // Direct translation of tools/testing/selftests/bpf/progs/metadata_unused.c
 // (bpf-rs-core idiom).
 //

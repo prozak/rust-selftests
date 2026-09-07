@@ -1,13 +1,15 @@
 #![no_std]
 #![no_main]
 
+// BTF_C_CHAR: u8
+
 // Direct translation of tools/testing/selftests/bpf/progs/test_ptr_untrusted.c
 // (bpf-rs-core idiom).
 //
 // BPF_PROG(lsm_run, int cmd, union bpf_attr *attr, unsigned int size,
 // bool kernel): on BPF_RAW_TRACEPOINT_OPEN the program copies the
 // tracepoint name in from user memory. `attr->raw_tracepoint.name` is at
-// offset 0 of that union member; prog_tests/task_local_storage.c only
+// offset 0 of that union member; prog_tests/ptr_untrusted.c only
 // checks that the program loads and that tp_name comes back, so the point
 // of the test is that an UNTRUSTED pointer is accepted here at all.
 

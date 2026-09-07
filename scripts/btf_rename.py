@@ -23,6 +23,7 @@ map-def structs are not load-bearing, so they are rewritten to
 
 An optional source argument can declare `// BTF_C_CHAR: u8` to represent
 this object's byte storage as the pinned x86 C ABI's signed `char`.
+`// BTF_C_VOID: c_void` makes pointers to Rust's c_void enum C void pointers.
 
 Usage: btf_rename.py <obj.o> [prog.rs]
 """
@@ -97,6 +98,7 @@ def main(path, objcopy=None, source=None):
         with open(source, encoding="utf-8") as f:
             source_text = f.read()
     c_char = re.search(r'^// BTF_C_CHAR: u8\s*$', source_text, re.M)
+    c_void = re.search(r'^// BTF_C_VOID: c_void\s*$', source_text, re.M)
     anonymous = set(re.findall(r'^// BTF_ANON: ([A-Za-z_]\w*)\s*$', source_text, re.M))
     found_anonymous = set()
     buf = bytearray(open(path, "rb").read())
@@ -129,12 +131,19 @@ def main(path, objcopy=None, source=None):
     end = types_base + type_len
     renamed = 0
     sanitized = 0
+    type_id = 1
+    void_types = set()
+    pointers = []
     while pos < end:
-        name_off, info, _ = struct.unpack_from("<III", data, pos)
+        name_off, info, target = struct.unpack_from("<III", data, pos)
         kind = (info >> 24) & 0x1F
         vlen = info & 0xFFFF
+        if kind == 2:
+            pointers.append((pos, target))
         if name_off:
             name = get_str(name_off)
+            if c_void and kind == 6 and name == "c_void":
+                void_types.add(type_id)
             if name in anonymous and kind in (4, 5):
                 struct.pack_into("<I", data, pos, 0)
                 found_anonymous.add(name)
@@ -160,10 +169,19 @@ def main(path, objcopy=None, source=None):
         if extra is None:
             extra = vlen * PER_VLEN[kind]
         pos += 12 + extra
+        type_id += 1
 
+    void_pointers = 0
+    if c_void:
+        for ptr_pos, target in pointers:
+            if target in void_types:
+                struct.pack_into("<I", data, ptr_pos + 8, 0)
+                void_pointers += 1
+        if not void_pointers:
+            raise ValueError("BTF_C_VOID requires a pointer to the c_void enum")
     if anonymous - found_anonymous:
         raise ValueError(f"missing BTF struct/union for BTF_ANON: {sorted(anonymous - found_anonymous)}")
-    if not renamed and not sanitized:
+    if not renamed and not sanitized and not void_pointers:
         return
 
     # string table is the last section in the .BTF blob; append and fix str_len
@@ -180,7 +198,8 @@ def main(path, objcopy=None, source=None):
     struct.pack_into("<QQ", buf, shdr_base + 24, new_off, len(data))
     open(path, "wb").write(buf)
     print(f"[btf_rename] {os.path.basename(path)}: "
-          f"renamed {renamed} int type(s), sanitized {sanitized} name(s)")
+          f"renamed {renamed} int type(s), sanitized {sanitized} name(s), "
+          f"normalized {void_pointers} void pointer(s)")
 
 
 if __name__ == "__main__":

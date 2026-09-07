@@ -313,6 +313,13 @@ add `// BTF_ANON: RustTypeName`. This removes only the BTF struct's name so
 the generated skeleton embeds its definition instead of referring to an
 undefined named C type. Members, offsets and references stay unchanged.
 
+For C `void *` globals, use a `*mut c_void` declaration and add
+`// BTF_C_VOID: c_void`. Rust emits `c_void` as an enum; the annotation
+repoints pointers to that enum to BTF type ID zero (void), allowing the
+generated C skeleton to accept arbitrary pointer values. Other pointers
+and uses of the enum by value are unchanged. Use this only when every
+pointer to `c_void` in the object represents C `void *`.
+
 ## Divergence classes the equivalence prover has caught (lint before submitting)
 
 `python3 scripts/translint.py <name>` checks a translation mechanically;

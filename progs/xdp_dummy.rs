@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
 
+// BTF_C_CHAR: u8
+
 // Direct translation of tools/testing/selftests/bpf/progs/xdp_dummy.c
 // (bpf-rs-core idiom).
 //
@@ -12,15 +14,8 @@
 // the prover still proves the pair EQUIV, because the difference is in the
 // BTF rather than in what the code computes.
 //
-// KNOWN GAP: prog_tests/btf_dump.c parses THIS object by name and
-// string-compares a dump of its `license` DATASEC against
-//     SEC("license") char[4] _license = (char[4])['G','P','L',];
-// Our `bpf_object!` emits `[u8; 4]`, which the pipeline renders as
-// `unsigned char[4]`, and nothing in the Rust type system maps to BTF
-// `char` (u8 -> "unsigned char", i8 -> "signed char"). So
-// btf_dump/datasec_data FAILS with this object while passing with the C
-// one. Tracked separately as a BTF-emission issue; the translated code
-// itself is correct and proves equivalent.
+// prog_tests/btf_dump.c also checks the license DATASEC's exact char[4]
+// representation. BTF_C_CHAR makes bpf_object!'s byte array match C char.
 
 use bpf_rs_core::bpf_object;
 

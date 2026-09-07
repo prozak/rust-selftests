@@ -354,6 +354,15 @@ def check_program(name, func, elves, shared, timeout_ms, callback=False,
     if res == z3.unknown:
         return "UNKNOWN", "solver timeout/gave-up"
 
+    # Per-executor register residue is deliberately independent. A witness
+    # that depends on it cannot establish a translation difference: the
+    # verifier rejects reads of uninitialized/call-clobbered registers, and
+    # aggregate R0:R2 returns are not fully modeled yet. Keep this boundary
+    # explicit instead of comparing two unrelated symbolic choices.
+    private_regs = unresolved_registers(eq)
+    if private_regs:
+        return "BAIL", "observable depends on unmodeled register state: " + ", ".join(private_regs)
+
     if ret_observable and (ret_bits is None or ret_bits > 32):
         # divergence only in upper 32 bits of r0 is benign for <=32-bit ret types
         _, res32 = solve([z3.Extract(31, 0, ret_a) == z3.Extract(31, 0, ret_b)] + mem_eq)
@@ -368,6 +377,16 @@ def check_program(name, func, elves, shared, timeout_ms, callback=False,
         if not z3.is_true(m.eval(e)):
             detail.append(f"observable '{r}' differs")
     return "INEQUIV", "; ".join(detail) or "model found (details unavailable)"
+
+
+def unresolved_registers(expressions):
+    """Private register symbols surviving simplification of observables."""
+    from z3.z3util import get_vars
+    prefixes = ("uninit_A_", "uninit_B_", "clobber_A_", "clobber_B_",
+                "cbclobber_A_", "cbclobber_B_")
+    return sorted({str(v) for expr in expressions
+                   for v in get_vars(z3.simplify(expr))
+                   if str(v).startswith(prefixes)})
 
 
 def main():

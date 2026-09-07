@@ -45,6 +45,26 @@ def test_differing_return_constant_is_detected():
     assert verdict(a, b) == "INEQUIV"
 
 
+def test_uninitialized_register_is_a_model_boundary_not_divergence():
+    p = asm.prog(asm.mov64_reg(R0, R2), asm.exit_())
+    result, detail = compare(p, p)
+    assert result == "BAIL"
+    assert "unmodeled register state" in detail
+
+
+def test_call_clobbered_register_is_not_a_shared_return_value():
+    p = asm.prog(asm.call(5), asm.mov64_reg(R0, R2), asm.exit_())
+    result, detail = compare(p, p)
+    assert result == "BAIL"
+    assert "clobber_" in detail
+
+
+def test_irrelevant_register_residue_does_not_hide_a_real_difference():
+    a = asm.prog(asm.call(5), asm.mov64_imm(R0, 1), asm.exit_())
+    b = asm.prog(asm.call(5), asm.mov64_imm(R0, 2), asm.exit_())
+    assert verdict(a, b) == "INEQUIV"
+
+
 # ------------------------------------------------- divergence classes seen
 
 def test_differing_ctx_load_offset_is_detected():
@@ -69,10 +89,10 @@ def test_signed_vs_unsigned_compare_is_detected():
     """`u32 > int` compares unsigned in C (sockmap_strp class)."""
     # load a scalar from the ctx first (r1 itself is the ctx POINTER),
     # then compare it signed vs unsigned
-    signed = asm.prog(asm.ldx(8, R1, R1, 0),
+    signed = asm.prog(asm.mov64_imm(R0, 1), asm.ldx(8, R1, R1, 0),
                       asm.raw(0x65, R1, off=1, imm=10),   # JSGT r1, 10
                       asm.mov64_imm(R0, 0), asm.exit_())
-    unsigned = asm.prog(asm.ldx(8, R1, R1, 0),
+    unsigned = asm.prog(asm.mov64_imm(R0, 1), asm.ldx(8, R1, R1, 0),
                         asm.jgt_imm(R1, 10, 1),
                         asm.mov64_imm(R0, 0), asm.exit_())
     assert verdict(signed, unsigned) == "INEQUIV"
@@ -81,9 +101,9 @@ def test_signed_vs_unsigned_compare_is_detected():
 def test_bool_compare_against_one_vs_zero_is_detected():
     """clang emits `jne 1` at some sites and `jne 0` at others; a
     translation must mirror its own site (test_sockmap_listen class)."""
-    ne_one = asm.prog(asm.ldx(1, R1, R1, 0), asm.jne_imm(R1, 1, 1),
+    ne_one = asm.prog(asm.mov64_imm(R0, 0), asm.ldx(1, R1, R1, 0), asm.jne_imm(R1, 1, 1),
                       asm.mov64_imm(R0, 9), asm.exit_())
-    ne_zero = asm.prog(asm.ldx(1, R1, R1, 0), asm.jne_imm(R1, 0, 1),
+    ne_zero = asm.prog(asm.mov64_imm(R0, 0), asm.ldx(1, R1, R1, 0), asm.jne_imm(R1, 0, 1),
                        asm.mov64_imm(R0, 9), asm.exit_())
     assert verdict(ne_one, ne_zero) == "INEQUIV"
 
@@ -91,9 +111,9 @@ def test_bool_compare_against_one_vs_zero_is_detected():
 def test_masking_a_ctx_word_is_detected():
     """Masking to a byte/half where C tests the full word
     (timer_start_deadlock / test_tc_dtime class)."""
-    full = asm.prog(asm.ldx(8, R1, R1, 16), asm.jeq_imm(R1, 0, 1),
+    full = asm.prog(asm.mov64_imm(R0, 0), asm.ldx(8, R1, R1, 16), asm.jeq_imm(R1, 0, 1),
                     asm.mov64_imm(R0, 1), asm.exit_())
-    masked = asm.prog(asm.ldx(8, R1, R1, 16), asm.and64_imm(R1, 0xFF),
+    masked = asm.prog(asm.mov64_imm(R0, 0), asm.ldx(8, R1, R1, 16), asm.and64_imm(R1, 0xFF),
                       asm.jeq_imm(R1, 0, 1),
                       asm.mov64_imm(R0, 1), asm.exit_())
     assert verdict(full, masked) == "INEQUIV"

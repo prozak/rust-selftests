@@ -9,9 +9,12 @@ harness: the real `prog_tests/*.c`, the real skeleton generation, the real
 (`kernel-commit`; `make status` and `make ci-local` refuse to run when the
 x86 worktree's merge-base with upstream is a different commit).
 
-Current corpus: 577 translated programs in `progs/`, each verified by
-running the kernel's own tests against it. This README is about **running
-those tests**; for how a translation is written see `TRANSLATING.md`.
+Current corpus: 596 translated C objects in `progs/`. The recorded
+[QEMU gate](qemu/gate/results.md) has 571 PASS / 17 FAIL / 8 NO-ORACLE;
+passing consumers can include skipped subtests. See the
+[Phase 3 report](docs/phase3-results-2026-09-06.md) for the latest additions
+and environment limits. This README is about **running those tests**;
+for how a translation is written see `TRANSLATING.md`.
 
 ## The two guest flavors
 
@@ -100,7 +103,7 @@ corrupt each other's swapped objects, logs and rows. Use separate lanes
 **Timing:** most programs take 10–20s wall; networking-heavy ones
 (`test_lwt_ip_encap`, `test_tc_link`, `test_tc_neigh_fib`, `test_uprobe`,
 `verifier_mtu`) take 30–160s. Budget a couple of hours for the full
-550-program corpus. Per-program caps: 1200s for the make step, 600s
+corpus. Per-program caps: 1200s for the make step, 600s
 (`QEMU_TIMEOUT`) for a single guest boot.
 
 **Reading the Summary line.** The `notes` column is `test_progs`' own

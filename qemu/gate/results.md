@@ -1,10 +1,17 @@
 | program | verdict | wall | notes |
 |---|---|---|---|
 | access_map_in_map | PASS | 26s | Summary: 3/20 PASSED, 0 SKIPPED, 0/0 FAILED |
+| aggregate_ret_func | PASS | — | Summary: 2/21 PASSED, 2 SKIPPED, 0/0 FAILED |
+| aggregate_ret_kfunc | PASS | — | Summary: 2/21 PASSED, 2 SKIPPED, 0/0 FAILED |
+| aggregate_ret_kfunc_arena | PASS | — | Summary: 2/21 PASSED, 2 SKIPPED, 0/0 FAILED; upstream dummy carries needs LLVM 23 skip; current build uses LLVM 22 |
+| aggregate_ret_target | PASS | — | Summary: 1/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | arena_atomics | PASS | 26s | Summary: 1/10 PASSED, 0 SKIPPED, 0/0 FAILED |
 | arena_htab | PASS | 26s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | arena_htab_asm | PASS | 26s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
+| arena_kfunc | PASS | — | Summary: 129/2513 PASSED, 26 SKIPPED, 0/0 FAILED; seven active programs pass; upstream stack-argument dummy SKIP |
+| arena_kfunc_jit | PASS | — | Summary: 129/2513 PASSED, 26 SKIPPED, 0/0 FAILED; all three JIT-disassembly programs SKIP (harness lacks LLVM disassembly support) |
 | arena_list | PASS | 16s | Summary: 1/0 PASSED, 4 SKIPPED, 0/0 FAILED |
+| arena_mem_usage | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | arena_spin_lock | PASS | 16s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
 | arena_strsearch | PASS | 17s | Summary: 1/1 PASSED, 0 SKIPPED, 0/0 FAILED |
 | atomic_bounds | PASS | 17s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -109,6 +116,7 @@
 | fentry_many_args | PASS | 22s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | fentry_recursive | PASS | 21s | Summary: 3/3 PASSED, 0 SKIPPED, 0/0 FAILED |
 | fentry_recursive_target | PASS | 23s | Summary: 3/3 PASSED, 0 SKIPPED, 0/0 FAILED |
+| fentry_sleepable | PASS | — | Summary: 1/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | fentry_test | PASS | 16s | Summary: 2/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | fexit_bpf2bpf | PASS | 13s | Summary: 1/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | fexit_bpf2bpf_simple | PASS | 12s | Summary: 1/16 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -134,6 +142,7 @@
 | freplace_global_func | PASS | 12s | Summary: 1/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | freplace_int_with_void | PASS | 12s | Summary: 1/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | freplace_progmap | PASS | 16s | Summary: 1/16 PASSED, 0 SKIPPED, 0/0 FAILED |
+| freplace_ret_pair | PASS | — | Summary: 1/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | freplace_unreliable_prog | PASS | 22s | Summary: 1/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | freplace_void | PASS | 13s | Summary: 1/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | fsession_test | PASS | 19s | Summary: 3/3 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -165,6 +174,7 @@
 | kfunc_call_fail | PASS | 16s | Summary: 1/26 PASSED, 0 SKIPPED, 0/0 FAILED |
 | kfunc_call_race | PASS | 17s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | kfunc_call_test | PASS | 17s | Summary: 2/26 PASSED, 0 SKIPPED, 0/0 FAILED |
+| kfunc_implicit_args_tracing | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | kfunc_module_order | PASS | 26s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | kmem_cache_iter | PASS | 16s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
 | kprobe_multi | PASS | 40s | Summary: 4/34 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -174,6 +184,8 @@
 | kprobe_multi_session_cookie | PASS | 52s | Summary: 3/23 PASSED, 0 SKIPPED, 0/0 FAILED |
 | kprobe_multi_sleepable | FAIL | 6s | ; C-PASS |
 | kprobe_write_ctx | PASS | 51s | Summary: 4/43 PASSED, 0 SKIPPED, 0/0 FAILED |
+| ksock_lsm | PASS | — | Summary: 2/1 PASSED, 0 SKIPPED, 0/0 FAILED |
+| ksock_wq | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | ksym_race | FAIL | 6s | ; C-NOCONSUMER |
 | lirc_mode2 | PASS | 26s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | livepatch_trampoline | PASS | 18s | Summary: 1/0 PASSED, 1 SKIPPED, 0/0 FAILED |
@@ -255,6 +267,7 @@
 | sock_destroy_prog | PASS | 19s | Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED |
 | sock_iter_batch | PASS | 24s | Summary: 1/17 PASSED, 0 SKIPPED, 0/0 FAILED |
 | sock_ops_get_sk | PASS | 25s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
+| sock_read_xattr | PASS | — | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
 | socket_cookie_prog | PASS | 20s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | sockmap_parse_prog | NO-ORACLE | 2s |  |
 | sockmap_tcp_msg_prog | NO-ORACLE | 2s |  |
@@ -274,6 +287,8 @@
 | strobemeta_bpf_loop | PASS | 49s | Summary: 27/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | strobemeta_nounroll1 | PASS | 34s | Summary: 27/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | strobemeta_nounroll2 | PASS | 46s | Summary: 27/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| struct_ops_arena | PASS | — | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
+| struct_ops_arena_attach | PASS | — | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
 | struct_ops_assoc | PASS | 17s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
 | struct_ops_assoc_in_timer | PASS | 29s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
 | struct_ops_assoc_reuse | PASS | 27s | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -310,6 +325,7 @@
 | tailcall_bpf2bpf_hierarchy2 | PASS | 16s | Summary: 1/40 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tailcall_bpf2bpf_hierarchy3 | PASS | 16s | Summary: 1/40 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tailcall_bpf2bpf_hierarchy_fentry | PASS | 12s | Summary: 1/40 PASSED, 0 SKIPPED, 0/0 FAILED |
+| tailcall_callback | PASS | — | Summary: 1/40 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tailcall_cgrp_storage | PASS | 24s | Summary: 1/40 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tailcall_cgrp_storage_no_storage | PASS | 20s | Summary: 1/40 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tailcall_cgrp_storage_owner | PASS | 20s | Summary: 1/40 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -385,6 +401,7 @@
 | test_global_func_args | PASS | 20s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_global_func_ctx_args | PASS | 15s | Summary: 1/29 PASSED, 1 SKIPPED, 0/0 FAILED |
 | test_global_map_resize | PASS | 16s | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_global_percpu_data | PASS | — | Summary: 2/8 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_hash_large_key | PASS | 16s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_helper_restricted | PASS | 26s | Summary: 2/8 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_kernel_flag | PASS | 15s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -491,6 +508,7 @@
 | test_tc_neigh | PASS | 59s | Summary: 1/8 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_tc_neigh_fib | PASS | 59s | Summary: 1/8 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_tc_peer | PASS | 59s | Summary: 1/8 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_tc_qevent | PASS | — | Summary: 1/0 PASSED, 2 SKIPPED, 0/0 FAILED; both traffic subtests SKIP (environment); object load passes |
 | test_tc_tunnel | PASS | 55s | Summary: 1/18 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_tcp_custom_syncookie | PASS | 14s | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_tcp_estats | PASS | 11s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -549,6 +567,7 @@
 | tracing_multi_fail | PASS | 36s | Summary: 3/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tracing_multi_rollback | PASS | 37s | Summary: 3/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tracing_struct | FAIL | 14s | Summary: 0/3 PASSED, 0 SKIPPED, 1/1 FAILED; C-FAIL |
+| tracing_struct_int128 | FAIL | — | Summary: 0/3 PASSED, 0 SKIPPED, 1/1 FAILED; C-FAIL: bpf_testmod_test_int128_arg absent from module BTF |
 | tracing_struct_many_args | FAIL | 14s | Summary: 0/3 PASSED, 0 SKIPPED, 1/1 FAILED; C-FAIL |
 | twfw | PASS | 17s | Summary: 27/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | udp_limit | PASS | 14s | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |

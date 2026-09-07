@@ -1,6 +1,14 @@
 # Advancing the bpf-next pin: gap analysis and plan (2026-09-04)
 
-## Where we are
+## Execution status (2026-09-06)
+
+Phases 1 and 2 are complete. Phase 3 adds all 19 remaining planned
+objects, bringing coverage to 596/1008. See the
+[Phase 3 results](phase3-results-2026-09-06.md) for validation and limits.
+Phase 4 is next; the seven verifier and three negative objects remain
+deferred. The analysis below preserves the original pre-bump snapshot.
+
+## Where we were when planning
 
 | | commit | date |
 |---|---|---|

@@ -21,7 +21,10 @@ Rust generics reach BTF as e.g. "BpfMap<u32, val, 1, 1>"; type names of
 map-def structs are not load-bearing, so they are rewritten to
 "BpfMap_u32__val__1__1_". Names that are already valid are never touched.
 
-Usage: btf_rename.py <obj.o>
+An optional source argument can declare `// BTF_C_CHAR: u8` to represent
+this object's byte storage as the pinned x86 C ABI's signed `char`.
+
+Usage: btf_rename.py <obj.o> [prog.rs]
 """
 
 import os
@@ -86,7 +89,11 @@ def elf_find_section(buf, want):
     raise KeyError(f"no section {want}")
 
 
-def main(path, objcopy=None):
+def main(path, objcopy=None, source=None):
+    # Rust has no one-byte C `char`. An explicit per-object declaration
+    # selects its u8 storage representation without changing other objects.
+    c_char = source is not None and re.search(
+        r'^// BTF_C_CHAR: u8\s*$', open(source, encoding="utf-8").read(), re.M)
     buf = bytearray(open(path, "rb").read())
     shdr_base, btf_off, btf_size, btf_align = elf_find_section(buf, ".BTF")
     data = bytearray(buf[btf_off:btf_off + btf_size])
@@ -124,7 +131,9 @@ def main(path, objcopy=None):
         if name_off:
             name = get_str(name_off)
             if kind == BTF_KIND_INT and name in RENAME:
-                struct.pack_into("<I", data, pos, intern(RENAME[name]))
+                struct.pack_into("<I", data, pos, intern("char" if c_char and name == "u8" else RENAME[name]))
+                if c_char and name == "u8":
+                    struct.pack_into("<I", data, pos + 12, 0x01000008)
                 renamed += 1
             # DATASEC (15) names are section names (".maps", ".bss", ...):
             # the kernel validates those with section-name rules, dots are
@@ -164,4 +173,4 @@ def main(path, objcopy=None):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
+    main(sys.argv[1], source=sys.argv[2] if len(sys.argv) > 2 else None)

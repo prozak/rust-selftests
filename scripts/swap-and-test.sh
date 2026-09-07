@@ -74,7 +74,11 @@ sfmake() {
 # is enough for them.
 SKELS=()
 for h in "${OUT}/${NAME}.skel.h" "${OUT}/${NAME}.lskel.h"; do
-    [ -f "${h}" ] || continue
+    # A failed skeleton build can remove the header. Its C consumer still
+    # requires it on the next swap/restore, so recover from source includes.
+    if [ ! -f "${h}" ]; then
+        grep -qF "\"$(basename "${h}")\"" "${SELFTESTS_SRC}"/prog_tests/*.c || continue
+    fi
     rm -f "${h}"
     SKELS+=("${OUT}//$(basename "${h}")")
 done

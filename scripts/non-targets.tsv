@@ -1,0 +1,7 @@
+# Pinned-kernel fixtures outside the translation corpus; see the bump plan.
+# name reason
+kasan	Requires a KASAN kernel configuration
+kasan_harden	Requires a KASAN kernel configuration
+bpf_for_bench	Benchmark-only program
+veristat_foo	Veristat fixture
+veristat_bar	Veristat fixture without programs

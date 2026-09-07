@@ -143,3 +143,42 @@ def test_tagging_twice_is_refused(tmp_path):
     T.inject(obj, [("stash", "node", "kptr")])
     with pytest.raises(TagError):
         T.inject(obj, [("stash", "node", "kptr")])
+
+
+@pytest.mark.parametrize("array", [False, True])
+def test_arena_void_pointer_and_array_preserve_other_users(tmp_path, array):
+    obj = str(tmp_path / "arena.bpf.o")
+    synth_struct_object(obj)
+    buf = bytearray(open(obj, "rb").read())
+    sh, off, size, align = T.elf_find_section(buf, ".BTF")
+    data = bytearray(buf[off:off + size])
+    _, _, _, hdr, toff, tlen, soff, slen = struct.unpack_from("<HBBIIIII", data)
+    types = T.walk_types(data, hdr, toff, tlen)
+    # Original PTR becomes PTR -> void. kptr must still reject this target.
+    struct.pack_into("<I", data, types[2][0] + 8, 0)
+    if array:
+        added = struct.pack("<IIIIII", 0, 3 << 24, 0, 3, 1, 1)
+        data = data[:hdr + tlen] + added + data[hdr + tlen:]
+        struct.pack_into("<III", data, 12, tlen + 24, soff + 24, slen)
+        struct.pack_into("<I", data, types[3][0] + 16, 7)
+    newoff = len(buf)
+    buf.extend(data)
+    struct.pack_into("<QQ", buf, sh + 24, newoff, len(data))
+    open(obj, "wb").write(buf)
+    with pytest.raises(TagError):
+        T.inject(obj, [("stash", "node", "kptr")])
+    T.inject(obj, [("stash", "node", "arena")])
+    after = BpfElf(obj).btf_types()
+    assert after[3][:3] == (2, "", 0)
+    member = after[4][4][0][1]
+    if array:
+        assert after[member][0] == 3
+        # Inspect raw array element type (bpfelf's public tuple shape differs).
+        raw = bytearray(open(obj, 'rb').read())
+        _, off, size, _ = T.elf_find_section(raw, '.BTF')
+        blob = raw[off:off + size]
+        _, _, _, hdr, toff, tlen, _, _ = struct.unpack_from('<HBBIIIII', blob)
+        ts = T.walk_types(blob, hdr, toff, tlen)
+        member = struct.unpack_from('<I', blob, ts[member - 1][0] + 12)[0]
+    assert after[member][0] == 2
+    assert after[after[member][2]][:3] == (18, 'arena', 0)

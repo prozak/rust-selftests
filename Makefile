@@ -128,6 +128,8 @@ $(BLDDIR)/libbpf_rs_core.rlib: $(wildcard bpf-rs-core/src/*.rs)
 		-o $@ bpf-rs-core/src/lib.rs
 
 # --- Rust -> LLVM bitcode ---
+$(BLDDIR)/ksock_lsm.bc $(BLDDIR)/ksock_wq.bc: progs/common/ksock.rs
+$(BLDDIR)/arena_kfunc.bc $(BLDDIR)/arena_kfunc_jit.bc $(BLDDIR)/struct_ops_arena.bc: progs/common/arena.rs
 $(BLDDIR)/%.bc: progs/%.rs $(BLDDIR)/libbpf_rs_core.rlib
 	@mkdir -p $(BLDDIR)
 	$(RUSTFLAGS_ENV) $(RUSTC) --edition 2021 --crate-type rlib $(RUSTC_COMMON) \
@@ -173,14 +175,16 @@ $(BLDDIR)/%-ksyms.bc: $(BLDDIR)/%-opt.bc
 	@rm -f $@.ll $@.tmp.bc $@.tmp2.bc
 
 # --- Final BPF object ---
-$(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc
-	$(LLC) -march=bpfel -mcpu=v4 -filetype=obj -o $@.tmp $<
+$(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc scripts/naked_abi.py
+	$(LLVM_DIS) $< -o $@.abi.ll
+	python3 scripts/naked_abi.py $@.abi.ll progs/$*.rs
+	$(LLC) -march=bpfel -mcpu=v4 -filetype=obj -o $@.tmp $@.abi.ll
 	$(LLVM_OBJCOPY) \
 		--remove-section=.eh_frame --remove-section=.rel.eh_frame \
 		--remove-section=.gcc_except_table \
 		--strip-symbol=rust_eh_personality $@.tmp $@
-	@rm -f $@.tmp
-	python3 scripts/btf_rename.py $@
+	@rm -f $@.tmp $@.abi.ll
+	python3 scripts/btf_rename.py $@ progs/$*.rs
 	python3 scripts/btf_map_slots.py $@
 	python3 scripts/btf_test_tags.py $@ progs/$*.rs
 	python3 scripts/btf_type_tags.py $@ progs/$*.rs
@@ -220,7 +224,12 @@ status: check-kernel-commit
 	total=$$(ls $(SELFTESTS_SRC)/progs/*.c | wc -l); \
 	done=$$(ls progs/*.rs 2>/dev/null | wc -l); \
 	echo "translated $$done of $$total kernel selftests BPF programs:"; \
-	for p in $(PROGS); do echo "  $$p"; done
+	for p in $(PROGS); do echo "  $$p"; done; \
+	echo "Excluded fixtures/configurations (not translation targets):"; \
+	while IFS=$$(printf '\t') read -r name reason; do \
+	  case "$$name" in \#*|"") continue ;; esac; \
+	  [ ! -f "$(SELFTESTS_SRC)/progs/$$name.c" ] || printf '  %s: %s\n' "$$name" "$$reason"; \
+	done < scripts/non-targets.tsv
 
 clean:
 	rm -rf $(BLDDIR)

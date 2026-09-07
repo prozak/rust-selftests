@@ -230,10 +230,9 @@ a register, keeps dead-arg-elim from dropping a function argument).
   your Rust must define all of them with matching names.
 - Never name a helper wrapper the same as a real kfunc/extern unless you
   mean a relocated call.
-- `__failure`/`__msg` negative verifier tests are untranslatable as
-  negative tests: rustc cannot emit BTF_KIND_DECL_TAG, so test_loader
-  defaults to expect-success. Keep the program structure but make it load
-  (see test_global_func1.rs), or classify the program as blocked.
+- Negative verifier tests require `test_tags!` to preserve their rejection
+  assertions; see "Test-loader expectations" below. Never change the body
+  to make a must-fail program load successfully.
 
 ## Build & validate
 
@@ -286,6 +285,29 @@ Rules:
   verifier rejecting them is the assertion, not a regression. The prover
   says nothing meaningful about them either: both objects are rejected, so
   the load-time test is the whole oracle.
+
+## Raw assembly and C character storage
+
+For instruction-level tests whose complete function body is BPF assembly,
+use an ordinary named Rust function with the real return type and one
+`asm!(..., options(noreturn))` body. Put `// BPF_NAKED: function_name` on
+its own line. `scripts/naked_abi.py` retains the debug signature, removes
+Rust's unused hidden aggregate-return parameter, and emits LLVM's naked
+form. It rejects bodies containing generated instructions or real arguments.
+The assembly must include its own `exit` and supply every return register.
+Use `sym` operands for calls so definitions survive optimization and receive
+relocations. `aggregate_ret_target.rs` is the minimal example.
+
+`btf_type_tags!` also supports `arena` on pointer members and arrays of
+pointers, including void pointees. This preserves the aggregate-return
+types exercised by `aggregate_ret_func.rs`.
+
+When the C consumer requires a plain `char` array (for example a string
+assertion compiled with `-Werror=pointer-sign`), declare byte storage with
+`u8` and add `// BTF_C_CHAR: u8` on its own line. The BTF normalizer then
+names that object's `u8` type `char` with the pinned x86 C signed-char
+encoding. This applies to all `u8` uses in the object, so use it only when
+that matches the object's C ABI. It does not change storage or code.
 
 ## Divergence classes the equivalence prover has caught (lint before submitting)
 

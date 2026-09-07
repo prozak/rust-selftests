@@ -46,10 +46,9 @@ BTF_KIND_UNION = 5
 BTF_KIND_TYPE_TAG = 18
 MODIFIERS = {8, 9, 10, 11, 18}   # VOLATILE CONST RESTRICT (TYPEDEF) TYPE_TAG
 
-# The tag names kernel/bpf/btf.c:btf_get_field_type recognises on a pointer
-# member. Anything else is a hard error: a misspelt tag would silently leave
-# the field a scalar.
-KNOWN_TAGS = {"kptr", "kptr_untrusted", "percpu_kptr", "uptr"}
+# kptr tags recognized by btf_get_field_type, plus the arena annotation
+# used by aggregate-return validation. Unknown names remain hard errors.
+KNOWN_TAGS = {"kptr", "kptr_untrusted", "percpu_kptr", "uptr", "arena"}
 
 
 # --- Source parsing ---------------------------------------------------------
@@ -169,6 +168,11 @@ def inject(path, entries):
         if member is None:
             raise TagError(f"{obj}: struct {sname} has no member {mname!r}")
         mpos, ptr_id = member
+        array = None
+        if tag == "arena" and types[ptr_id - 1][1] == 3:
+            apos = types[ptr_id - 1][0]
+            array = bytes(data[apos:apos + 24])
+            ptr_id = struct.unpack_from("<I", array, 12)[0]
         if types[ptr_id - 1][1] != BTF_KIND_PTR:
             raise TagError(f"{obj}: {sname}.{mname} is not a pointer, "
                            "a type tag applies to a pointer member")
@@ -179,7 +183,7 @@ def inject(path, entries):
                 raise TagError(f"{obj}: {sname}.{mname} already carries a "
                                f"type tag {get_str(types[t - 1][2])!r}")
             t = types[t - 1][3]
-        if not t or types[t - 1][1] not in (BTF_KIND_STRUCT, BTF_KIND_UNION):
+        if tag != "arena" and (not t or types[t - 1][1] not in (BTF_KIND_STRUCT, BTF_KIND_UNION)):
             raise TagError(f"{obj}: {sname}.{mname} does not point at a "
                            "struct; the kernel only classifies struct kptrs")
 
@@ -191,6 +195,12 @@ def inject(path, entries):
         new_types.extend(struct.pack("<III", 0, BTF_KIND_PTR << 24, tag_id))
         struct.pack_into("<I", head, mpos + 4, next_id)
         next_id += 1
+        if array is not None:
+            cloned = bytearray(array)
+            struct.pack_into("<I", cloned, 12, next_id - 1)
+            new_types.extend(cloned)
+            struct.pack_into("<I", head, mpos + 4, next_id)
+            next_id += 1
         done.append(f"{sname}.{mname}:{tag}")
 
     strings = data[str_base:str_base + str_len]

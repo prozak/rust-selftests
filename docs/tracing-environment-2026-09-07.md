@@ -1,5 +1,11 @@
 # Tracing environment repair (2026-09-07)
 
+Subsequent [whole-stack validation](ci-nightly-results-2026-09-07.md)
+exposed regressions in this regenerated module and stopped at 290/596
+runtime rows. The targeted tracing results below remain valid, but the
+module generation is not compatible with the whole existing kernel BTF
+stack. See the later report before using the recorded zero-failure gate.
+
 The three remaining runtime failures share the `tracing_struct` consumer.
 Its struct, many-argument, and union subtests already passed; only
 `int128_args` failed, making all three object-swap rows fail.

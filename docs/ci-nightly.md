@@ -92,6 +92,14 @@ nightly itself never accepts them. This implements the local whole-stack
 portion of issue #23. Scheduling and runner provisioning remain separate;
 weekly kernel-gap reporting continues in its existing workflow.
 
+## Latest attempt
+
+The [September 7 post-repair attempt](ci-nightly-results-2026-09-07.md)
+ended ERROR at 290/596 runtime rows: ten matching C/Rust failures,
+including a guest panic, and one INEQUIV previously hidden by timeout.
+Cleanup succeeded. Kernel/module BTF compatibility and proof timeout
+handling need attention before scheduling; no baselines were accepted.
+
 ## Recorded full run
 
 See [the first complete run](ci-nightly-results-2026-09-06.md): all 596

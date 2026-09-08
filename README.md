@@ -14,6 +14,10 @@ Current corpus: 596 translated C objects in `progs/`. The recorded
 passing consumers can include skipped subtests. See the
 [tracing environment report](docs/tracing-environment-2026-09-07.md) for the
 final three repairs and validation limits.
+The [post-repair nightly](docs/ci-nightly-results-2026-09-07.md) stopped
+at 290/596 runtime rows with ten matching C/Rust failures and one proof
+INEQUIV. The repaired whole stack is not yet validated; see that report
+for the module BTF incompatibility and successful cleanup.
 This README is about **running those tests**;
 for how a translation is written see `TRANSLATING.md`.
 

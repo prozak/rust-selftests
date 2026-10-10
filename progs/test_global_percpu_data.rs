@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #![no_std]
 #![no_main]
 // BTF_C_CHAR: u8

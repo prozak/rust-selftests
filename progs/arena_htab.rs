@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #![no_std]
 #![no_main]
 #![feature(asm_experimental_arch)]

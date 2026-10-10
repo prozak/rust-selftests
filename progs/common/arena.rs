@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 // Explicit BPF address-space casts, matching bpf_arena_common.h.
 #[inline(always)]
 pub unsafe fn cast_kern<T>(p: *mut T) -> *mut T {

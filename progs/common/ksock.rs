@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 use core::ffi::c_void;
 use bpf_rs_core::maps::{BpfMap, ARRAY};
 

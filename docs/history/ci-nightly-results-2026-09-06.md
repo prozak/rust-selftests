@@ -7,9 +7,9 @@ proof sweep, and serial runtime gate, replacing the previous mixed-age
 validation evidence with one complete measurement.
 
 Run: `make ci-nightly NIGHTLY_OUT=nightly/20260906-full`.
-The local [full report](../nightly/20260906-full/REPORT.md), JSON, per-object
+The local full report (`nightly/20260906-full/REPORT.md`, not tracked), JSON, per-object
 logs, baseline snapshots, and source/tool/input records remain in that
-ignored directory. The [runner guide](ci-nightly.md) documents reproduction
+ignored directory. The [runner guide](../ci-nightly.md) documents reproduction
 and exit semantics. No committed baseline or codegen report was rewritten.
 
 ## Results

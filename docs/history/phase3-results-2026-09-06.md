@@ -17,7 +17,7 @@ The 19 additions contribute 13 EQUIV and six BAIL. Compared with Phase 2,
 TIMEOUT → UNKNOWN; all other old verdicts are unchanged. This guard uses
 its default 180-second object cap, versus the seeded sweep's 120 seconds.
 Neither changed verdict is a proof. See the
-[complete sweep](../equiv/results/sweep-2026-09-06-596.tsv) and hashed baseline.
+[complete sweep](../../equiv/results/sweep-2026-09-06-596.tsv) and hashed baseline.
 
 `make ci-local` passed: 103 hermetic tests, Python compilation, generated
 SEMANTICS.md consistency, kernel-pin check, lint, and all 596 cached guard

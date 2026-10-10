@@ -38,7 +38,7 @@ rejects unsupported contracts. It runs only for annotated translations.
   then produce the successful program's verifier log before stopping at
   the deliberate invalid access in `bad_prog`.
 
-See [TRANSLATING.md](../TRANSLATING.md) for both new annotations.
+See [TRANSLATING.md](../../TRANSLATING.md) for both new annotations.
 
 ## Validation
 

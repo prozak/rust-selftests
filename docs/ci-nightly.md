@@ -7,7 +7,7 @@ validation. It does not fetch or rebuild the kernel, advance pins, publish
 results, or update the committed proof/runtime baselines.
 
 For an existing output built with the pahole v1.31 release, prepare the
-[repaired tracing environment](tracing-environment-2026-09-07.md) first.
+[repaired tracing environment](history/tracing-environment-2026-09-07.md) first.
 The normal QEMU selftests build now uses `pahole-commit` and refreshes
 module BTF automatically. Module BTF changes invalidate the guard cache;
 nightly already proves every object freshly and records module hashes.
@@ -94,7 +94,7 @@ weekly kernel-gap reporting continues in its existing workflow.
 
 ## Latest attempt
 
-The [September 7 post-repair attempt](ci-nightly-results-2026-09-07.md)
+The [September 7 post-repair attempt](history/ci-nightly-results-2026-09-07.md)
 ended ERROR at 290/596 runtime rows: ten matching C/Rust failures,
 including a guest panic, and one INEQUIV previously hidden by timeout.
 Cleanup succeeded. Kernel/module BTF compatibility and proof timeout
@@ -102,6 +102,6 @@ handling need attention before scheduling; no baselines were accepted.
 
 ## Recorded full run
 
-See [the first complete run](ci-nightly-results-2026-09-06.md): all 596
+See [the first complete run](history/ci-nightly-results-2026-09-06.md): all 596
 proof and runtime verdicts match the recorded baselines. The run completed
 with 17 known runtime failures and retained a nonzero status.

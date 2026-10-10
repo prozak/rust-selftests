@@ -51,10 +51,11 @@ Override input locations or reproduce a historical comparison with:
 scripts/kernel-gap.sh /path/to/candidate \
   --base-repo /path/to/repo-containing-the-pin \
   --base-ref 520d7d7942025a58a0c79a61b905a556cf3cb524 \
-  --patch-dir /path/to/harness/patches/bpf-selftests-uml
+  --patch-dir /path/to/patches
 ```
 
-The default patch directory is the sibling `uml-harness` repository.
+The default patch directory is this repository's `patches/kernel/`; an
+absent or empty directory is an empty patch stack.
 Both resolved commit IDs appear in the report. JSON uses `schema_version: 1`.
 
 ## Weekly CI

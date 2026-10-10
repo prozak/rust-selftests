@@ -32,7 +32,7 @@ for n in "${names[@]}"; do
     printf '%s\t%s\t%s\n' "$n" "$rc" "$c_rc" | tee -a "$out/validation.tsv"
 done
 make restore-all || exit 1
-../z3-venv/bin/python equiv/guard.py --jobs 8 "${names[@]}" > "$out/guard.log" 2>&1
+"$(make -s --no-print-directory echo-pyz3)" equiv/guard.py --jobs 8 "${names[@]}" > "$out/guard.log" 2>&1
 rc=$?
 tail -25 "$out/guard.log"
 if [ "$rc" -ne 0 ]; then exit "$rc"; fi

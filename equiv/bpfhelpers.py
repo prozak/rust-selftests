@@ -18,10 +18,9 @@ the target kernel's BTF by the caller, since only that knows the layout).
 import os
 import re
 
-DEFAULT_HEADER = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__)))),
-    "uml-harness", ".build", "bpf-next-x86", "include", "uapi", "linux", "bpf.h")
+import paths
+
+DEFAULT_HEADER = os.path.join(paths.KERNEL_SRC, "include", "uapi", "linux", "bpf.h")
 
 # scalar C spellings -> byte width
 _SCALARS = {

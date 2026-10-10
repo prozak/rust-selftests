@@ -4,8 +4,8 @@
 # Emits <out-dir>/<name>.log per program and <out-dir>/summary.tsv
 set -u
 NAMES=$1; OUT=$2; JOBS=${3:-8}
-PY=/home/prozak/sources/heimdall_experiment/z3-venv/bin/python
 REPO=$(cd "$(dirname "$0")/.." && pwd)
+PY=${PYZ3:-$(make -s -C "$REPO" --no-print-directory echo-pyz3)}
 mkdir -p "$OUT"
 
 run_one() {

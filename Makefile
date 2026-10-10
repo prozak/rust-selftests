@@ -22,12 +22,14 @@
 #   make status          translation coverage vs the kernel progs/ directory
 #
 # Configuration (override via environment or command line):
+#   BUILD_DIR         root of the QEMU build tree (default .build/); the
+#                     defaults below hang off it (see scripts/paths.sh)
 #   KERNEL_SRC        bpf-next checkout (with built selftests)
 #   SELFTESTS_OUTPUT  the selftests build output directory (contains *.bpf.o,
 #                     test_progs, generated skeletons)
 #   RUSTBPF           4ast/rust-bpf checkout with built bld_deps/ and tools
 #   LLVM_PREFIX       LLVM >= 22 install (llc/opt/llvm-link/llvm-readelf...)
-#   UML_HARNESS       bpf-uml-selftests checkout (uml-veristat/uml-test-progs;
+#   UML_HARNESS       uml-veristat checkout (uml-veristat/uml-test-progs;
 #                     FLAVOR=uml only)
 #   UML_INSTALL_DIR   uml-veristat install to boot (FLAVOR=uml only)
 
@@ -36,11 +38,14 @@
 # (older pin, patched kernel, reduced feature set) -- only when asked for
 # explicitly.
 FLAVOR ?= qemu
+BUILD_DIR ?= $(CURDIR)/.build
 ifeq ($(FLAVOR),qemu)
-KERNEL_SRC ?= $(abspath $(CURDIR)/../uml-harness/.build/bpf-next-x86)
-SELFTESTS_OUTPUT ?= $(abspath $(CURDIR)/../uml-harness/.build/selftests-output-qemu)
+KERNEL_SRC ?= $(BUILD_DIR)/bpf-next
+SELFTESTS_OUTPUT ?= $(BUILD_DIR)/selftests-output-qemu
 VMLINUX_BTF ?= $(KERNEL_SRC)/vmlinux
+QEMU_KERNEL ?= $(KERNEL_SRC)/arch/x86/boot/bzImage
 TEST_RUNNER ?= $(CURDIR)/scripts/qemu-test-progs
+LLVM_PREFIX ?= $(BUILD_DIR)/llvm
 else ifeq ($(FLAVOR),uml)
 KERNEL_SRC ?= $(abspath $(CURDIR)/../uml-harness/.build/bpf-next)
 SELFTESTS_OUTPUT ?= $(abspath $(CURDIR)/../uml-harness/.build/selftests-output-heimdall)
@@ -48,18 +53,17 @@ VMLINUX_BTF ?= $(KERNEL_SRC)/linux
 UML_HARNESS ?= $(abspath $(CURDIR)/../uml-harness)
 UML_INSTALL_DIR ?= $(HOME)/.local/share/uml-veristat-heimdall
 TEST_RUNNER ?= $(UML_HARNESS)/uml-test-progs
+LLVM_PREFIX ?= $(abspath $(CURDIR)/../uml-harness/.build/llvm-install)
 else
 $(error unknown FLAVOR '$(FLAVOR)' (qemu or uml))
 endif
-export FLAVOR VMLINUX_BTF TEST_RUNNER UML_HARNESS UML_INSTALL_DIR
+export FLAVOR BUILD_DIR VMLINUX_BTF QEMU_KERNEL TEST_RUNNER UML_HARNESS UML_INSTALL_DIR
 SELFTESTS_SRC := $(KERNEL_SRC)/tools/testing/selftests/bpf
 
-# The bpf-next commit the QEMU flavor kernel is built from. kernel-commit
-# is this repo's own pin (the harness pin file belongs to bpf-uml-selftests
-# and stays on the UML stack's base); the x86 worktree is that commit plus
-# the harness selftests/libbpf patches, so its merge-base with upstream
-# must be exactly the pin. Bumping either side alone fails status/ci-local.
-KERNEL_X86 := $(abspath $(CURDIR)/../uml-harness/.build/bpf-next-x86)
+# The bpf-next commit the QEMU flavor kernel is built from. The worktree is
+# that commit plus exactly the patches vendored in patches/kernel/ (none, if
+# the directory is empty), so check-kernel-commit fails as soon as either
+# side moves alone.
 KERNEL_COMMIT := $(shell cat $(CURDIR)/kernel-commit)
 
 # kfunc extern protos are mirrored from kernel BTF by add_ksyms.py
@@ -67,7 +71,6 @@ KERNEL_COMMIT := $(shell cat $(CURDIR)/kernel-commit)
 BPFTOOL_BIN := $(dir $(SELFTESTS_OUTPUT))bpftool-output-$(patsubst selftests-output-%,%,$(notdir $(SELFTESTS_OUTPUT)))/bpftool
 KSYM_BTF_FILES := $(VMLINUX_BTF) $(wildcard $(SELFTESTS_OUTPUT)/*.ko)
 RUSTBPF ?= $(abspath $(CURDIR)/../rust-bpf)
-LLVM_PREFIX ?= $(abspath $(CURDIR)/../uml-harness/.build/llvm-install)
 
 BLDDIR := $(CURDIR)/bld
 LLC := $(LLVM_PREFIX)/bin/llc
@@ -93,7 +96,17 @@ PROGS := $(patsubst progs/%.rs,%,$(wildcard progs/*.rs))
 
 export KERNEL_SRC SELFTESTS_SRC SELFTESTS_OUTPUT LLVM_PREFIX
 
-all: $(addprefix $(BLDDIR)/,$(addsuffix .bpf.o,$(PROGS)))
+all: $(addprefix $(BLDDIR)/,$(addsuffix .bpf.o,$(PROGS))) $(BLDDIR)/vmlinux.btf
+
+# Raw kernel BTF for the equivalence checker (CO-RE target, kfunc protos):
+# much faster to load than vmlinux, and tied to it so a rebuilt kernel
+# cannot leave a stale copy behind.
+# The explicit empty rule matters: without it `make -B` applies the
+# built-in "link % from %.o" rule to the kernel image and deletes it.
+$(VMLINUX_BTF): ;
+$(BLDDIR)/vmlinux.btf: $(VMLINUX_BTF)
+	@mkdir -p $(BLDDIR)
+	$(LLVM_OBJCOPY) --dump-section=.BTF=$@.tmp $< /dev/null && mv $@.tmp $@
 
 # --- Keep-list: the global FUNC/OBJECT symbols of the C-built object are the
 # --- ABI the harness sees; keep exactly those through internalize/globaldce.
@@ -238,14 +251,20 @@ restore-%:
 echo-kernel-src:
 	@echo $(KERNEL_SRC)
 
+echo-pyz3:
+	@echo $(PYZ3)
+
 check-kernel-commit:
-	@have=$$(git -C $(KERNEL_X86) merge-base HEAD origin/master 2>/dev/null); \
-	[ "$$have" = "$(KERNEL_COMMIT)" ] || { \
-	  echo "kernel-commit: $(KERNEL_X86) is based on $${have:-<unknown>}," \
-	       "not the pinned $(KERNEL_COMMIT)" >&2; exit 1; }
+	@[ "$(FLAVOR)" = qemu ] || { echo "check-kernel-commit: QEMU flavor only" >&2; exit 1; }; \
+	npatch=$$(ls patches/kernel/*.patch 2>/dev/null | wc -l); \
+	git -C $(KERNEL_SRC) merge-base --is-ancestor $(KERNEL_COMMIT) HEAD 2>/dev/null && \
+	have=$$(git -C $(KERNEL_SRC) rev-list --count $(KERNEL_COMMIT)..HEAD) && \
+	[ "$$have" = "$$npatch" ] || { \
+	  echo "kernel-commit: $(KERNEL_SRC) is not $(KERNEL_COMMIT) plus the" \
+	       "$$npatch patch(es) in patches/kernel/" >&2; exit 1; }
 
 status: check-kernel-commit
-	@echo "kernel: bpf-next $(KERNEL_COMMIT) (+ harness patches)"; \
+	@echo "kernel: bpf-next $(KERNEL_COMMIT) + $$(ls patches/kernel/*.patch 2>/dev/null | wc -l) patch(es) from patches/kernel/"; \
 	total=$$(ls $(SELFTESTS_SRC)/progs/*.c | wc -l); \
 	done=$$(ls progs/*.rs 2>/dev/null | wc -l); \
 	echo "translated $$done of $$total kernel selftests BPF programs:"; \
@@ -266,7 +285,9 @@ clean:
 .PHONY: all verify status check-kernel-commit clean
 
 # --- equivalence regression guard + translation linter ---
-PYZ3 ?= $(abspath $(CURDIR)/../z3-venv/bin/python)
+# Python with z3-solver and pytest (pip install -r requirements.txt); a
+# virtualenv at .venv/ is picked up automatically.
+PYZ3 ?= $(if $(wildcard $(CURDIR)/.venv/bin/python),$(CURDIR)/.venv/bin/python,python3)
 equiv-guard:
 	$(PYZ3) equiv/guard.py
 
@@ -302,7 +323,7 @@ semantics:
 # ci-local: everything that needs the pinned kernel tree and built objects.
 # Order matters — undo any swapped-in objects BEFORE proving, or the
 # comparison is Rust-vs-Rust.
-ci-local: restore-all ci-fast check-kernel-commit
+ci-local: restore-all ci-fast check-kernel-commit $(BLDDIR)/vmlinux.btf
 	python3 scripts/translint.py
 	$(PYZ3) equiv/guard.py
 

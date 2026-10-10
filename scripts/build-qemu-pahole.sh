@@ -2,9 +2,10 @@
 # Build upstream pahole with wide-argument ABI support in an isolated prefix.
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "${repo}/scripts/paths.sh"
 revision="$(cat "${repo}/pahole-commit")"
 [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid pahole pin" >&2; exit 1; }
-root="${repo}/bld/pahole-${revision}"
+root="${BUILD_DIR}/pahole-${revision}"
 src="${root}/source"
 install="${root}/install"
 

@@ -27,9 +27,9 @@ Two exclusions keep it honest:
 ## Usage
 
 ```sh
-../z3-venv/bin/python codegen/compare.py            # -> REPORT.md, pairs.tsv
-../z3-venv/bin/python codegen/compare.py --all      # include unproved pairs
-../z3-venv/bin/python codegen/compare.py --show test_lwt_ip_encap:encap_gre6
+.venv/bin/python codegen/compare.py            # -> REPORT.md, pairs.tsv
+.venv/bin/python codegen/compare.py --all      # include unproved pairs
+.venv/bin/python codegen/compare.py --show test_lwt_ip_encap:encap_gre6
 ```
 
 `--baseline <path>` selects a different proof baseline. `make ci-nightly`

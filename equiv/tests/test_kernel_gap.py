@@ -120,9 +120,7 @@ def test_failed_patch_blocks_remaining_stack_and_missing_patch_is_error(kernel, 
 def test_cli_snapshot_selection_output_and_exit_status(kernel, tmp_path, monkeypatch, capsys):
     repo, base = kernel
     patch_dir = tmp_path / "patches"
-    names = patches(repo, patch_dir, len(gap.PATCH_NAMES))
-    for old, new in zip(names, gap.PATCH_NAMES):
-        (patch_dir / old).rename(patch_dir / new)
+    patches(repo, patch_dir, 3)
     project = tmp_path / "project"
     write(project, "kernel-commit", base + "\n")
     write(project, "progs/a.rs", "")

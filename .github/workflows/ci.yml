@@ -6,7 +6,8 @@ name: ci
 #
 # The heavy gates (fresh proofs and QEMU runtime tests for all translations)
 # need the pinned kernel tree and run via `make ci-nightly` on a machine
-# that has uml-harness/.build. `make ci-local` is the cached proof/lint tier.
+# that has built .build/ (see the README). `make ci-local` is the cached
+# proof/lint tier.
 
 on:
   push:
@@ -25,7 +26,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install --quiet z3-solver pytest
+        run: pip install --quiet -r requirements.txt
 
       - name: Prover tests (synthetic objects, no kernel)
         run: python -m pytest equiv/tests -q

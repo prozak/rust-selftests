@@ -13,16 +13,9 @@ import tarfile
 import tempfile
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "equiv"))
+import paths  # noqa: E402
 BPF = "tools/testing/selftests/bpf"
-PATCH_NAMES = (
-    "0004-selftests-bpf-fix-bpf_testmod.c-compilation-on-UML.patch",
-    "0005-libbpf-handle-duplicate-BTF-types-in-relocations.patch",
-    "0005b-libbpf-tolerate-duplicate-target-type-ids-in-core-relos.patch",
-    "0007-selftests-bpf-make-benchmark-map-definitions-standal.patch",
-    "0007b-selftests-bpf-veristat-preserve-zero-max_entries-for.patch",
-    "0009-selftests-bpf-include-btf_ptr.h-in-bpf_iter_task_btf.patch",
-    "0011-selftests-bpf-fix-arena-allocator-ASM-fallback-globals.patch",
-)
 
 
 def git(repo, *args, check=True):
@@ -135,7 +128,11 @@ def compare(before, after, translations, exclusions):
     }
 
 
-def check_patches(root, patch_dir, names=PATCH_NAMES):
+def check_patches(root, patch_dir, names=None):
+    """Apply the stack in order; by default every *.patch in patch_dir (an
+    absent directory is an empty stack)."""
+    if names is None:
+        names = sorted(p.name for p in patch_dir.glob("*.patch"))
     patches = [patch_dir / name for name in names]
     for patch in patches:
         if not patch.is_file():
@@ -202,9 +199,9 @@ def markdown(report):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("tip_checkout", type=Path, help="candidate Git checkout; compares HEAD")
-    parser.add_argument("--base-repo", type=Path, default=REPO.parent / "uml-harness/.build/bpf-next-x86")
+    parser.add_argument("--base-repo", type=Path, default=Path(paths.KERNEL_SRC))
     parser.add_argument("--base-ref", help="override kernel-commit for historical comparisons")
-    parser.add_argument("--patch-dir", type=Path, default=REPO.parent / "uml-harness/patches/bpf-selftests-uml")
+    parser.add_argument("--patch-dir", type=Path, default=REPO / "patches/kernel")
     parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
     args = parser.parse_args(argv)
     try:

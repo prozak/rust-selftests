@@ -367,7 +367,7 @@ pointer to `c_void` in the object represents C `void *`.
 ## Divergence classes the equivalence prover has caught (lint before submitting)
 
 `python3 scripts/translint.py <name>` checks a translation mechanically;
-`../z3-venv/bin/python equiv/guard.py <name>` re-proves it after a rebuild
+`.venv/bin/python equiv/guard.py <name>` (any Python with `requirements.txt`) re-proves it after a rebuild
 (hash-gated, seconds when nothing else changed). The classes, each found
 as a real bug at least once (equiv/README.md "true findings"):
 

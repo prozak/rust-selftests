@@ -23,14 +23,6 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Check out the reviewed x86 patch stack
-        uses: actions/checkout@v4
-        with:
-          repository: mykola-lysenko/uml-veristat
-          ref: 7983e26bb213526c768b24170d5a6fb5bb1964a4
-          path: harness-patches
-          sparse-checkout: patches/bpf-selftests-uml
-
       - name: Fetch upstream tip and the recorded pin
         shell: bash
         run: |
@@ -47,7 +39,6 @@ jobs:
           mkdir -p kernel-gap-report
           set +e
           scripts/kernel-gap.sh ../kernel-tip --base-repo ../kernel-tip \
-            --patch-dir ../harness-patches/patches/bpf-selftests-uml \
             --format json > kernel-gap-report/report.json 2> kernel-gap-report/errors.log
           result=$?
           set -e

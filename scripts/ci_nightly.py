@@ -18,9 +18,10 @@ import time
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "equiv"))
 import guard  # noqa: E402
+import paths  # noqa: E402
 
 C_DIR = Path(guard.DEFAULT_C_DIR).resolve()
-KERNEL = C_DIR.parent / "bpf-next-x86"
+KERNEL = Path(paths.KERNEL_SRC).resolve()
 GOOD = {"EQUIV", "WAIVED-EQUIV"}
 CHILDREN = set()
 CHILD_LOCK = threading.RLock()
@@ -169,20 +170,23 @@ def main(argv=None):
     if min(args.proof_timeout, args.runtime_timeout) <= 0:
         ap.error("timeouts must be positive")
     env = os.environ.copy()
-    # The checker and codegen also read modules from their default C directory.
-    # Reject alternate stacks rather than silently mix kernels or object trees.
-    expected = {"FLAVOR": "qemu", "KERNEL_SRC": str(KERNEL),
+    # The checker and codegen read modules from equiv/paths.py's directories.
+    # Every stage gets those same values; reject an environment where the
+    # kernel-derived paths point at a different tree than KERNEL_SRC.
+    expected = {"FLAVOR": "qemu", "BUILD_DIR": str(Path(paths.BUILD_DIR).resolve()),
+                "KERNEL_SRC": str(KERNEL),
                 "SELFTESTS_SRC": str(KERNEL / "tools/testing/selftests/bpf"),
                 "SELFTESTS_OUTPUT": str(C_DIR), "VMLINUX_BTF": str(KERNEL / "vmlinux"),
                 "QEMU_KERNEL": str(KERNEL / "arch/x86/boot/bzImage"),
                 "TEST_RUNNER": str(REPO / "scripts/qemu-test-progs")}
     for key, value in expected.items():
-        if env.get(key, value) != value:
+        given = env.get(key, value)
+        if (given if key == "FLAVOR" else os.path.realpath(given)) != value:
             ap.error(f"nightly requires {key}={value}")
     env.update(expected)
     for key in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "SWAP_ONLY"):
         env.pop(key, None)
-    env.setdefault("LLVM_PREFIX", str(C_DIR.parent / "llvm-install"))
+    env.setdefault("LLVM_PREFIX", paths.LLVM_PREFIX)
     env.setdefault("QEMU_CPUS", "4")
     nightly = REPO / "nightly"
     nightly.mkdir(exist_ok=True)

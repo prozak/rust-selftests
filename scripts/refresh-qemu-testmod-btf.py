@@ -21,6 +21,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / 'equiv'))
 from bpfelf import BpfElf
 from bpfcore import load_kernel_btf
+import paths
 
 
 def executable_hashes(path):
@@ -47,21 +48,20 @@ def atomic_copy(source, destination):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--kernel', type=Path, default=REPO.parent / 'uml-harness/.build/bpf-next-x86')
-    parser.add_argument('--selftests-output', type=Path, default=REPO.parent / 'uml-harness/.build/selftests-output-qemu')
+    parser.add_argument('--kernel', type=Path, default=Path(paths.KERNEL_SRC))
+    parser.add_argument('--selftests-output', type=Path, default=Path(paths.SELFTESTS_OUTPUT))
     parser.add_argument('--output', type=Path, default=REPO / 'bld/testmod-btf')
     parser.add_argument('--install', action='store_true')
     args = parser.parse_args()
     revision = (REPO / 'pahole-commit').read_text().strip()
-    pahole = REPO / f'bld/pahole-{revision}/install/bin/pahole'
+    pahole = Path(paths.BUILD_DIR) / f'pahole-{revision}/install/bin/pahole'
     if not pahole.is_file():
         parser.error('run bash scripts/build-qemu-pahole.sh first')
     kernel, output = args.kernel.resolve(), args.output.resolve()
     kernel_pin = (REPO / 'kernel-commit').read_text().strip()
-    actual_pin = subprocess.check_output(
-        ['git', '-C', str(kernel), 'merge-base', 'HEAD', 'origin/master'], text=True).strip()
-    if actual_pin != kernel_pin:
-        parser.error(f'kernel base {actual_pin} differs from pin {kernel_pin}')
+    if subprocess.run(['git', '-C', str(kernel), 'merge-base', '--is-ancestor',
+                       kernel_pin, 'HEAD']).returncode:
+        parser.error(f'{kernel} is not based on the pin {kernel_pin}')
     module_dir = kernel / 'tools/testing/selftests/bpf/test_kmods'
     original = module_dir / 'bpf_testmod.ko'
     runtime = args.selftests_output.resolve() / 'bpf_testmod.ko'

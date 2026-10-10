@@ -9,8 +9,8 @@ global and of the context.
 ## Usage
 
 ```sh
-# one program (venv: ../../z3-venv)
-../z3-venv/bin/python equiv/check.py fentry_test
+# one program (a venv with ../requirements.txt; make picks up .venv/)
+.venv/bin/python equiv/check.py fentry_test
 
 # whole corpus, 10-way parallel
 equiv/sweep.sh <names-file> <out-dir> 10
@@ -58,7 +58,7 @@ equiv/sweep.sh <names-file> <out-dir> 10
 - CO-RE relocations are APPLIED before lifting (no more `CORESKIP`): both
   objects are relocated against the same target BTF — the qemu-flavor
   kernel's vmlinux (`bld/vmlinux.btf`, extracted from
-  `uml-harness/.build/bpf-next-x86/vmlinux`) plus the split BTFs of the
+  `.build/bpf-next/vmlinux`) plus the split BTFs of the
   selftest modules (`*.ko`, distilled-base aware) — exactly as libbpf would
   at load time. All 13 relocation kinds are implemented per relo_core.c:
   field byte offset/size/exists/signed and the bitfield lshift/rshift pair,

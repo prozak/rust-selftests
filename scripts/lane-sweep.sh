@@ -20,17 +20,18 @@ MAX_ATTEMPTS="${3:-2}"
 MAIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PARENT="$(dirname "${MAIN}")"
 WT="${PARENT}/rust-selftests-lane${LANE}"
-BUILD="${PARENT}/uml-harness/.build"
+. "${MAIN}/scripts/paths.sh"
 
 export FLAVOR=qemu
-export SELFTESTS_OUTPUT="${BUILD}/selftests-output-qemu-lane${LANE}"
+# The lane worktree's own .build/ is empty: share the main repo's tree.
+export BUILD_DIR KERNEL_SRC SELFTESTS_SRC VMLINUX_BTF QEMU_KERNEL LLVM_PREFIX
+export SELFTESTS_OUTPUT="${SELFTESTS_OUTPUT}-lane${LANE}"
 export MODEL="${MODEL:-claude-sonnet-5}"
 export TRANSLATE_JSON=1
 export QEMU_CPUS="${QEMU_CPUS:-4}"
 
 STOP="${MAIN}/sweep/STOP"
-KERNEL_SRC_Q="${BUILD}/bpf-next-x86"
-PROG_TESTS="${KERNEL_SRC_Q}/tools/testing/selftests/bpf/prog_tests"
+PROG_TESTS="${SELFTESTS_SRC}/prog_tests"
 
 cd "${WT}"
 mkdir -p "${MAIN}/sweep/lane-results" "${WT}/sweep/logs"

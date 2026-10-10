@@ -22,7 +22,8 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO}"
 
 KERNEL_SRC="$(make -s echo-kernel-src)"
-OUT="${SELFTESTS_OUTPUT:-$(cd "${REPO}/.." && pwd)/uml-harness/.build/selftests-output-qemu}"
+. "${REPO}/scripts/paths.sh"
+OUT="${SELFTESTS_OUTPUT}"
 PROG_TESTS="${KERNEL_SRC}/tools/testing/selftests/bpf/prog_tests"
 
 SWEEP="sweep"

@@ -7,18 +7,14 @@
 # the vng/QEMU guest) and then `make restore-<name>`. Results append to
 # qemu/results.md. Serial by construction.
 #
-# The QEMU flavor is selected purely by env overrides — swap-and-test.sh
-# and the Makefile are shared with the UML flavor.
+# Paths come from scripts/paths.sh (default .build/, overridable).
 
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO}"
-BUILD="$(cd "${REPO}/.." && pwd)/uml-harness/.build"
-
-export KERNEL_SRC="${BUILD}/bpf-next-x86"
-export SELFTESTS_OUTPUT="${BUILD}/selftests-output-qemu"
-export VMLINUX_BTF="${KERNEL_SRC}/vmlinux"
+. "${REPO}/scripts/paths.sh"
+export BUILD_DIR KERNEL_SRC SELFTESTS_OUTPUT VMLINUX_BTF QEMU_KERNEL LLVM_PREFIX
 export TEST_RUNNER="${REPO}/scripts/qemu-test-progs"
 
 # With no arguments the whole corpus runs and an existing results row means

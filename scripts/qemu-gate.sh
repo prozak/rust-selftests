@@ -31,13 +31,11 @@ shift $((OPTIND - 1))
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO}"
-BUILD="$(cd "${REPO}/.." && pwd)/uml-harness/.build"
+. "${REPO}/scripts/paths.sh"
+BASE_OUT="${SELFTESTS_OUTPUT}"
 
-export KERNEL_SRC="${BUILD}/bpf-next-x86"
-export SELFTESTS_SRC="${KERNEL_SRC}/tools/testing/selftests/bpf"
-export LLVM_PREFIX="${LLVM_PREFIX:-${BUILD}/llvm-install}"
+export BUILD_DIR KERNEL_SRC SELFTESTS_SRC LLVM_PREFIX VMLINUX_BTF QEMU_KERNEL
 export FLAVOR=qemu
-export VMLINUX_BTF="${KERNEL_SRC}/vmlinux"
 export TEST_RUNNER="${REPO}/scripts/qemu-test-progs"
 export QEMU_CPUS="${QEMU_CPUS:-4}"
 
@@ -49,7 +47,7 @@ for n in "${PROGS[@]}"; do
     [ -f "bld/${n}.bpf.o" ] || { echo "bld/${n}.bpf.o missing — build first" >&2; exit 1; }
 done
 for i in $(seq 1 "${LANES}"); do
-    [ -x "${BUILD}/selftests-output-qemu-lane${i}/test_progs" ] \
+    [ -x "${BASE_OUT}-lane${i}/test_progs" ] \
         || { echo "lane ${i} output missing (scripts/setup-lanes.sh ${LANES})" >&2; exit 1; }
 done
 
@@ -58,7 +56,7 @@ mkdir -p "${GATE}/logs"
 
 run_lane() {
     local lane="$1"; shift
-    local out="${BUILD}/selftests-output-qemu-lane${lane}"
+    local out="${BASE_OUT}-lane${lane}"
     local results="${GATE}/lane${lane}.md"
     echo "| program | verdict | wall | notes |" > "${results}"
     echo "|---|---|---|---|" >> "${results}"

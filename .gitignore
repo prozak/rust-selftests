@@ -4,3 +4,6 @@ qemu/gate/logs/
 qemu/phase3/*.log
 kernel-gap-report/
 nightly/
+/.build
+/.venv
+qemu/logs/

@@ -46,14 +46,14 @@ import re
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# The C side is the QEMU flavor: the x86 worktree pinned by kernel-commit
-# and the objects built from it. The UML tree stays on its own older pin.
-C_PROGS = os.path.join(REPO, "..", "uml-harness", ".build", "bpf-next-x86",
-                       "tools", "testing", "selftests", "bpf", "progs")
-C_OBJ_DIR = os.path.join(REPO, "..", "uml-harness", ".build",
-                         "selftests-output-qemu")
-
 sys.path.insert(0, os.path.join(REPO, "equiv"))
+import paths  # noqa: E402
+
+# The C side is the QEMU flavor: the kernel worktree pinned by kernel-commit
+# and the objects built from it.
+C_PROGS = os.path.join(paths.SELFTESTS_SRC, "progs")
+C_OBJ_DIR = paths.SELFTESTS_OUTPUT
+
 sys.path.insert(0, os.path.join(REPO, "scripts"))
 from bpfelf import BpfElf, SHF_EXECINSTR
 import btf_test_tags

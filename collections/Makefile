@@ -6,12 +6,14 @@
 #   make        build the crate's examples (cargo bpf --examples) + runner
 #   make test   run every object under the qemu kernel via vng
 
-HEIM     := $(abspath ../..)
-BTOOLDIR ?= $(HEIM)/uml-harness/.build/bpftool-output-qemu
-KERNEL   ?= $(HEIM)/uml-harness/.build/bpf-next-x86
-VNG      ?= $(HOME)/.local/share/vng-venv/bin/vng
+# Same defaults as ../scripts/paths.sh.
+BUILD_DIR   ?= $(abspath ..)/.build
+BTOOLDIR    ?= $(BUILD_DIR)/bpftool-output-qemu
+KERNEL      ?= $(BUILD_DIR)/bpf-next
+LLVM_PREFIX ?= $(BUILD_DIR)/llvm
+VNG         ?= $(or $(shell command -v vng),$(BUILD_DIR)/vng-venv/bin/vng)
 
-CRATE_VARS := LLVM_PREFIX=$(HEIM)/uml-harness/.build/llvm-install \
+CRATE_VARS := LLVM_PREFIX=$(LLVM_PREFIX) \
               LIBARENA_VMLINUX_H=$(BTOOLDIR)/vmlinux.h \
               LIBBPF_INCLUDE=$(BTOOLDIR)/libbpf/include \
               LIBBPF_LIBS="$(BTOOLDIR)/libbpf/libbpf.a -lelf -lz" \

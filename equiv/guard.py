@@ -32,10 +32,11 @@ import os
 import subprocess
 import sys
 
+import paths
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-DEFAULT_C_DIR = os.path.join(REPO, "..", "uml-harness", ".build",
-                             "selftests-output-qemu")
+DEFAULT_C_DIR = paths.SELFTESTS_OUTPUT
 BASELINE = os.path.join(HERE, "results", "baseline.tsv")
 TOOL_FILES = ["bpfelf.py", "bpfsym.py", "bpfcore.py", "check.py",
               "waivers.tsv"]

@@ -28,17 +28,18 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import z3
 import bpfcore
 import bpfhelpers
+import paths
 from bpfelf import (BpfElf, SHF_ALLOC, SHF_EXECINSTR, SHT_NOBITS, STT_FUNC,
                     STT_OBJECT, normalize_name)
 from bpfsym import Bail, Executor
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_C_DIR = os.path.join(REPO, "..", "uml-harness", ".build", "selftests-output-qemu")
+DEFAULT_C_DIR = paths.SELFTESTS_OUTPUT
 # CO-RE relocation target: the qemu-flavor kernel's BTF. Prefer the raw .BTF
 # dump cached in bld/ (fast); fall back to extracting from vmlinux itself.
 DEFAULT_KERNEL_BTFS = [
     os.path.join(REPO, "bld", "vmlinux.btf"),
-    os.path.join(REPO, "..", "uml-harness", ".build", "bpf-next-x86", "vmlinux"),
+    paths.VMLINUX_BTF,
 ]
 
 

@@ -2,7 +2,9 @@
 """Classify kernel BPF selftest programs for the stratified sweep sample."""
 import os, re, sys, glob, json
 
-KSRC = os.path.expanduser("~/sources/heimdall_experiment/uml-harness/.build/bpf-next")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "equiv"))
+import paths  # noqa: E402
+KSRC = paths.KERNEL_SRC
 PROGS = os.path.join(KSRC, "tools/testing/selftests/bpf/progs")
 PROG_TESTS = os.path.join(KSRC, "tools/testing/selftests/bpf/prog_tests")
 DONE = {"fentry_test","htab_update","test_core_retro","test_global_func1",

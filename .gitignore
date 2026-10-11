@@ -7,3 +7,4 @@ nightly/
 /.build
 /.venv
 qemu/logs/
+qemu/gate/lane*.md

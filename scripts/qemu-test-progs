@@ -16,6 +16,7 @@
 #                     $BUILD_DIR/vng-venv/bin/vng)
 #   QEMU_CPUS/QEMU_MEM  guest size (default 8 / 4G)
 #   QEMU_TIMEOUT      seconds before the guest is killed (default 600)
+#   QEMU_ALLOW_TCG    set to run without a usable /dev/kvm (slow)
 
 set -uo pipefail
 
@@ -38,6 +39,15 @@ VNG="${VNG:-$(command -v vng || echo "${BUILD_DIR}/vng-venv/bin/vng")}"
 # vng shells out to virtme-run etc. from its own venv — put it on PATH
 export PATH="$(dirname "${VNG}"):${PATH}"
 [ -f "${QEMU_KERNEL}" ] || { echo "kernel not found: ${QEMU_KERNEL}" >&2; exit 1; }
+# Without KVM, QEMU silently falls back to software emulation: the guest is
+# several times slower and timing-sensitive tests fail for C and Rust alike.
+if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+    [ -n "${QEMU_ALLOW_TCG:-}" ] || {
+        echo "/dev/kvm is not usable by $(id -un) ($(ls -l /dev/kvm 2>&1));" \
+             "fix its permissions or set QEMU_ALLOW_TCG=1 to run emulated" >&2
+        exit 1
+    }
+fi
 [ -x "${TEST_PROGS}" ] || { echo "test_progs not found: ${TEST_PROGS}" >&2; exit 1; }
 
 # vng passes the guest command on the KERNEL COMMAND LINE, which x86 caps at

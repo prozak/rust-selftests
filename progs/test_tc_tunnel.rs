@@ -169,13 +169,13 @@ extern "C" {
 }
 
 // bpf_core_cast()'s second argument is a BPF_CORE_TYPE_ID_TARGET relocation
-// (bpf_core_type_id_kernel(struct skb_shared_info)) the pipeline cannot
-// emit; as in mptcp_subflow.rs the value it resolves to is the pinned
-// kernel's vmlinux BTF id, read with
-//     bpftool btf dump file <bpf-next-x86>/vmlinux | grep "STRUCT 'skb_shared_info'"
-// on 3ccdb078. This is the #15 class of pin-dependent constant: it must be
-// refreshed at every kernel bump until the relocation is emitted.
-const SKB_SHARED_INFO_BTF_ID: u32 = 154954;
+// (bpf_core_type_id_kernel(struct skb_shared_info)); scripts/type_id.py
+// lowers the declaration below to that relocation, so libbpf resolves the
+// id against the running kernel as it does for the C object.
+// BTF_TYPE_ID: tid_skb_shared_info struct skb_shared_info
+extern "C" {
+    fn tid_skb_shared_info() -> u64;
+}
 
 #[inline(always)]
 fn kskb_head(kskb: &sk_buff) -> *mut u8 {
@@ -963,7 +963,7 @@ fn decap_internal(skb: *mut __sk_buff, off: i32, len: i32, proto: u8, ipxip_flag
     let kskb = unsafe { bpf_cast_to_kern_ctx(skb as *const c_void) } as *const sk_buff;
     let kskb_ref = unsafe { &*kskb };
     let shinfo_addr = (kskb_head(kskb_ref) as u64).wrapping_add(kskb_end(kskb_ref) as u64);
-    let shinfo = unsafe { bpf_rdonly_cast(shinfo_addr as *const c_void, SKB_SHARED_INFO_BTF_ID) }
+    let shinfo = unsafe { bpf_rdonly_cast(shinfo_addr as *const c_void, tid_skb_shared_info() as u32) }
         as *const skb_shared_info;
     let shinfo_ref = unsafe { &*shinfo };
     if shinfo_gso_size(shinfo_ref) != 0 {

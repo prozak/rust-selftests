@@ -6,11 +6,11 @@ LLVM, rust-bpf, Python/Z3, virtme-ng, and `/dev/kvm` access as normal local
 validation. It does not fetch or rebuild the kernel, advance pins, publish
 results, or update the committed proof/runtime baselines.
 
-For an existing output built with the pahole v1.31 release, prepare the
-[repaired tracing environment](history/tracing-environment-2026-09-07.md) first.
-The normal QEMU selftests build now uses `pahole-commit` and refreshes
-module BTF automatically. Module BTF changes invalidate the guard cache;
-nightly already proves every object freshly and records module hashes.
+The kernel and the selftests output must come from
+`scripts/build-qemu-kernel.sh` and `scripts/build-qemu-selftests.sh`, which
+use the pahole in `pahole-commit` for both. Module BTF changes invalidate
+the guard cache; nightly already proves every object freshly and records
+module hashes.
 
 ```sh
 make ci-nightly
@@ -27,10 +27,11 @@ Do not run other builds, swaps, guards, or QEMU drivers against this
 checkout/shared selftests output during nightly. An advisory lock prevents
 two nightly runs in this checkout or against the same selftests output;
 older drivers do not take those locks.
-The runner rejects alternate flavor/kernel/selftests paths because the
-checker also discovers module BTF from the standard QEMU output directory.
-This includes `QEMU_KERNEL`: the guest must boot the pinned tree's
-`arch/x86/boot/bzImage`, whose hash is recorded with the kernel inputs.
+The runner takes its paths from `equiv/paths.py`, as the checker does, and
+rejects an environment whose kernel-derived paths point outside
+`KERNEL_SRC`. This includes `QEMU_KERNEL`: the guest must boot the pinned
+tree's `arch/x86/boot/bzImage`, whose hash is recorded with the kernel
+inputs.
 
 ## Pipeline
 
@@ -92,16 +93,14 @@ nightly itself never accepts them. This implements the local whole-stack
 portion of issue #23. Scheduling and runner provisioning remain separate;
 weekly kernel-gap reporting continues in its existing workflow.
 
-## Latest attempt
+## Runs
 
-The [September 7 post-repair attempt](history/ci-nightly-results-2026-09-07.md)
-ended ERROR at 290/596 runtime rows: ten matching C/Rust failures,
-including a guest panic, and one INEQUIV previously hidden by timeout.
-Cleanup succeeded. Kernel/module BTF compatibility and proof timeout
-handling need attention before scheduling; no baselines were accepted.
-
-## Recorded full run
-
-See [the first complete run](history/ci-nightly-results-2026-09-06.md): all 596
-proof and runtime verdicts match the recorded baselines. The run completed
-with 17 known runtime failures and retained a nonzero status.
+- 2026-10-10, the current baselines: all 596 runtime rows on unpatched
+  bpf-next built by the scripts above. 581 PASS / 7 FAIL / 8 NO-ORACLE and
+  one INEQUIV; the README's Status section accounts for each failure and
+  the three re-runs.
+- [2026-09-07](history/ci-nightly-results-2026-09-07.md): stopped at
+  290/596 on a guest panic caused by a kernel and a test module built with
+  different pahole versions.
+- [2026-09-06](history/ci-nightly-results-2026-09-06.md): the first
+  complete run.

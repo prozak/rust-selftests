@@ -1,248 +1,231 @@
-# rust-selftests — Rust translations of the kernel BPF selftests
+# rust-selftests
 
-Rust translations of `tools/testing/selftests/bpf/progs/*.c`, compiled
-**directly to BPF by upstream rustc/LLVM** (the
-[4ast/rust-bpf](https://github.com/4ast/rust-bpf) pipeline — no aya, no
-bpf-linker), and validated against the kernel's **unmodified** selftests
-harness: the real `prog_tests/*.c`, the real skeleton generation, the real
-`test_progs`, running in a guest kernel built from the pinned bpf-next tree
-(`kernel-commit`; `make status` and `make ci-local` refuse to run when the
-x86 worktree's merge-base with upstream is a different commit).
+The Linux kernel's BPF selftest programs, translated from C to Rust and run
+through the kernel's own test harness.
 
-Current corpus: 596 translated C objects in `progs/`. The recorded
-[QEMU gate](qemu/gate/results.md) has 588 PASS / 0 FAIL / 8 NO-ORACLE;
-passing consumers can include skipped subtests. See the
-[tracing environment report](docs/tracing-environment-2026-09-07.md) for the
-final three repairs and validation limits.
-The [post-repair nightly](docs/ci-nightly-results-2026-09-07.md) stopped
-at 290/596 runtime rows with ten matching C/Rust failures and one proof
-INEQUIV. The repaired whole stack is not yet validated; see that report
-for the module BTF incompatibility and successful cleanup.
-This README is about **running those tests**;
-for how a translation is written see `TRANSLATING.md`.
+Each `progs/<name>.rs` here is a translation of
+[`tools/testing/selftests/bpf/progs/<name>.c`](https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git/tree/tools/testing/selftests/bpf/progs?id=3ccdb07813829ba9487273e75d1cb238cfa774c1)
+in bpf-next. The Rust is compiled straight to a BPF object by rustc and
+LLVM, using the [4ast/rust-bpf](https://github.com/4ast/rust-bpf) pipeline:
+no aya, no bpf-linker, no libbpf-rs. The object is then dropped in place of
+the one clang built from the C file, and the kernel's unmodified tests decide
+whether it is good.
 
-For a fresh rebuild, full proof sweep, serial QEMU gate, and codegen report,
-run `make ci-nightly`. See [the nightly guide](docs/ci-nightly.md) for
-prerequisites, artifacts, and failure semantics.
+596 of the 1,008 programs in the kernel tree are translated. In the last
+full run (2026-10-10), 584 of them pass the kernel's tests with the Rust
+object in place; [Status](#status) has the rest.
 
-## The two guest flavors
+## What "passes" means
 
-`FLAVOR` selects the oracle the harness runs the tests in:
+The kernel tests each BPF program with a userspace test in
+`prog_tests/*.c`, linked into one binary, `test_progs`. That test opens the
+object through a generated skeleton, loads it (so the in-kernel verifier
+must accept it), attaches it, triggers it and checks what it did.
 
-| FLAVOR | guest | notes |
-|---|---|---|
-| `qemu` | x86_64 bpf-next at `kernel-commit` + virtme-ng/KVM | **the default** — ~10x faster, real kprobes/uprobes/stack unwinding, test kmods |
-| `uml` | UML bpf-next (`uml-harness`) | parked: an older pin with a patched kernel and a reduced feature set; used only when asked for with `FLAVOR=uml` |
+For a translation, this repo:
 
-Everything below is the QEMU flavor; nothing needs `FLAVOR=` unless UML is
-wanted explicitly. The two flavors share `scripts/swap-and-test.sh` and the
-Makefile — the flavor only switches the kernel tree, the selftests output
-directory and the guest runner.
+1. builds `bld/<name>.bpf.o` from `progs/<name>.rs`;
+2. installs it as `<name>.bpf.o` in a build of the kernel selftests, and
+   lets the kernel's own Makefile regenerate the skeletons and relink
+   `test_progs`;
+3. boots a QEMU guest running bpf-next at the commit in
+   [`kernel-commit`](kernel-commit) and runs every `prog_tests` test that
+   uses the object.
 
-## Prerequisites for the QEMU flavor
+**PASS** means those tests report zero failures with the Rust object in
+place. The tests, the skeleton generator, libbpf and the kernel are
+unmodified bpf-next: no patches are
+applied ([`patches/kernel/`](patches/kernel) is empty). A passing test can still skip
+subtests, and a test that exercises several objects runs the others from C.
+**NO-ORACLE** means no `prog_tests` test uses the object, so nothing ran.
 
-1. **x86_64 kernel worktree** at `../uml-harness/.build/bpf-next-x86` — a
-   `git worktree` of bpf-next at `kernel-commit` plus the seven
-   selftests/libbpf patches from `uml-harness/patches/bpf-selftests-uml`
-   (0004, 0005, 0005b, 0007, 0007b, 0009, 0011), configured to boot under
-   virtme-ng (`CONFIG_KVM_GUEST`, `CONFIG_VIRTIO*`, `CONFIG_VIRTIO_FS`,
-   `CONFIG_9P_FS`, `CONFIG_DEBUG_INFO_BTF`, `CONFIG_BPF_JIT`,
-   `CONFIG_KPROBES`, `CONFIG_UPROBES`, `CONFIG_FUNCTION_TRACER`), built to
-   `vmlinux` + `arch/x86/boot/bzImage` + `modules`.
-2. **virtme-ng** at `~/.local/share/vng-venv/bin/vng` (v1.41 here) and
-   access to `/dev/kvm` (be in the `kvm` group).
-3. **QEMU selftests output** — build it once with
-   `scripts/build-qemu-selftests.sh`. It builds `bpftool` from the x86
-   tree into `../uml-harness/.build/bpftool-output-qemu`, `modules` in the
-   x86 tree, and then the selftests into
-   `../uml-harness/.build/selftests-output-qemu` with the upstream revision
-   in `pahole-commit`, in keep-going mode (a partial `test_progs` is
-   expected and fine). After a pin bump: move the old output aside,
-   `REBUILD_BPFTOOL=1`, and re-run `scripts/setup-lanes.sh`.
-   The build also refreshes `bpf_testmod` BTF so tool updates cannot leave
-   the int128 tracing target missing. For an existing prepared output,
-   run `bash scripts/build-qemu-pahole.sh` followed by
-   `python3 scripts/refresh-qemu-testmod-btf.py --install`.
-4. **Toolchain for building the Rust objects**: a built
-   [4ast/rust-bpf](../rust-bpf) checkout (`bld_deps/` rlibs,
-   `bld/bpf-postproc`, `bld/libbtf_macros.so`), LLVM >= 22 at
-   `../uml-harness/.build/llvm-install`, and `rustc` (stable is fine;
-   needs the `rust-src` component — `RUSTC_BOOTSTRAP=1` is set by the
-   Makefile).
+The kernel is pinned, not tracking: `3ccdb0781382` is bpf-next as of
+2026-09-04.
 
-Paths default to the `heimdall_experiment` layout; override `KERNEL_SRC`,
-`SELFTESTS_OUTPUT`, `VMLINUX_BTF`, `RUSTBPF`, `LLVM_PREFIX` as needed.
-Guest sizing/timeouts for the runner: `QEMU_CPUS` (8), `QEMU_MEM` (4G),
-`QEMU_TIMEOUT` (600s), `QEMU_KERNEL`, `VNG`.
+## Start here
 
-## Running all the Rust tests in QEMU
+Read one translation next to its original. A short one with maps,
+read-only globals and a `bpf_loop` callback:
 
-```sh
-scripts/qemu-verify.sh                      # every progs/*.rs
-scripts/qemu-verify.sh fentry_test atomics  # just these
+- C: [`progs/test_map_lookup_percpu_elem.c`](https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git/tree/tools/testing/selftests/bpf/progs/test_map_lookup_percpu_elem.c?id=3ccdb07813829ba9487273e75d1cb238cfa774c1)
+- Rust: [`progs/test_map_lookup_percpu_elem.rs`](progs/test_map_lookup_percpu_elem.rs)
+- the test that judges both: [`prog_tests/map_lookup_percpu_elem.c`](https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git/tree/tools/testing/selftests/bpf/prog_tests/map_lookup_percpu_elem.c?id=3ccdb07813829ba9487273e75d1cb238cfa774c1)
+
+A map definition in C,
+
+```c
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, __u64);
+} percpu_array_map SEC(".maps");
 ```
 
-`qemu-verify.sh` pins the QEMU flavor's paths itself and for
-each program runs, serially:
+becomes
 
-- `make test-<name>` — build `bld/<name>.bpf.o`, install it over
-  `<name>.bpf.o` in the selftests output, regenerate the affected
-  skeletons and `test_progs` **with the kernel's own Makefile**, and run
-  the affected tests in the QEMU guest;
-- `make restore-<name>` — put the pristine C object back and run the same
-  tests again, which both leaves the output dir clean and gives a free
-  C-vs-Rust A/B for that test set.
-
-Output:
-
-- one row per program appended to `qemu/results.md`
-  (`| program | verdict | wall | notes |`, `notes` is the `test_progs`
-  Summary line);
-- full run logs in `qemu/logs/<name>.log` and `<name>.restore.log`.
-
-**Resume semantics:** in the no-argument (whole-corpus) form, a program
-already present in `qemu/results.md` is skipped, so an interrupted run
-resumes by re-invoking the same command. **Explicitly named programs always
-re-run**, replacing their existing row. To force a full re-run of the
-corpus, move `qemu/results.md` aside first (that file is the only state —
-logs are just overwritten). The final table printed by a run lists only the
-programs that run actually tested.
-
-**One run at a time.** The driver mutates a single selftests output
-directory and rewrites `qemu/results.md` in place; two concurrent runs
-corrupt each other's swapped objects, logs and rows. Use separate lanes
-(below) for parallelism.
-
-**Timing:** most programs take 10–20s wall; networking-heavy ones
-(`test_lwt_ip_encap`, `test_tc_link`, `test_tc_neigh_fib`, `test_uprobe`,
-`verifier_mtu`) take 30–160s. Budget a couple of hours for the full
-corpus. Per-program caps: 1200s for the make step, 600s
-(`QEMU_TIMEOUT`) for a single guest boot.
-
-**Reading the Summary line.** The `notes` column is `test_progs`' own
-summary, and its two leading numbers are *not* a ratio
-(`test_progs.c`: `printf("Summary: %d/%d PASSED, ...", succ_cnt,
-sub_succ_cnt, ...)`) — they are **top-level tests passed / subtests
-passed**:
-
-- `1/10 PASSED` — one test, whose 10 subtests all passed;
-- `1/0 PASSED` — one test that registers no subtests (normal, not a
-  failure);
-- `121/2455 PASSED` — 121 tests and 2455 subtests, because the `-t` filter
-  expands to every test registered in the consuming `prog_tests` file
-  (`verifier_mtu.bpf.o` is consumed by `prog_tests/verifier.c`, which
-  registers all 121 `verifier_*` tests). Over-broad relative to the one
-  swapped object, which can only catch more regressions, never fewer.
-
-Skips and failures are counted separately; `0 FAILED` is the pass
-condition.
-
-**Finding failures:**
-
-```sh
-grep -v '| PASS |' qemu/results.md
-grep -E "^(#[0-9]+|Summary:)" qemu/logs/<name>.log | tail -20
+```rust
+#[link_section = ".maps"]
+#[no_mangle]
+static percpu_array_map: BpfMap<u32, u64, { maps::PERCPU_ARRAY }, 1> = BpfMap::new();
 ```
 
-If a program fails, compare with its `.restore.log`: if the **pristine C
-object fails the same tests**, the harness or the environment is at fault,
-not the translation (see "When the output dir drifts" below).
+and a program is an `extern "C" fn` placed in the section libbpf expects:
 
-### Running the corpus in parallel
-
-`qemu-verify.sh` is serial by construction — it mutates one shared
-selftests output directory. To use more cores, give each worker its own
-worktree and its own copy of that directory:
-
-```sh
-scripts/setup-lanes.sh 4      # ../rust-selftests-lane{1..4} + per-lane outputs
+```rust
+#[link_section = "tp/syscalls/sys_enter_getuid"]
+#[no_mangle]
+extern "C" fn sysenter_getuid(_ctx: *const c_void) -> i32 { ... }
 ```
 
-Then drive `make` directly in each lane (the Makefile takes all paths from
-the environment):
+[TRANSLATING.md](TRANSLATING.md) is the full set of rules: how each C
+construct is written in Rust, and the mistakes that the tools below caught.
 
-```sh
-cd ../rust-selftests-lane1
-QEMU_CPUS=4 \
-  SELFTESTS_OUTPUT=../uml-harness/.build/selftests-output-qemu-lane1 \
-  make test-<name> && make restore-<name>
+## How an object is built
+
+`make` runs, for each `progs/<name>.rs`:
+
+```
+rustc --emit=llvm-bc  ->  llvm-link (+ libcore/liballoc)  ->  bpf-postproc
+  ->  opt (internalize + O2)  ->  add_ksyms.py  ->  llc -mcpu=v4
 ```
 
-The kernel worktree and its BTF are shared read-only; only the selftests
-output is per-lane. `setup-lanes.sh` is idempotent. (The lane machinery was
-built for the translation sweep — `scripts/lane-sweep.sh`, which drives
-`translate.sh` and honours a `sweep/STOP` file for a graceful stop; that
-script translates rather than verifies.)
+The pipeline, the target description, the `#[btf]` macro and `bpf-postproc`
+come from rust-bpf. This repo adds:
 
-## Running a single test
-
-```sh
-make test-<name>      # swap Rust object in, run affected tests
-make restore-<name>   # reinstall pristine C object, run them again
-```
-
-`make test-<name>` reuses the harness verbatim by construction: the Rust
-object is installed as `<name>.bpf.o` in the selftests output and the
-kernel's own Makefile regenerates the (possibly signed) skeletons and
-relinks `test_progs` from it. The pristine C object is backed up once as
-`<name>.bpf.o.corig` on the first swap.
-
-The set of affected tests is discovered from the generated `*.test.d`
-dependency files, plus a scan of `prog_tests/*.c` for programs loaded from
-disk by name, so program/test name mismatches need no manual mapping. The
-resulting file basenames are expanded to the **registered** test names
-(`test_<name>()` / `serial_test_<name>()`), because that is what
-`test_progs -t` matches.
-
-`scripts/known-bad-tests` lists registered test names that fail with the
-**pristine C object** in this harness (kernel limits / environment);
-`swap-and-test.sh` subtracts them from the `-t` filter so a bundled
-always-broken test cannot fail an otherwise-correct translation.
-
-## Building objects without running tests
-
-```sh
-make            # build bld/<name>.bpf.o for every progs/*.rs
-make status     # translation coverage vs the kernel progs/
-make clean      # drop bld/
-```
-
-`make verify` (the standalone verifier gate) runs `uml-veristat` and only
-works under `FLAVOR=uml`; it refuses to run otherwise. Under the QEMU
-flavor the acceptance gate is `test-<name>` itself.
-
-## When the output dir drifts
-
-The selftests output is mutable state: hundreds of swap/restore cycles can
-leave a Rust object behind after a silently failed restore, or let the tree
-drift from the sources. Symptom: a test fails for both the Rust object and
-the pristine C object. Fix by rebuilding the output from scratch:
-
-```sh
-mv ../uml-harness/.build/selftests-output-qemu{,.drifted}
-scripts/build-qemu-selftests.sh
-```
-
-Then re-run the affected programs (results for them must be removed from
-`qemu/results.md` first, or they will be skipped).
-
-## Result files
-
-To compare the pinned upstream corpus with a candidate kernel checkout,
-run `scripts/kernel-gap.sh /path/to/tip`. The [kernel-gap guide](docs/kernel-gap.md)
-describes the report, patch checks, and weekly CI artifacts.
-
-| file | what |
+| | |
 |---|---|
-| `qemu/results.md` | 63-program QEMU verification pass (the pre-sweep corpus) |
-| `qemu/results-postmerge.md` | 24 programs re-verified on a freshly built output dir after the helper-crate merge |
-| `qemu/results-pre-elffix.md` | historical, before the BTF/ELF append fix |
-| `sweep/lane-results/lane*.md` | the 4-lane translation sweep: 484 PASS / 117 FAIL of 608 candidates, each verdict from a QEMU test run in its lane |
-| `qemu/gate/results.md` | recorded gate on bpf-next 3ccdb078: 588 PASS / 0 FAIL / 8 NO-ORACLE; the September 6 nightly confirmed the previous table, and September 7 repairs refreshed seventeen rows; see `docs/tracing-environment-2026-09-07.md` for validation limits |
-| `sweep/results.md`, `docs/` | earlier sample sweep and the failure taxonomy |
+| [`bpf-rs-core/`](bpf-rs-core) | support crate the translations use: map types, helper and kfunc wrappers, context types, section macros |
+| [`scripts/btf_*.py`](scripts) and friends | post-link fixes that make the object's BTF and symbols match what the C object exposes to the harness |
+| [`equiv/`](equiv) | a checker that symbolically executes the C-built and Rust-built objects and asks Z3 whether anything observable can differ |
+| [`codegen/`](codegen) | a comparison of what rustc and clang emit for the proved-equivalent pairs |
+| [`collections/`](collections) | Rust `alloc` collections running in BPF on an arena allocator |
+| [`scripts/translint.py`](scripts/translint.py) | a linter for known translation mistakes |
 
-Translations include documented runtime failures and objects without a
-runtime oracle; passing consumers can also skip assertions. Consult the
-gate and phase reports for each object's validation status.
-`scripts/qemu-gate.sh` re-runs the whole corpus over the four lane outputs
-(`qemu/gate/`), which is how a kernel bump is re-validated.
+The prover and the runtime gate catch different bugs, and neither replaces
+the other. The prover compares program behaviour and has found integer
+narrowing mistakes that every test passed over; it cannot see an object's
+BTF, symbols or section order, which is where the runtime gate has found
+its own.
+
+## Status
+
+From `make ci-nightly` on 2026-10-10 (the sources of commit `1985958`), on bpf-next
+`3ccdb0781382` with no patches, plus the re-runs listed below. The
+per-object tables are [`qemu/gate/results.md`](qemu/gate/results.md) and
+[`equiv/results/baseline.tsv`](equiv/results/baseline.tsv).
+
+**Runtime gate** (596 objects, serial, 4-CPU guest):
+
+| | objects |
+|---|---:|
+| PASS | 584 |
+| FAIL, and the C object fails the same way | 4 |
+| NO-ORACLE | 8 |
+
+The run itself ended at 581 PASS / 7 FAIL. Three of the seven were re-run
+the next day and pass:
+
+- `get_branch_snapshot`, `get_smp_processor_id`: the guest kernel
+  panicked 1.8 s into boot, before the test started. Both pass on a second
+  boot.
+- `test_tc_tunnel`: the translation carried a kernel BTF id that the
+  rebuilt kernel no longer used. It now emits the relocation the C object
+  has (`3296ed8`) and passes.
+
+The other four fail with the unmodified C objects too, on this host, on
+that day: `test_tc_edt` misses a rate-accuracy threshold, and the three
+`tracing_multi_*` objects share a test whose attach of 64,321 functions
+takes about 146 s against a 120 s watchdog. All four passed in September
+on the same host. They are timing, not translation.
+
+60 of the passing rows include skipped subtests.
+
+**Proof sweep** (same 596 objects, 180 s each):
+
+| | objects |
+|---|---:|
+| EQUIV — every program proved equivalent to its C original | 417 |
+| BAIL — the checker met something it does not model | 120 |
+| TIMEOUT | 32 |
+| UNKNOWN | 13 |
+| NOPROGS — the object has no programs | 13 |
+| INEQUIV | 1 |
+
+The INEQUIV is `cpumask_success`: C masks the return of
+`bpf_cpumask_empty()` to one bit and the Rust tests all 32. Whether that
+is a translation bug or a gap in how the checker models kfunc returns is
+open; its runtime test passes. Until it is settled `make ci-local` fails
+on it.
+
+## Reproducing it
+
+You need an x86_64 Linux host with KVM (`/dev/kvm` readable by you), about
+30 GB of disk and 16 GB of memory (the kernel link peaks at 7.4 GB). Everything below was measured on
+a 32-thread machine running Ubuntu 24.04 with gcc 13.3.
+
+Host tools: the usual kernel build dependencies (gcc, make, flex, bison,
+bc, libelf, libssl, cmake for pahole), `qemu-system-x86_64`,
+[virtme-ng](https://github.com/arighi/virtme-ng) 1.41, Rust stable with the
+`rust-src` component (1.96.1 here), Python 3.12.
+
+```sh
+git clone --recurse-submodules https://github.com/prozak/rust-selftests
+git clone https://github.com/4ast/rust-bpf            # next to it
+cd rust-selftests
+
+scripts/fetch-llvm.sh             # LLVM 22.1.8 release -> .build/llvm       (1.9 GB download, 12 GB unpacked)
+scripts/build-qemu-kernel.sh      # bpf-next at kernel-commit -> .build/bpf-next   (300 MB fetch, 4 min, 9 GB)
+scripts/build-qemu-selftests.sh   # kernel selftests -> .build/selftests-output-qemu  (1 min, 1.3 GB)
+```
+
+Build rust-bpf's support libraries with the same LLVM and a stable rustc
+(its Makefile defaults to nightly):
+
+```sh
+make -C ../rust-bpf \
+  LLVM_PREFIX=$PWD/.build/llvm \
+  RUSTC=$(rustup which --toolchain stable rustc) \
+  RUST_SRC=$(rustc +stable --print sysroot)/lib/rustlib/src/rust/library
+```
+
+Tested with rust-bpf at `c130551`.
+
+Then:
+
+```sh
+make -j8                                  # all objects -> bld/      (about 1 min)
+make test-test_map_lookup_percpu_elem     # one translation, in QEMU (about 20 s)
+make restore-all                          # put the C objects back
+```
+
+`make test-<name>` leaves the Rust object installed; `make restore-all`
+undoes every swap. The whole corpus, with the proof sweep, is
+`make ci-nightly` (8 hours here on 2026-10-10, nearly all of it the serial runtime gate; see [docs/ci-nightly.md](docs/ci-nightly.md)).
+It needs `pip install -r requirements.txt`, into `.venv/` if you want
+`make` to find it by itself.
+
+All paths default to `.build/` inside the checkout and can be moved with
+`BUILD_DIR`, or one by one (`KERNEL_SRC`, `SELFTESTS_OUTPUT`, `LLVM_PREFIX`,
+`RUSTBPF`, `VNG`). [docs/maintainer.md](docs/maintainer.md) covers running
+subsets, parallel lanes, reading results and recovering a drifted output
+directory.
+
+## Layout
+
+| | |
+|---|---|
+| `progs/` | the translations, one per kernel `progs/*.c` |
+| `kernel-commit`, `pahole-commit` | the pinned bpf-next and pahole revisions |
+| `kernel/config-x86_64` | the guest kernel's configuration |
+| `patches/kernel/` | patches applied to the pinned kernel before building: none are needed |
+| `qemu/gate/results.md` | the recorded runtime verdict of every translation |
+| `equiv/results/baseline.tsv` | the recorded proof verdict of every translation |
+| `docs/` | the nightly and kernel-gap guides, the maintainer guide; dated reports under `docs/history/` |
+
+## License
+
+GPL-2.0-only, as the kernel selftests these programs are translated from;
+see [LICENSE](LICENSE). Each `progs/*.rs` carries the SPDX identifier of its
+C original, so the few dual-licensed originals stay dual-licensed.
+`collections/vendor/libarena-rs` is a submodule under its own license.

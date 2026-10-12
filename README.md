@@ -12,7 +12,7 @@ the one clang built from the C file, and the kernel's unmodified tests decide
 whether it is good.
 
 596 of the 1,008 programs in the kernel tree are translated. In the last
-full run (2026-10-10), 584 of them pass the kernel's tests with the Rust
+full run (2026-10-12), 588 of them pass the kernel's tests with the Rust
 object in place; [Status](#status) has the rest.
 
 ## What "passes" means
@@ -110,43 +110,25 @@ its own.
 
 ## Status
 
-From `make ci-nightly` on 2026-10-10 (the sources of commit `1985958`), on bpf-next
-`3ccdb0781382` with no patches, plus the re-runs listed below. The
-per-object tables are [`qemu/gate/results.md`](qemu/gate/results.md) and
+From `make ci-nightly` on 2026-10-12 (the sources of commit `453a499`), on
+bpf-next `3ccdb0781382` with no patches. The per-object tables are
+[`qemu/gate/results.md`](qemu/gate/results.md) and
 [`equiv/results/baseline.tsv`](equiv/results/baseline.tsv).
 
-This run was made without KVM. `/dev/kvm` was not usable that day and
-QEMU fell back to software emulation without saying so, which nobody
-noticed until afterwards. The verdicts below stand, but the guest was
-several times slower than it should be, and that is the likely cause of
-every failure the C objects share. The run will be repeated with KVM.
-
-**Runtime gate** (596 objects, serial, 4-CPU emulated guest):
+**Runtime gate** (596 objects, serial, 4-CPU KVM guest):
 
 | | objects |
 |---|---:|
-| PASS | 584 |
-| FAIL, and the C object fails the same way | 4 |
+| PASS | 588 |
+| FAIL | 0 |
 | NO-ORACLE | 8 |
 
-The run itself ended at 581 PASS / 7 FAIL. Three of the seven were re-run
-the next day and pass:
+Nothing was re-run. 54 of the passing rows include skipped subtests.
 
-- `get_branch_snapshot`, `get_smp_processor_id`: the guest kernel
-  panicked 1.8 s into boot, before the test started. Both pass on a second
-  boot.
-- `test_tc_tunnel`: the translation carried a kernel BTF id that the
-  rebuilt kernel no longer used. It now emits the relocation the C object
-  has (`3296ed8`) and passes.
-
-The other four fail with the unmodified C objects too: `test_tc_edt`
-misses a rate-accuracy threshold, and the three `tracing_multi_*` objects
-share a test whose attach of 64,321 functions takes about 146 s against a
-120 s watchdog. All four passed in September, with KVM, on the same host.
-Both are timing checks, so emulation is the likely cause; that is not
-confirmed until the KVM run.
-
-60 of the passing rows include skipped subtests.
+The previous run, on 2026-10-10, was made without KVM by accident and
+recorded four failures that the C objects shared (`test_tc_edt` and three
+`tracing_multi_*` objects) and two guest panics during boot. All six pass
+here, on the same kernel.
 
 **Proof sweep** (same 596 objects, 180 s each):
 
@@ -210,8 +192,7 @@ make restore-all                          # put the C objects back
 `make test-<name>` leaves the Rust object installed; `make restore-all`
 undoes every swap. The whole corpus, with the proof sweep, is
 `make ci-nightly` (see [docs/ci-nightly.md](docs/ci-nightly.md)). Its
-runtime gate is serial: 3 hours 23 minutes with KVM in September, and 7.6
-hours in the emulated 2026-10-10 run.
+runtime gate is serial and took 3 hours 27 minutes in the 2026-10-12 run.
 It needs `pip install -r requirements.txt`, into `.venv/` if you want
 `make` to find it by itself.
 

@@ -115,7 +115,13 @@ From `make ci-nightly` on 2026-10-10 (the sources of commit `1985958`), on bpf-n
 per-object tables are [`qemu/gate/results.md`](qemu/gate/results.md) and
 [`equiv/results/baseline.tsv`](equiv/results/baseline.tsv).
 
-**Runtime gate** (596 objects, serial, 4-CPU guest):
+This run was made without KVM. `/dev/kvm` was not usable that day and
+QEMU fell back to software emulation without saying so, which nobody
+noticed until afterwards. The verdicts below stand, but the guest was
+several times slower than it should be, and that is the likely cause of
+every failure the C objects share. The run will be repeated with KVM.
+
+**Runtime gate** (596 objects, serial, 4-CPU emulated guest):
 
 | | objects |
 |---|---:|
@@ -133,11 +139,12 @@ the next day and pass:
   rebuilt kernel no longer used. It now emits the relocation the C object
   has (`3296ed8`) and passes.
 
-The other four fail with the unmodified C objects too, on this host, on
-that day: `test_tc_edt` misses a rate-accuracy threshold, and the three
-`tracing_multi_*` objects share a test whose attach of 64,321 functions
-takes about 146 s against a 120 s watchdog. All four passed in September
-on the same host. They are timing, not translation.
+The other four fail with the unmodified C objects too: `test_tc_edt`
+misses a rate-accuracy threshold, and the three `tracing_multi_*` objects
+share a test whose attach of 64,321 functions takes about 146 s against a
+120 s watchdog. All four passed in September, with KVM, on the same host.
+Both are timing checks, so emulation is the likely cause; that is not
+confirmed until the KVM run.
 
 60 of the passing rows include skipped subtests.
 
@@ -160,7 +167,8 @@ on it.
 
 ## Reproducing it
 
-You need an x86_64 Linux host with KVM (`/dev/kvm` readable by you), about
+You need an x86_64 Linux host with KVM (`/dev/kvm` readable and writable
+by you; the test runner refuses to start otherwise), about
 30 GB of disk and 16 GB of memory (the kernel link peaks at 7.4 GB). Everything below was measured on
 a 32-thread machine running Ubuntu 24.04 with gcc 13.3.
 
@@ -201,7 +209,9 @@ make restore-all                          # put the C objects back
 
 `make test-<name>` leaves the Rust object installed; `make restore-all`
 undoes every swap. The whole corpus, with the proof sweep, is
-`make ci-nightly` (8 hours here on 2026-10-10, nearly all of it the serial runtime gate; see [docs/ci-nightly.md](docs/ci-nightly.md)).
+`make ci-nightly` (see [docs/ci-nightly.md](docs/ci-nightly.md)). Its
+runtime gate is serial: 3 hours 23 minutes with KVM in September, and 7.6
+hours in the emulated 2026-10-10 run.
 It needs `pip install -r requirements.txt`, into `.venv/` if you want
 `make` to find it by itself.
 

@@ -98,7 +98,9 @@ weekly kernel-gap reporting continues in its existing workflow.
 - 2026-10-10, the current baselines: all 596 runtime rows on unpatched
   bpf-next built by the scripts above. 581 PASS / 7 FAIL / 8 NO-ORACLE and
   one INEQUIV; the README's Status section accounts for each failure and
-  the three re-runs.
+  the three re-runs. The guests ran emulated, without KVM, which went
+  unnoticed until afterwards; `scripts/qemu-test-progs` now refuses to
+  start without a usable `/dev/kvm`.
 - [2026-09-07](history/ci-nightly-results-2026-09-07.md): stopped at
   290/596 on a guest panic caused by a kernel and a test module built with
   different pahole versions.

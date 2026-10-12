@@ -146,13 +146,13 @@
 | freplace_unreliable_prog | PASS | — | Summary: 1/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | freplace_void | PASS | — | Summary: 1/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | fsession_test | PASS | — | Summary: 3/3 PASSED, 0 SKIPPED, 0/0 FAILED |
-| get_branch_snapshot | PASS | — | Summary: 1/0 PASSED, 1 SKIPPED, 0/0 FAILED; re-run 2026-10-11; the nightly guest panicked at boot |
+| get_branch_snapshot | PASS | — | Summary: 1/0 PASSED, 1 SKIPPED, 0/0 FAILED |
 | get_cgroup_id_kern | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | get_func_args_fsession_test | PASS | — | Summary: 2/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | get_func_args_test | PASS | — | Summary: 2/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | get_func_ip_fsession_test | PASS | — | Summary: 2/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | get_func_ip_uprobe_test | PASS | — | Summary: 2/0 PASSED, 0 SKIPPED, 0/0 FAILED |
-| get_smp_processor_id | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED; re-run 2026-10-11; the nightly guest panicked at boot |
+| get_smp_processor_id | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | getpeername4_prog | PASS | — | Summary: 2/152 PASSED, 0 SKIPPED, 0/0 FAILED |
 | getpeername6_prog | PASS | — | Summary: 2/152 PASSED, 0 SKIPPED, 0/0 FAILED |
 | getpeername_unix_prog | PASS | — | Summary: 2/152 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -199,7 +199,7 @@
 | loop6 | PASS | — | Summary: 27/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | lpm_trie_map | NO-ORACLE | — |  |
 | lru_bug | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
-| lru_lock_nmi | PASS | — | Summary: 1/0 PASSED, 3 SKIPPED, 0/0 FAILED |
+| lru_lock_nmi | PASS | — | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
 | lsm | PASS | — | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | lsm_bdev | PASS | — | Summary: 1/0 PASSED, 1 SKIPPED, 0/0 FAILED |
 | lsm_cgroup_nonvoid | PASS | — | Summary: 1/3 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -253,7 +253,7 @@
 | recursion | PASS | — | Summary: 2/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | recvmsg6_prog | PASS | — | Summary: 2/152 PASSED, 0 SKIPPED, 0/0 FAILED |
 | recvmsg_unix_prog | PASS | — | Summary: 2/152 PASSED, 0 SKIPPED, 0/0 FAILED |
-| res_spin_lock | PASS | — | Summary: 3/14 PASSED, 1 SKIPPED, 0/0 FAILED |
+| res_spin_lock | PASS | — | Summary: 3/14 PASSED, 0 SKIPPED, 0/0 FAILED |
 | rhash | PASS | — | Summary: 1/10 PASSED, 0 SKIPPED, 0/0 FAILED |
 | security_bpf_map | PASS | — | Summary: 1/6 PASSED, 0 SKIPPED, 0/0 FAILED |
 | sendmsg4_prog | PASS | — | Summary: 2/152 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -360,7 +360,7 @@
 | test_btf_newkv | PASS | — | Summary: 31/381 PASSED, 21 SKIPPED, 0/0 FAILED |
 | test_btf_nokv | PASS | — | Summary: 31/381 PASSED, 21 SKIPPED, 0/0 FAILED |
 | test_btf_skc_cls_ingress | PASS | — | Summary: 1/6 PASSED, 0 SKIPPED, 0/0 FAILED |
-| test_build_id | PASS | — | Summary: 3/3 PASSED, 1 SKIPPED, 0/0 FAILED |
+| test_build_id | PASS | — | Summary: 3/3 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_cgroup1_hierarchy | PASS | — | Summary: 1/8 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_cgroup_link | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_check_mtu | PASS | — | Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -456,7 +456,7 @@
 | test_ringbuf | PASS | — | Summary: 4/33 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_seg6_loop | PASS | — | Summary: 27/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_select_reuseport_kern | PASS | — | Summary: 2/157 PASSED, 0 SKIPPED, 0/0 FAILED |
-| test_send_signal_kern | PASS | — | Summary: 2/8 PASSED, 4 SKIPPED, 0/0 FAILED |
+| test_send_signal_kern | PASS | — | Summary: 2/12 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_sig_in_xattr | PASS | — | Summary: 1/1 PASSED, 1 SKIPPED, 0/0 FAILED |
 | test_signed_loader | PASS | — | Summary: 1/30 PASSED, 2 SKIPPED, 0/0 FAILED |
 | test_signed_loader_data | PASS | — | Summary: 1/30 PASSED, 2 SKIPPED, 0/0 FAILED |
@@ -483,11 +483,11 @@
 | test_sockmap_redir | PASS | — | Summary: 1/576 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_sockmap_skb_verdict_attach | PASS | — | Summary: 1/35 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_sockmap_strp | PASS | — | Summary: 1/10 PASSED, 0 SKIPPED, 0/0 FAILED |
-| test_spin_lock | PASS | — | Summary: 7/69 PASSED, 1 SKIPPED, 0/0 FAILED |
-| test_spin_lock_fail | PASS | — | Summary: 7/69 PASSED, 1 SKIPPED, 0/0 FAILED |
+| test_spin_lock | PASS | — | Summary: 7/69 PASSED, 0 SKIPPED, 0/0 FAILED |
+| test_spin_lock_fail | PASS | — | Summary: 7/69 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_stack_map | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_stack_var_off | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
-| test_stacktrace_build_id | PASS | — | Summary: 3/0 PASSED, 2 SKIPPED, 0/0 FAILED |
+| test_stacktrace_build_id | PASS | — | Summary: 3/0 PASSED, 1 SKIPPED, 0/0 FAILED |
 | test_static_linked1 | NO-ORACLE | — |  |
 | test_static_linked2 | NO-ORACLE | — |  |
 | test_subprogs | PASS | — | Summary: 5/33 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -503,13 +503,13 @@
 | test_tc_bpf | PASS | — | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_tc_change_tail | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_tc_dtime | PASS | — | Summary: 1/8 PASSED, 0 SKIPPED, 0/0 FAILED |
-| test_tc_edt | FAIL | — | Summary: 0/0 PASSED, 0 SKIPPED, 1/0 FAILED; C-FAIL |
+| test_tc_edt | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_tc_link | PASS | — | Summary: 41/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_tc_neigh | PASS | — | Summary: 1/8 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_tc_neigh_fib | PASS | — | Summary: 1/8 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_tc_peer | PASS | — | Summary: 1/8 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_tc_qevent | PASS | — | Summary: 1/0 PASSED, 2 SKIPPED, 0/0 FAILED |
-| test_tc_tunnel | PASS | — | Summary: 1/18 PASSED, 0 SKIPPED, 0/0 FAILED; re-run 2026-10-11 at 3296ed8; the nightly object pinned a stale kernel BTF id |
+| test_tc_tunnel | PASS | — | Summary: 1/18 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_tcp_custom_syncookie | PASS | — | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_tcp_estats | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_tcp_hdr_options | PASS | — | Summary: 1/6 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -551,9 +551,9 @@
 | test_xdp_with_cpumap_helpers | PASS | — | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_xdp_with_devmap_frags_helpers | PASS | — | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_xdp_with_devmap_helpers | PASS | — | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
-| timer | PASS | — | Summary: 14/3 PASSED, 3 SKIPPED, 0/0 FAILED |
+| timer | PASS | — | Summary: 14/3 PASSED, 1 SKIPPED, 0/0 FAILED |
 | timer_crash | PASS | — | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
-| timer_interrupt | PASS | — | Summary: 14/3 PASSED, 3 SKIPPED, 0/0 FAILED |
+| timer_interrupt | PASS | — | Summary: 14/3 PASSED, 0 SKIPPED, 0/0 FAILED |
 | timer_lockup | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | timer_mim_reject | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | timer_start_deadlock | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -563,9 +563,9 @@
 | trace_dummy_st_ops | PASS | — | Summary: 1/7 PASSED, 0 SKIPPED, 0/0 FAILED |
 | trace_printk | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tracing_failure | PASS | — | Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED |
-| tracing_multi_bench | FAIL | — | Summary: 2/16 PASSED, 0 SKIPPED, 1/0 FAILED; C-FAIL |
-| tracing_multi_fail | FAIL | — | Summary: 2/16 PASSED, 0 SKIPPED, 1/0 FAILED; C-FAIL |
-| tracing_multi_rollback | FAIL | — | Summary: 2/16 PASSED, 0 SKIPPED, 1/0 FAILED; C-FAIL |
+| tracing_multi_bench | PASS | — | Summary: 3/16 PASSED, 0 SKIPPED, 0/0 FAILED |
+| tracing_multi_fail | PASS | — | Summary: 3/16 PASSED, 0 SKIPPED, 0/0 FAILED |
+| tracing_multi_rollback | PASS | — | Summary: 3/16 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tracing_struct | PASS | — | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tracing_struct_int128 | PASS | — | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
 | tracing_struct_many_args | PASS | — | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |

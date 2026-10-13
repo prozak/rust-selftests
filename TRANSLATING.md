@@ -342,6 +342,27 @@ The assembly must include its own `exit` and supply every return register.
 Use `sym` operands for calls so definitions survive optimization and receive
 relocations. `aggregate_ret_target.rs` is the minimal example.
 
+C's `__kptr` (and `__kptr_untrusted`, `__percpu_kptr`, `__uptr`) is a BTF
+type tag on a pointer, which rustc cannot emit. Declare the field as a
+plain pointer and list it in `btf_type_tags!`; `scripts/btf_type_tags.py`
+adds the tag to the built object. A struct member is named
+`struct.member`, a global variable by its name alone, and an array of
+pointers (of any depth) is tagged like a single pointer:
+
+```rust
+btf_type_tags! {
+    __cpumask_map_value.cpumask: kptr;   // map value member
+    global_mask: kptr;                    // static struct bpf_cpumask __kptr *global_mask;
+    global_mask_array_l2: kptr;           // ... __kptr *global_mask_array_l2[2][1];
+}
+```
+
+A C `static` global in a `private(NAME)` section is a Rust `static mut`
+with `#[link_section = ".bss.NAME"]` and no `#[no_mangle]`. With the tags
+in place, `bpf_kptr_xchg` into the field loads as it does for the C
+object, so translate the kptr round trip as written; do not replace it
+with a release of the local pointer. `cpumask_success.rs` has every form.
+
 `btf_type_tags!` also supports `arena` on pointer members and arrays of
 pointers, including void pointees. This preserves the aggregate-return
 types exercised by `aggregate_ret_func.rs`.

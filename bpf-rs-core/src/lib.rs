@@ -93,7 +93,10 @@ macro_rules! test_tags {
 ///     rcu_node_stash.node: kptr;
 /// }
 /// ```
+///
+/// An array of pointers is tagged the same way, and a global variable is
+/// named without a struct (`global_mask: kptr;`).
 #[macro_export]
 macro_rules! btf_type_tags {
-    ($($ty:ident . $field:ident : $tag:ident);+ $(;)?) => {};
+    ($($ty:ident $(. $field:ident)? : $tag:ident);+ $(;)?) => {};
 }

@@ -49,6 +49,11 @@ btf_type_tags! {
                                    ("c", "z", "uptr")]
 
 
+def test_an_entry_without_a_struct_names_a_global(tmp_path):
+    src = write(tmp_path, "btf_type_tags! { global_mask: kptr; s.m: kptr; }")
+    assert T.parse_source(src) == [(None, "global_mask", "kptr"), ("s", "m", "kptr")]
+
+
 def test_no_declaration_is_not_an_error(tmp_path):
     assert T.parse_source(write(tmp_path, "fn main() {}")) == []
 
@@ -59,7 +64,7 @@ def test_a_commented_out_declaration_is_not_read(tmp_path):
 
 @pytest.mark.parametrize("body,why", [
     ("btf_type_tags! { a.b: kptrs; }", "unknown tag"),
-    ("btf_type_tags! { a: kptr; }", "no member"),
+    ("btf_type_tags! { a.b.c: kptr; }", "two dots"),
     ("btf_type_tags! { }", "empty"),
     ("btf_type_tags! { a.b: kptr; } btf_type_tags! { c.d: kptr; }", "twice"),
 ])
@@ -182,3 +187,112 @@ def test_arena_void_pointer_and_array_preserve_other_users(tmp_path, array):
         member = struct.unpack_from('<I', blob, ts[member - 1][0] + 12)[0]
     assert after[member][0] == 2
     assert after[after[member][2]][:3] == (18, 'arena', 0)
+
+
+# --- globals and arrays of kptrs ---------------------------------------------
+
+def synth_globals_object(path):
+    """synth_struct_object plus [7] ARRAY [3] x1, [8] ARRAY [7] x2,
+    [9] VAR 'g' -> [3], [10] VAR (mangled) 'garr' -> [8], [11] VAR 'n' -> [1],
+    and stash.node repointed at the [7] array."""
+    synth_struct_object(path)
+    buf = bytearray(open(path, "rb").read())
+    sh, off, size, _align = T.elf_find_section(buf, ".BTF")
+    data = bytearray(buf[off:off + size])
+    _, _, _, hdr, toff, tlen, soff, slen = struct.unpack_from("<HBBIIIII", data)
+    types = T.walk_types(data, hdr, toff, tlen)
+    names = [b"g", b"_RNvCs1a2B3c_4prog4garr", b"n"]
+    strings, offs = b"", {}
+    for n in names:
+        offs[n] = slen + len(strings)
+        strings += n + b"\0"
+    added = struct.pack("<IIIIII", 0, 3 << 24, 0, 3, 1, 1)                 # [7]
+    added += struct.pack("<IIIIII", 0, 3 << 24, 0, 7, 1, 2)                # [8]
+    added += struct.pack("<IIII", offs[names[0]], 14 << 24, 3, 0)          # [9]
+    added += struct.pack("<IIII", offs[names[1]], 14 << 24, 8, 0)          # [10]
+    added += struct.pack("<IIII", offs[names[2]], 14 << 24, 1, 1)          # [11]
+    struct.pack_into("<I", data, types[3][0] + 16, 7)                      # stash.node
+    data = data[:hdr + tlen] + added + data[hdr + tlen:] + strings
+    struct.pack_into("<III", data, 12, tlen + len(added), soff + len(added),
+                     slen + len(strings))
+    newoff = len(buf)
+    buf.extend(data)
+    struct.pack_into("<QQ", buf, sh + 24, newoff, len(data))
+    open(path, "wb").write(buf)
+
+
+def raw_types(path):
+    raw = open(path, "rb").read()
+    _, off, size, _ = T.elf_find_section(bytearray(raw), ".BTF")
+    blob = raw[off:off + size]
+    _, _, _, hdr, toff, tlen, _, _ = struct.unpack_from("<HBBIIIII", blob)
+    return blob, T.walk_types(blob, hdr, toff, tlen)
+
+
+def array_elem(blob, ts, tid):
+    assert ts[tid - 1][1] == 3, f"type {tid} is not an ARRAY"
+    elem, _idx, nelems = struct.unpack_from("<III", blob, ts[tid - 1][0] + 12)
+    return elem, nelems
+
+
+def assert_kptr_ptr(ts, tid, pointee):
+    assert ts[tid - 1][1] == 2, f"type {tid} is not a PTR"
+    tag = ts[ts[tid - 1][3] - 1]
+    assert (tag[1], tag[3]) == (18, pointee)
+
+
+def test_a_global_pointer_is_tagged_through_its_var(tmp_path):
+    obj = str(tmp_path / "g.bpf.o")
+    synth_globals_object(obj)
+    assert T.inject(obj, [(None, "g", "kptr")]) == ["g:kptr"]
+    blob, ts = raw_types(obj)
+    assert_kptr_ptr(ts, ts[9 - 1][3], 2)
+    assert ts[3 - 1][3] == 2, "the shared PTR is untouched"
+
+
+def test_a_static_global_is_found_under_its_mangled_name_and_arrays_are_cloned(tmp_path):
+    obj = str(tmp_path / "g.bpf.o")
+    synth_globals_object(obj)
+    T.inject(obj, [(None, "garr", "kptr")])
+    blob, ts = raw_types(obj)
+    outer = ts[10 - 1][3]
+    assert outer > 11, "the VAR points at a cloned array"
+    inner, n = array_elem(blob, ts, outer)
+    assert n == 2
+    ptr, n = array_elem(blob, ts, inner)
+    assert n == 1
+    assert_kptr_ptr(ts, ptr, 2)
+    assert array_elem(blob, ts, 8) == (7, 2), "the original arrays are untouched"
+    assert array_elem(blob, ts, 7) == (3, 1)
+
+
+def test_a_member_array_of_kptrs_is_tagged(tmp_path):
+    obj = str(tmp_path / "g.bpf.o")
+    synth_globals_object(obj)
+    T.inject(obj, [("stash", "node", "kptr")])
+    blob, ts = raw_types(obj)
+    member = struct.unpack_from("<I", blob, ts[4 - 1][0] + 16)[0]
+    ptr, n = array_elem(blob, ts, member)
+    assert n == 1
+    assert_kptr_ptr(ts, ptr, 2)
+
+
+@pytest.mark.parametrize("name", ["nope", "n", "arr"])
+def test_a_bad_global_target_is_rejected(tmp_path, name):
+    # no such variable; not a pointer; "arr" must not match the mangled
+    # "...4garr" (the whole last path element has to be the name)
+    obj = str(tmp_path / "g.bpf.o")
+    synth_globals_object(obj)
+    with pytest.raises(TagError):
+        T.inject(obj, [(None, name, "kptr")])
+
+
+@pytest.mark.parametrize("sym,name", [
+    ("_RNvCsayMV1tQyH8U_15cpumask_success11global_mask", "global_mask"),
+    ("_RNvCs1a2B3c_4prog4garr", "garr"),
+    ("_RNvCs1a2B3c_4prog5foo1x", "foo1x"),
+    ("global_mask", None),
+    ("_RNvNvCs1a2B3c_4prog4main3FMT", None),   # a static inside a function
+])
+def test_rust_static_name(sym, name):
+    assert T.rust_static_name(sym) == name

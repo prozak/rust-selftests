@@ -99,12 +99,25 @@ def prove(name, timeout_s, solver_ms):
     """Run check.py; return (verdict, detail) in sweep.sh's taxonomy."""
     try:
         p = subprocess.run(
-            [sys.executable, os.path.join(HERE, "check.py"), name,
+            [sys.executable, "-u", os.path.join(HERE, "check.py"), name,
              "--timeout", str(solver_ms)],
             capture_output=True, text=True, timeout=timeout_s)
-    except subprocess.TimeoutExpired:
-        return "TIMEOUT", f"killed after {timeout_s}s"
+    except subprocess.TimeoutExpired as e:
+        return classify_timeout(e.stdout, timeout_s)
     return classify(p.stdout + p.stderr, p.returncode)
+
+
+def classify_timeout(partial, timeout_s):
+    """Verdict for a checker killed at the wall limit. A divergence it had
+    already reported is still a divergence: only an object with none is a
+    TIMEOUT."""
+    if isinstance(partial, bytes):
+        partial = partial.decode(errors="replace")
+    bad = [line.strip() for line in (partial or "").splitlines()
+           if line.startswith("  INEQUIV")]
+    if bad:
+        return "INEQUIV", "; ".join(bad)[:400]
+    return "TIMEOUT", f"killed after {timeout_s}s"
 
 
 def classify(out, returncode):

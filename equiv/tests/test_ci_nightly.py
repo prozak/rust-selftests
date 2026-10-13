@@ -278,3 +278,12 @@ def test_timeout_kills_descendants(tmp_path):
     time.sleep(0.8)
     assert not marker.exists()
     assert not nightly.CHILDREN
+
+
+def test_guard_keeps_a_divergence_reported_before_the_wall_limit():
+    partial = "  EQUIV    sec:a  [paths C=1 rust=1]\n  INEQUIV  sec:b  [observable 'g:err' differs]\n"
+    verdict, detail = nightly.guard.classify_timeout(partial, 180)
+    assert verdict == "INEQUIV" and "sec:b" in detail
+    assert nightly.guard.classify_timeout(partial.encode(), 180)[0] == "INEQUIV"
+    assert nightly.guard.classify_timeout("  EQUIV    sec:a\n", 180) == ("TIMEOUT", "killed after 180s")
+    assert nightly.guard.classify_timeout(None, 180)[0] == "TIMEOUT"

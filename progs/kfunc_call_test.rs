@@ -15,24 +15,16 @@
 // reimplementation reusing test5's own multiply-and-call logic is a
 // faithful translation without needing a `#[naked]` symbol-relocated call.
 //
-// kfunc_call_ctx: struct ctx_val's `ctx` field is `__kptr`-tagged in the C
-// source, but rustc cannot emit BTF_KIND_TYPE_TAG (see TRANSLATING.md /
-// btf-type-tag-uptr-kptr-unfixable) so bpf_kptr_xchg into it would be
-// rejected ("R1 has no valid kptr"). The map is part of the object's kept
-// ABI (must still be declared to match ELF shape) but the C program's use
-// of it is a single-invocation "stash, xchg from NULL, always take the
-// non-null branch" round trip with no cross-invocation purpose here either
-// -- kfunc_call_test.skel.h is reopened fresh for every test run. So this
-// follows kptr-bss-global-workaround-use-trusted-ptr-directly /
-// cgrp_kfunc_success's generalization: skip the map entirely and just
-// create+release the acquired pointer directly. prog_tests/kfunc_call.c's
-// TC_TEST(kfunc_call_ctx, 0) only asserts the return value.
+// kfunc_call_ctx: struct ctx_val's `ctx` field is `__kptr` in the C; the
+// tag comes from the btf_type_tags! declaration at the bottom.
 
-use bpf_rs_core::bpf_object;
 use bpf_rs_core::ctx::__sk_buff;
-use bpf_rs_core::helpers::{bpf_get_prandom_u32, bpf_sk_fullsock, bpf_spin_lock, bpf_spin_unlock};
+use bpf_rs_core::helpers::{
+    bpf_get_prandom_u32, bpf_kptr_xchg, bpf_map_lookup_elem, bpf_sk_fullsock, bpf_spin_lock,
+    bpf_spin_unlock,
+};
 use bpf_rs_core::maps::{self, BpfMap};
-use bpf_rs_core::vload;
+use bpf_rs_core::{bpf_object, btf_type_tags, vload};
 use core::ffi::c_void;
 
 #[repr(C)]
@@ -40,8 +32,9 @@ struct ProgTestRefKfunc {
     _opaque: [u8; 0],
 }
 
+#[allow(non_camel_case_types)]
 #[repr(C)]
-struct BpfTestmodCtx {
+struct bpf_testmod_ctx {
     _opaque: [u8; 0],
 }
 
@@ -51,13 +44,13 @@ struct SyscallTestArgs {
     size: usize,
 }
 
+#[allow(non_camel_case_types)]
 #[repr(C)]
-#[allow(dead_code)]
-struct CtxVal {
-    ctx: *mut BpfTestmodCtx,
+struct ctx_val {
+    ctx: *mut bpf_testmod_ctx,
 }
 
-type CtxMap = BpfMap<i32, CtxVal, { maps::ARRAY }, 1>;
+type CtxMap = BpfMap<i32, ctx_val, { maps::ARRAY }, 1>;
 
 /// struct bpf_spin_lock { __u32 val; }; -- matched by BTF struct name.
 #[allow(non_camel_case_types)]
@@ -103,8 +96,8 @@ extern "C" {
     fn bpf_kfunc_call_test_get_rdwr_mem(p: *mut ProgTestRefKfunc, size: i32) -> *mut i32;
     fn bpf_kfunc_call_test_get_rdonly_mem(p: *mut ProgTestRefKfunc, size: i32) -> *mut i32;
     fn bpf_kfunc_call_test_static_unused_arg(arg: u32, unused: u32) -> u32;
-    fn bpf_testmod_ctx_create(err: *mut i32) -> *mut BpfTestmodCtx;
-    fn bpf_testmod_ctx_release(ctx: *mut BpfTestmodCtx);
+    fn bpf_testmod_ctx_create(err: *mut i32) -> *mut bpf_testmod_ctx;
+    fn bpf_testmod_ctx_release(ctx: *mut bpf_testmod_ctx);
     fn bpf_testmod_test_mod_kfunc(i: i32);
 }
 
@@ -343,16 +336,32 @@ extern "C" fn kfunc_call_test_static_unused_arg(_skb: *const __sk_buff) -> i32 {
 #[no_mangle]
 extern "C" fn kfunc_call_ctx(_skb: *const __sk_buff) -> i32 {
     let mut err: i32 = 0;
-    let ctx = unsafe { bpf_testmod_ctx_create(&mut err) };
+    let mut ctx = unsafe { bpf_testmod_ctx_create(&mut err) };
     if ctx.is_null() && err == 0 {
         err = -1;
     }
     if !ctx.is_null() {
-        unsafe {
-            bpf_testmod_ctx_release(ctx);
+        let key: i32 = 0;
+        let val = bpf_map_lookup_elem(&ctx_map, &key) as *mut ctx_val;
+
+        // Transfer ctx to map to be freed via implicit dtor call
+        // on cleanup.
+        if !val.is_null() {
+            ctx = bpf_kptr_xchg(unsafe { core::ptr::addr_of_mut!((*val).ctx) }.cast(), ctx.cast())
+                .cast();
+        }
+        if !ctx.is_null() {
+            unsafe {
+                bpf_testmod_ctx_release(ctx);
+            }
+            err = -1;
         }
     }
     err
+}
+
+btf_type_tags! {
+    ctx_val.ctx: kptr;
 }
 
 bpf_object!("GPL");

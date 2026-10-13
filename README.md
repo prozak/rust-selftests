@@ -130,22 +130,30 @@ recorded four failures that the C objects shared (`test_tc_edt` and three
 `tracing_multi_*` objects) and two guest panics during boot. All six pass
 here, on the same kernel.
 
-**Proof sweep** (same 596 objects, 180 s each):
+Six objects were changed after that run (`cpumask_success` and five others
+now store their kptrs as the C does, where they used to release them
+immediately). Each was re-run on its own and passes.
+
+**Proof sweep** (same 596 objects, 180 s each; re-run in full after that
+change):
 
 | | objects |
 |---|---:|
-| EQUIV — every program proved equivalent to its C original | 417 |
+| EQUIV — every program proved equivalent to its C original | 418 |
 | BAIL — the checker met something it does not model | 120 |
 | TIMEOUT | 32 |
-| UNKNOWN | 13 |
+| UNKNOWN | 12 |
 | NOPROGS — the object has no programs | 13 |
 | INEQUIV | 1 |
 
-The INEQUIV is `cpumask_success`: C masks the return of
-`bpf_cpumask_empty()` to one bit and the Rust tests all 32. Whether that
-is a translation bug or a gap in how the checker models kfunc returns is
-open; its runtime test passes. Until it is settled `make ci-local` fails
-on it.
+The INEQUIV is `cpumask_success`. Its kfuncs return `bool`, and on x86-64
+only the low byte of that return is defined. clang masks the result to one
+bit; rustc marks the return as already zero-extended, so the Rust object
+tests the whole register. That is a defect in how the object is built, not
+in the checker. Its runtime test passes: most of the kfuncs involved
+return clean values on the test machine, and the two that were seen not to
+are not called directly (the source says where). Until the build masks
+these returns, `make ci-local` fails on this object.
 
 ## Reproducing it
 

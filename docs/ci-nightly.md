@@ -98,6 +98,11 @@ weekly kernel-gap reporting continues in its existing workflow.
 - 2026-10-12, the current baselines: the same kernel as the run
   below, with KVM. 588 PASS / 0 FAIL / 8 NO-ORACLE and one INEQUIV
   (`cpumask_success`); the runtime gate took 3 hours 27 minutes.
+  `equiv/results/baseline.tsv` is newer than this run: six translations
+  were changed afterwards and four waivers removed, which invalidates
+  every row, so the proof sweep was repeated in full with
+  `equiv/guard.py --all` (418 EQUIV, one more than the nightly). The six
+  objects were re-run through the gate one at a time and pass.
 - 2026-10-10: all 596 runtime rows on unpatched bpf-next built by the
   scripts above. 581 PASS / 7 FAIL / 8 NO-ORACLE and one INEQUIV. The
   guests ran emulated, without KVM, which went unnoticed until afterwards,

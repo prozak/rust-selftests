@@ -1,33 +1,70 @@
 // SPDX-License-Identifier: GPL-2.0
 #![no_std]
 #![no_main]
+#![feature(asm_experimental_arch)]
 
 // Direct translation of
 // tools/testing/selftests/bpf/progs/pro_epilogue_with_kfunc.c, bpf-rs-core
 // idiom.
 //
-// The C source implements `test_kfunc_pro_epilogue` as a `__naked` function
-// with hand-written BPF asm so the accompanying `__xlated(...)` decl tags
-// can assert the *exact* instruction sequence the kernel's struct_ops
-// prologue/epilogue trampoline splices around it. This
-// translation carries no `__xlated` tags, so test_loader (RUN_TESTS) just
-// checks load success. test_tags! and `// BPF_NAKED:` could reproduce the
-// tags and the asm body; whether translations should carry `__xlated` is
-// the open decision in #33. The trampoline's prologue/epilogue
-// splicing itself is unconditional kernel-side behavior keyed off the
-// `test_pro_epilogue` struct_ops member (bpf_testmod.c), independent of
-// how the callback body is written — so an ordinary (non-naked) function
-// with the same semantics is sufficient: extract the args pointer from
-// ctx slot 0 (the trampoline's u64-array calling convention, same as
-// fentry/fexit — see struct_ops_maybe_null.rs), call the inc10 kfunc on
-// it, then call subprog on it. The syscall program's expected retval
-// (22022) already encodes the kernel-side prologue (+1000) and epilogue
-// (+10000, *2) contributions, so this translation only needs to reproduce
-// the (+10 kfunc, +1 subprog) contribution to args->a.
+// test_kfunc_pro_epilogue is `__naked` hand-written BPF asm in the C: load
+// the args ptr, call the bpf_kfunc_st_ops_inc10 kfunc, call the noinline
+// `subprog` (args->a += 1; return args->a), exit. The kernel's
+// st_ops_gen_prologue/st_ops_gen_epilogue callbacks (bpf_testmod.c) splice
+// in a prologue and an epilogue that themselves call kfuncs, keyed on the
+// `test_pro_epilogue` struct_ops member. The C's `__xlated` tags assert the
+// rewritten listing line by line, so the body is carried verbatim as raw
+// asm (// BPF_NAKED:, scripts/naked_abi.py) and every tag is mirrored by
+// test_tags! below.
+//
+// __kfunc_btf_root is a plain (non-SEC, never-called) global function in
+// the C source whose only purpose is a reachable use of
+// bpf_kfunc_st_ops_inc10 for BTF/relocation purposes.
 
-use bpf_rs_core::bpf_object;
-use bpf_rs_core::progs::fentry_arg;
+use bpf_rs_core::{bpf_object, test_tags};
 use core::ffi::c_void;
+
+// The C's tag comments: 0-11 are the kernel's prologue (with its own kfunc
+// calls), 12 saves the __u64 *ctx to the stack, 13-17 are the main prog
+// and 18-32 the epilogue. The __retval comment: 22022 = (PROLOGUE_A [1000]
+// + KFUNC_INC10 + SUBPROG_A [1] + EPILOGUE_A [10000]) * 2.
+test_tags! {
+    test_kfunc_pro_epilogue: __success,
+        __xlated("0: r8 = r1"),
+        __xlated("1: r1 = 0"),
+        __xlated("2: call kernel-function"),
+        __xlated("3: if r0 != 0x0 goto pc+5"),
+        __xlated("4: r6 = *(u64 *)(r8 +0)"),
+        __xlated("5: r7 = *(u64 *)(r6 +0)"),
+        __xlated("6: r7 += 1000"),
+        __xlated("7: *(u64 *)(r6 +0) = r7"),
+        __xlated("8: goto pc+2"),
+        __xlated("9: r1 = r0"),
+        __xlated("10: call kernel-function"),
+        __xlated("11: r1 = r8"),
+        __xlated("12: *(u64 *)(r10 -8) = r1"),
+        __xlated("13: r1 = *(u64 *)(r1 +0)"),
+        __xlated("14: r6 = r1"),
+        __xlated("15: call kernel-function"),
+        __xlated("16: r1 = r6"),
+        __xlated("17: call pc+"),
+        __xlated("18: r1 = 0"),
+        __xlated("19: r6 = 0"),
+        __xlated("20: call kernel-function"),
+        __xlated("21: if r0 != 0x0 goto pc+6"),
+        __xlated("22: r1 = *(u64 *)(r10 -8)"),
+        __xlated("23: r1 = *(u64 *)(r1 +0)"),
+        __xlated("24: r6 = *(u64 *)(r1 +0)"),
+        __xlated("25: r6 += 10000"),
+        __xlated("26: *(u64 *)(r1 +0) = r6"),
+        __xlated("27: goto pc+2"),
+        __xlated("28: r1 = r0"),
+        __xlated("29: call kernel-function"),
+        __xlated("30: r0 = r6"),
+        __xlated("31: r0 *= 2"),
+        __xlated("32: exit");
+    syscall_pro_epilogue: __retval(22022);
+}
 
 #[repr(C)]
 struct st_ops_args {
@@ -39,8 +76,16 @@ extern "C" {
     fn bpf_kfunc_st_ops_test_pro_epilogue(args: *mut st_ops_args) -> i32;
 }
 
+#[no_mangle]
+extern "C" fn __kfunc_btf_root() {
+    unsafe {
+        bpf_kfunc_st_ops_inc10(core::ptr::null_mut());
+    }
+}
+
+#[no_mangle]
 #[inline(never)]
-fn subprog(args: *mut st_ops_args) -> i32 {
+extern "C" fn subprog(args: *mut st_ops_args) -> i32 {
     unsafe {
         (*args).a += 1;
         (*args).a as i32
@@ -49,12 +94,21 @@ fn subprog(args: *mut st_ops_args) -> i32 {
 
 #[link_section = "struct_ops/test_pro_epilogue"]
 #[no_mangle]
-extern "C" fn test_kfunc_pro_epilogue(ctx: *const u64) -> i32 {
-    let args = fentry_arg(ctx, 0) as *mut st_ops_args;
+// BPF_NAKED: test_kfunc_pro_epilogue
+extern "C" fn test_kfunc_pro_epilogue() -> i32 {
     unsafe {
-        bpf_kfunc_st_ops_inc10(args);
+        core::arch::asm!(
+            "r1 = *(u64 *)(r1 +0);",
+            "r6 = r1;",
+            "call {bpf_kfunc_st_ops_inc10};",
+            "r1 = r6;",
+            "call {subprog};",
+            "exit;",
+            bpf_kfunc_st_ops_inc10 = sym bpf_kfunc_st_ops_inc10,
+            subprog = sym subprog,
+            options(noreturn)
+        );
     }
-    subprog(args)
 }
 
 #[link_section = "syscall"]
@@ -71,7 +125,7 @@ extern "C" fn syscall_pro_epilogue(_ctx: *const c_void) -> i32 {
 #[allow(non_camel_case_types)]
 #[repr(C)]
 struct bpf_testmod_st_ops {
-    test_pro_epilogue: extern "C" fn(*const u64) -> i32,
+    test_pro_epilogue: extern "C" fn() -> i32,
 }
 
 unsafe impl Sync for bpf_testmod_st_ops {}

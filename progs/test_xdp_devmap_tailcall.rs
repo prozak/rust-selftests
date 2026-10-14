@@ -14,21 +14,16 @@
 // a real bpf_tail_call sets map->owner->expected_attach_type, and every
 // later program referencing the same map must match it exactly.
 //
-// The C source establishes that ownership by pre-populating the map via
-// `.values = { [0] = &xdp_devmap }` (an ELF relocation into a BTF
-// zero-length array member — Rust can't reproduce a flexible-array-member
-// field whose BTF type says 0 elements while its ELF data holds a real
-// pointer, so that exact mechanism isn't portable here). Instead,
-// xdp_devmap performs its own harmless out-of-range bpf_tail_call(..., 1)
-// (index 1 is never populated, so it always falls through) purely so it
-// also becomes a used_maps referrer of xdp_map. Since xdp_devmap is the
-// first program loaded, it becomes xdp_map's owner with its own
-// expected_attach_type, and xdp_entry's later bpf_tail_call is checked
-// against it — reproducing the same four accept/reject outcomes as the C
-// original's map-population approach.
+// The C source establishes that ownership by pre-populating the map with
+// `.values = { [0] = &xdp_devmap }`: libbpf stores xdp_devmap in slot 0 at
+// load time, which makes it the owner, and xdp_entry's bpf_tail_call is then
+// checked against it. `values: [XdpFn; 1]` emits the same .maps storage and
+// .rel.maps entry as clang, and scripts/btf_map_slots.py rewrites the BTF
+// member to the zero-length array libbpf demands (see TRANSLATING.md,
+// "Statically-initialized `values` slots").
 
 use bpf_rs_core::helpers::bpf_tail_call;
-use bpf_rs_core::{bpf_map, bpf_object, maps, vload};
+use bpf_rs_core::{bpf_object, maps, vload};
 
 /// UAPI struct xdp_md (linux/bpf.h).
 #[allow(non_camel_case_types)]
@@ -42,19 +37,30 @@ pub struct xdp_md {
     pub egress_ifindex: u32,
 }
 
-bpf_map! {
-    xdp_map {
-        r#type: *const [i32; maps::PROG_ARRAY],
-        max_entries: *const [i32; 1],
-        key_size: *const [i32; 4],
-        value_size: *const [i32; 4],
-    }
+type XdpFn = extern "C" fn(*const xdp_md) -> i32;
+
+#[allow(non_camel_case_types)]
+#[repr(C)]
+struct xdp_map {
+    r#type: *const [i32; maps::PROG_ARRAY],
+    max_entries: *const [i32; 1],
+    key_size: *const [i32; 4],
+    values: [XdpFn; 1],
 }
+unsafe impl Sync for xdp_map {}
+
+#[link_section = ".maps"]
+#[no_mangle]
+static xdp_map: xdp_map = xdp_map {
+    r#type: core::ptr::null(),
+    max_entries: core::ptr::null(),
+    key_size: core::ptr::null(),
+    values: [xdp_devmap],
+};
 
 #[link_section = "xdp"]
 #[no_mangle]
 extern "C" fn xdp_devmap(ctx: *const xdp_md) -> i32 {
-    bpf_tail_call(ctx as *const core::ffi::c_void, &xdp_map, 1);
     vload!((*ctx).egress_ifindex) as i32
 }
 

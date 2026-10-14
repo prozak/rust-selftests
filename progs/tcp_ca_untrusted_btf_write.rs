@@ -14,27 +14,23 @@
 // read is supported" — fires before the specific struct/field/offset is even
 // resolved, so which struct type is named doesn't matter to the outcome).
 //
-// This pipeline cannot reproduce bpf_core_type_id_kernel(): it's a
-// BPF_TYPE_ID_TARGET CO-RE relocation and btf-macros only emits field
-// byte_offset/field_exists relocations. Passing btf_id 0 (void) to the
-// second bpf_rdonly_cast keeps the verifier on its btf_type_is_void branch
-// (PTR_TO_MEM | MEM_RDONLY | PTR_UNTRUSTED instead of PTR_TO_BTF_ID |
-// PTR_UNTRUSTED), and the direct write below is rejected by the sibling
-// check for that type in check_mem_access's PTR_TO_MEM arm ("t == BPF_WRITE
-// && rdonly_mem" -> "cannot write into") — same load-time rejection, same
-// open_and_load() failure the test requires.
-//
-// Independently, add_ksyms.py always emits a 0-arg void FUNC_PROTO for every
-// extern fn regardless of its real signature, and bpf_rdonly_cast takes 2
-// real args, so libbpf's func_proto compat check (vlen 0 vs 2) rejects the
-// kfunc call before the verifier body check ever runs — load fails either
-// way.
+// bpf_core_type_id_kernel(struct tcp_sock) is the BTF_TYPE_ID declaration
+// below (scripts/type_id.py).
+
+// BTF_TYPE_ID: tid_tcp_sock struct tcp_sock
 
 use bpf_rs_core::bpf_object;
+use btf_macros::btf;
 use core::ffi::c_void;
 
 extern "C" {
     fn bpf_rdonly_cast(obj: *const c_void, btf_id: u32) -> *mut c_void;
+    fn tid_tcp_sock() -> u64;
+}
+
+#[btf]
+struct tcp_sock {
+    snd_cwnd: u32,
 }
 
 #[link_section = "struct_ops"]
@@ -42,8 +38,8 @@ extern "C" {
 extern "C" fn untrusted_btf_write_init(_ctx: *const u64) {
     let v: i32 = 1;
     let p = unsafe { bpf_rdonly_cast(&v as *const i32 as *const c_void, 0) };
-    let tp = unsafe { bpf_rdonly_cast(p, 0) };
-    unsafe { *(tp as *mut i32) = 1 };
+    let tp = unsafe { bpf_rdonly_cast(p, tid_tcp_sock() as u32) } as *mut tcp_sock;
+    unsafe { *((*tp).snd_cwnd().as_ptr() as *mut u32) = 1 };
 }
 
 // struct tcp_congestion_ops (net/tcp.h): only the members this program

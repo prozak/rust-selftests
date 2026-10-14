@@ -1224,6 +1224,12 @@ pub fn bpf_snprintf_btf(
     )
 }
 
+/// `long bpf_seq_printf_btf(struct seq_file *m, struct btf_ptr *ptr, u32 ptr_size, u64 flags)`.
+#[inline(always)]
+pub fn bpf_seq_printf_btf(m: *mut c_void, ptr: *const c_void, ptr_size: u32, flags: u64) -> i64 {
+    thunk!(150, fn(*mut c_void, *const c_void, u32, u64) -> i64)(m, ptr, ptr_size, flags)
+}
+
 /// `struct socket *bpf_sock_from_file(struct file *file)`: returns the
 /// `struct socket *` owning `file`, or NULL if `file` isn't a socket file.
 /// Generic over the caller's `file`-typed pointer.

@@ -123,6 +123,17 @@ fn task_real_parent(task: *mut task_struct) -> *mut task_struct {
     *unsafe { &*task }.real_parent().get().unwrap()
 }
 
+// x86-64 struct pt_regs; only PT_REGS_IP's field is read.
+#[btf]
+struct pt_regs {
+    ip: u64,
+}
+
+#[inline(never)]
+fn regs_ip(regs: *mut pt_regs) -> u64 {
+    *unsafe { &*regs }.ip().get().unwrap()
+}
+
 #[inline(never)]
 fn task_cgroups(task: *mut task_struct) -> *mut css_set {
     *unsafe { &*task }.cgroups().get().unwrap()
@@ -340,21 +351,18 @@ extern "C" fn inproper_sleepable_helper(_ctx: *const u64) -> i32 {
         unsafe { bpf_rcu_read_unlock() };
         return 0;
     }
-    let regs = bpf_task_pt_regs(real_parent);
+    let regs = bpf_task_pt_regs(real_parent) as *mut pt_regs;
     if regs.is_null() {
         unsafe { bpf_rcu_read_unlock() };
         return 0;
     }
 
-    // Stand-in for PT_REGS_IP(regs): this whole path is verifier-rejected at
-    // load time (sleepable helper call inside an rcu_read_lock region)
-    // before it can ever execute, so the exact address read back doesn't
-    // affect prog_tests/rcu_read_lock.c's inproper_region_tests outcome.
+    let ptr = regs_ip(regs) as *const c_void;
     let mut value: u32 = 0;
     let _ = bpf_copy_from_user_task(
         &mut value as *mut u32 as *mut c_void,
         4,
-        regs as *const c_void,
+        ptr,
         task,
         0,
     );

@@ -216,6 +216,7 @@ $(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc scripts/naked_abi.py
 	$(LLVM_DIS) $< -o $@.abi.ll
 	python3 scripts/naked_abi.py $@.abi.ll progs/$*.rs
 	@if grep -q '^// BPF_PROGRAM_ORDER:' progs/$*.rs; then python3 scripts/program_order.py $@.abi.ll progs/$*.rs; fi
+	python3 scripts/maps_section.py $@.abi.ll
 	$(LLC) -march=bpfel -mcpu=v4 -filetype=obj -o $@.tmp $@.abi.ll
 	$(LLVM_OBJCOPY) \
 		--remove-section=.eh_frame --remove-section=.rel.eh_frame \

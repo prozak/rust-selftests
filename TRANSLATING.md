@@ -159,6 +159,33 @@ zero-length ARRAY. Slots are live: a `__retval` that depends on the tail
 call actually runs it. Before this pass the slots stayed empty and such
 tests passed vacuously.
 
+A map-in-map slot is the same with a pointer to the inner map's definition
+as the element; a hole in a C designated initializer is a null:
+
+```rust
+#[repr(C)]
+struct outer_arr_def {
+    r#type: *const [i32; ARRAY_OF_MAPS],
+    max_entries: *const [i32; 2],
+    key_size: *const [i32; 4],
+    value_size: *const [i32; 4],
+    values: [*const InnerMap; 2],   // C: .values = { [1] = &inner_htab }
+}
+// ...
+    values: [core::ptr::null(), &inner_htab],
+```
+
+Where the C casts a target to `void *` because its type is not the declared
+inner type, cast the pointer (`&m as *const m_type as *const Declared`).
+
+`scripts/maps_section.py` does the rest for such objects before llc. A map
+with relocated slots would otherwise land in a second, writable `.maps`
+section apart from the read-only one holding its targets, and rustc orders
+statics by symbol name, while libbpf fills an outer map's slots when it
+creates it and so needs the inner maps earlier in the section. The pass
+makes every map writable, as in C, and moves inner maps ahead of the maps
+that name them.
+
 ## Helper calls
 
 All helpers live in `bpf_rs_core::helpers` as `#[inline(always)]` thunks

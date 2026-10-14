@@ -95,10 +95,8 @@ extern "C" fn timer_cb(_map: *mut InnerMap, _key: *mut i32, _val: *mut hmap_elem
 #[link_section = "fentry/bpf_fentry_test1"]
 #[no_mangle]
 extern "C" fn test1(_ctx: *const u64) -> i32 {
-    let init = hmap_elem {
-        pad: 0,
-        timer: bpf_timer { __opaque: [0; 2] },
-    };
+    // C: `struct hmap_elem init = {};` zeroes the padding after `pad` too.
+    let init: hmap_elem = unsafe { core::mem::zeroed() };
     let array_key: i32 = ARRAY_KEY;
     let array_key2: i32 = ARRAY_KEY2;
     let hash_key: i32 = HASH_KEY;

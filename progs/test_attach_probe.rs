@@ -4,35 +4,9 @@
 
 // Direct translation of tools/testing/selftests/bpf/progs/test_attach_probe.c
 // bpf-rs-core idiom.
-//
-// bpf_copy_from_user_str is declared `__weak __ksym` in the C source (a real
-// kfunc, not a helper). Its kernel BTF proto is
-// `int bpf_copy_from_user_str(void *dst, u32 dst__sz, const void __user *unsafe_ptr__ign, u64 flags)`
-// -- a genuine untyped `void *dst` (pointee BTF type_id 0). add_ksyms.py
-// mirrors kfunc protos from kernel BTF by function-name match (ignoring
-// whatever type our own extern declaration used), and for a bare `void *`
-// arg it emits a DIDerivedType pointer with no `baseType` field, which this
-// LLVM's llvm-as hard-rejects ("missing required field 'baseType'") --
-// confirmed unfixable in-file (same class of bug as bpf_obj_drop in
-// kptr_xchg_inline.c and bpf_session_is_return in
-// get_func_ip_fsession_test.c). So this file never references
-// bpf_copy_from_user_str by name; `copy_from_user_str` below reimplements
-// its externally observable contract on top of the existing
-// `bpf_probe_read_user_str` HELPER (id 114, no kfunc/BTF-mirror involved),
-// which -- despite the differently-shaped kernel-side primitive it wraps
-// (`strncpy_from_user_nofault` vs the kfunc's own `strncpy_from_user`) --
-// already treats its `size` argument as the full buffer capacity
-// (including NUL) and already returns the copied length including the NUL,
-// exactly matching `bpf_copy_from_user_str`'s own return convention with no
-// adjustment needed (see `copy_from_user_str`'s doc comment below). The
-// BPF_F_PAD_ZEROS tail-zeroing the real kfunc performs explicitly is
-// intentionally left implicit here: every call site below hands it a
-// freshly zero-initialized local array used exactly once, so the untouched
-// tail bytes are already zero and the observable result is bit-for-bit
-// identical to the real kfunc's.
 
 use bpf_rs_core::bpf_object;
-use bpf_rs_core::helpers::{bpf_copy_from_user, bpf_probe_read_user, bpf_probe_read_user_str, bpf_strncmp};
+use bpf_rs_core::helpers::{bpf_copy_from_user, bpf_probe_read_user, bpf_strncmp};
 use core::ffi::c_void;
 
 const BPF_F_PAD_ZEROS: u64 = 1;
@@ -164,25 +138,13 @@ fn verify_sleepable_user_copy() -> bool {
     ) == 0
 }
 
-/// Reimplementation of the `bpf_copy_from_user_str` kfunc's documented
-/// contract (see the file-level comment above for why it can't be called by
-/// name) on top of the plain `bpf_probe_read_user_str` helper. Unlike the
-/// kfunc's own internal `strncpy_from_user(dst, src, dst_sz - 1)` (which
-/// does NOT reserve NUL space, so the kfunc reserves it manually and adds 1
-/// to the result), the helper goes through `strncpy_from_user_nofault`,
-/// which already treats its `size` argument as the full buffer capacity
-/// *including* the NUL and already returns the length *including* the NUL
-/// (kernel/mm/maccess.c). So `dst_sz`/`ret` are passed straight through
-/// with no +-1 adjustment -- the two conventions land on the same numbers.
+extern "C" {
+    fn bpf_copy_from_user_str(dst: *mut c_void, dst__sz: u32, unsafe_ptr: *const c_void, flags: u64) -> i32;
+}
+
 #[inline(always)]
 fn copy_from_user_str(dst: &mut [u8], dst_sz: u32, src: *const c_void, flags: u64) -> i32 {
-    if (flags & !BPF_F_PAD_ZEROS) != 0 {
-        return -22; // -EINVAL
-    }
-    if dst_sz == 0 {
-        return 0;
-    }
-    bpf_probe_read_user_str(dst.as_mut_ptr() as *mut c_void, dst_sz, src) as i32
+    unsafe { bpf_copy_from_user_str(dst.as_mut_ptr() as *mut c_void, dst_sz, src, flags) }
 }
 
 #[inline(never)]

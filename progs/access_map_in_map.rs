@@ -35,15 +35,9 @@ static inner_map: inner_map_type = inner_map_type {
 // int); __uint(max_entries, 1); __array(values, struct inner_map_type); }
 // outer_array_map = { .values = { [0] = &inner_map } };
 //
-// rustc can't replicate Clang's flexible-array-member static initializer for
-// the `values` slot (divergent codegen-type vs. debug-type trick, no rustc
-// equivalent) -- see prog-array-static-values-init-unfixable memory. Encode
-// `values` as zero-length so the map still loads; slot 0 stays unpopulated
-// at load time. This is safe here: prog_tests/map_in_map.c's
-// test_map_in_map_access() never asserts on what the BPF program's inner
-// lookup finds -- it only checks that its own userspace
-// bpf_map_update_elem() calls on the outer map succeed, which populate slot
-// 0 at runtime regardless of the static initializer.
+// `[T; 1]` emits the slot storage and its .rel.maps entry;
+// scripts/btf_map_slots.py rewrites the BTF member to the zero-length array
+// libbpf demands.
 #[allow(non_camel_case_types)]
 #[repr(C)]
 struct outer_array_map_def {
@@ -51,7 +45,7 @@ struct outer_array_map_def {
     key: *const i32,
     value: *const i32,
     max_entries: *const [i32; 1],
-    values: [*const inner_map_type; 0],
+    values: [*const inner_map_type; 1],
 }
 unsafe impl Sync for outer_array_map_def {}
 
@@ -62,11 +56,11 @@ static outer_array_map: outer_array_map_def = outer_array_map_def {
     key: core::ptr::null(),
     value: core::ptr::null(),
     max_entries: core::ptr::null(),
-    values: [],
+    values: [&inner_map],
 };
 
-// struct { __uint(type, HASH_OF_MAPS); ... } outer_htab_map -- same
-// unfixable static-init limitation as outer_array_map above.
+// struct { __uint(type, HASH_OF_MAPS); ... } outer_htab_map = { .values =
+// { [0] = &inner_map } };
 #[allow(non_camel_case_types)]
 #[repr(C)]
 struct outer_htab_map_def {
@@ -74,7 +68,7 @@ struct outer_htab_map_def {
     key: *const i32,
     value: *const i32,
     max_entries: *const [i32; 1],
-    values: [*const inner_map_type; 0],
+    values: [*const inner_map_type; 1],
 }
 unsafe impl Sync for outer_htab_map_def {}
 
@@ -85,7 +79,7 @@ static outer_htab_map: outer_htab_map_def = outer_htab_map_def {
     key: core::ptr::null(),
     value: core::ptr::null(),
     max_entries: core::ptr::null(),
-    values: [],
+    values: [&inner_map],
 };
 
 #[no_mangle]

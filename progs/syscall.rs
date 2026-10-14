@@ -34,17 +34,9 @@
 // BPF_MAP_TYPE_ARRAY and BPF_MAP_TYPE_ARRAY_OF_MAPS) embeds `struct bpf_map`
 // at offset 0, so the same offset applies to bpf_attr_array/outer_array_map.
 //
-// outer_array_map's `__array(values, ...)` static preload
-// (`.values = { [0] = &inner_map }`) is the same flexible-array-member shape
-// found unfixable in timer_mim.rs/[[prog-array-static-values-init-unfixable]]
-// (rustc can't diverge codegen-size from debug-type for a flex array like
-// clang can), so it's translated the same way: an empty `values: [..; 0]`
-// array. This doesn't affect the update_outer_map subtest's correctness —
-// unlike timer_mim, this program never relies on slot 0 being
-// pre-populated: it looks up outer_array_map's own kernel map id, creates a
-// fresh inner map via BPF_MAP_CREATE, wires it in via BPF_MAP_UPDATE_ELEM,
-// then removes it again via BPF_MAP_DELETE_ELEM, entirely through syscalls
-// at runtime.
+// outer_array_map's `.values = { [0] = &inner_map }` is declared as
+// `values: [*const inner_map; 1]`; scripts/btf_map_slots.py rewrites the BTF
+// member to the zero-length array libbpf demands.
 
 use bpf_rs_core::bpf_map;
 use bpf_rs_core::bpf_object;
@@ -205,7 +197,7 @@ struct outer_array_map_def {
     key: *const i32,
     value: *const i32,
     max_entries: *const [i32; 1],
-    values: [*const inner_map; 0],
+    values: [*const inner_map; 1],
 }
 unsafe impl Sync for outer_array_map_def {}
 
@@ -216,7 +208,7 @@ static outer_array_map: outer_array_map_def = outer_array_map_def {
     key: core::ptr::null(),
     value: core::ptr::null(),
     max_entries: core::ptr::null(),
-    values: [],
+    values: [&inner_map],
 };
 
 #[link_section = ".maps"]

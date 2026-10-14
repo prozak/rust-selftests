@@ -7,17 +7,11 @@
 //
 // Maps-only object: no programs. `outer_map` is a BPF_MAP_TYPE_HASH_OF_MAPS
 // whose `__array(values, struct inner_map_type)` member tells libbpf the
-// inner map's layout (type/key_size/value_size/max_entries) so it can
-// allocate a template inner map at outer-map-creation time — this can't use
-// the `bpf_map!` escape hatch (which null-pointer-initializes every field)
-// because `values` is a genuine zero-length *array* field (C's incomplete
-// `typeof(val) *name[]`), not a `__uint`/`__type` pointer-encoded field. The
-// C source's `.values = { [0] = &inner_map }` initializer additionally
-// pre-populates outer_map[0] via an ELF relocation, but prog_tests.c's
-// setup_htab() unconditionally overwrites keys 0..entries with fresh inner
-// maps right after load, so the pre-population is inert and only the BTF
-// shape (a real zero-element array, matching C's unpopulated flexible-array
-// case) needs replicating.
+// inner map's layout, and whose `.values = { [0] = &inner_map }` initializer
+// stores inner_map under key 0 at load time. It is written out by hand
+// because `bpf_map!` null-initializes every field. `[T; 1]` emits the slot
+// storage and its .rel.maps entry; scripts/btf_map_slots.py rewrites the BTF
+// member to the zero-length array libbpf demands.
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::maps;
@@ -48,7 +42,7 @@ struct OuterMapDef {
     max_entries: *const [i32; 64],
     key: *const i32,
     value: *const i32,
-    values: [*const InnerMapDef; 0],
+    values: [*const InnerMapDef; 1],
 }
 unsafe impl Sync for OuterMapDef {}
 
@@ -59,7 +53,7 @@ static outer_map: OuterMapDef = OuterMapDef {
     max_entries: core::ptr::null(),
     key: core::ptr::null(),
     value: core::ptr::null(),
-    values: [],
+    values: [&inner_map],
 };
 
 bpf_object!("GPL");

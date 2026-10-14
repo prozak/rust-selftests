@@ -86,19 +86,16 @@ static lru_percpu_hash: BpfMap<u32, u64, { maps::LRU_PERCPU_HASH }, 1> = BpfMap:
 #[no_mangle]
 static inner_map: InnerMapDef = BpfMap::new();
 
-// Map-in-map static `.values = { [0] = &inner_map }` initializer: per
-// [[prog-array-static-values-init-unfixable]], rustc cannot diverge a
-// static's codegen type from its debug type the way clang's flexible-array
-// trick requires, so the values slot stays unpopulated at load time. This
-// is harmless here: test_lsm.c never asserts on outer_arr/outer_hash
-// contents, only that test_void_hook's null-checked lookups don't crash.
+// C: `.values = { [0] = &inner_map }` in both outer maps. `[T; 1]` emits the
+// slot storage and its .rel.maps entry; scripts/btf_map_slots.py rewrites
+// the BTF member to the zero-length array libbpf demands.
 #[repr(C)]
 struct outer_arr_def {
     r#type: *const [i32; ARRAY_OF_MAPS],
     max_entries: *const [i32; 1],
     key_size: *const [i32; 4],
     value_size: *const [i32; 4],
-    values: [*const InnerMapDef; 0],
+    values: [*const InnerMapDef; 1],
 }
 unsafe impl Sync for outer_arr_def {}
 
@@ -109,7 +106,7 @@ static outer_arr: outer_arr_def = outer_arr_def {
     max_entries: core::ptr::null(),
     key_size: core::ptr::null(),
     value_size: core::ptr::null(),
-    values: [],
+    values: [&inner_map],
 };
 
 #[repr(C)]
@@ -117,7 +114,7 @@ struct outer_hash_def {
     r#type: *const [i32; HASH_OF_MAPS],
     max_entries: *const [i32; 1],
     key_size: *const [i32; 4],
-    values: [*const InnerMapDef; 0],
+    values: [*const InnerMapDef; 1],
 }
 unsafe impl Sync for outer_hash_def {}
 
@@ -127,7 +124,7 @@ static outer_hash: outer_hash_def = outer_hash_def {
     r#type: core::ptr::null(),
     max_entries: core::ptr::null(),
     key_size: core::ptr::null(),
-    values: [],
+    values: [&inner_map],
 };
 
 #[no_mangle]

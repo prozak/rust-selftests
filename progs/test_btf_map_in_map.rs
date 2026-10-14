@@ -6,17 +6,12 @@
 // tools/testing/selftests/bpf/progs/test_btf_map_in_map.c.
 //
 // Every outer map here (`outer_arr`, `outer_hash`, `outer_arr_dyn`,
-// `outer_sockarr`) has a C static `.values = {...}` designated initializer
-// meant to pre-populate slots at load time. rustc can't replicate that
-// (see prog-array-static-values-init-unfixable memory), so every `values`
-// array below stays zero-length and the slots go unpopulated at load.
-// This is unaffected here: prog_tests/btf_map_in_map.c's test_lookup_update()
-// always calls bpf_map_update_elem() on the outer maps' key 0 itself right
-// after skeleton attach, before triggering handle__sys_enter, so the
-// program never depends on load-time population. test_diff_size() never
-// attaches at all and only checks the outer maps' inner-map-template BTF
-// shape (type/flags/max_entries/key/value), which the zero-length `values`
-// array still encodes correctly via its pointee type.
+// `outer_sockarr`) has a C `.values = {...}` initializer that fills slots at
+// load time. Each `values` member is declared with its real length and
+// targets (null where the C leaves a hole), and scripts/btf_map_slots.py
+// rewrites the BTF member to the zero-length array libbpf demands. The C
+// casts a target to `void *` where its type is not the declared inner type;
+// the pointer casts below are those.
 
 use bpf_rs_core::helpers::{bpf_map_lookup_elem, bpf_map_update_elem};
 use bpf_rs_core::{bpf_map, bpf_object};
@@ -58,7 +53,7 @@ struct outer_arr_def {
     max_entries: *const [i32; 3],
     key: *const i32,
     value: *const i32,
-    values: [*const InnerMap; 0],
+    values: [*const InnerMap; 3],
 }
 unsafe impl Sync for outer_arr_def {}
 
@@ -69,7 +64,7 @@ static outer_arr: outer_arr_def = outer_arr_def {
     max_entries: core::ptr::null(),
     key: core::ptr::null(),
     value: core::ptr::null(),
-    values: [],
+    values: [&inner_map1, core::ptr::null(), &inner_map2],
 };
 
 // struct inner_map_sz3 { __uint(type, ARRAY); __uint(map_flags, BPF_F_INNER_MAP);
@@ -110,7 +105,7 @@ bpf_map! {
 
 // outer_arr_dyn's anonymous `__array(values, struct {...})` template: ARRAY,
 // BPF_F_INNER_MAP, max_entries 1 — distinct from inner_map3/4/5's own shape
-// (max_entries 3/3/5); only used here as the `values` pointee type.
+// (max_entries 3/3/5); it is the `values` pointee type.
 #[allow(non_camel_case_types)]
 #[repr(C)]
 struct inner_map_dyn_tmpl {
@@ -132,7 +127,7 @@ struct outer_arr_dyn_def {
     max_entries: *const [i32; 3],
     key: *const i32,
     value: *const i32,
-    values: [*const inner_map_dyn_tmpl; 0],
+    values: [*const inner_map_dyn_tmpl; 3],
 }
 unsafe impl Sync for outer_arr_dyn_def {}
 
@@ -143,7 +138,11 @@ static outer_arr_dyn: outer_arr_dyn_def = outer_arr_dyn_def {
     max_entries: core::ptr::null(),
     key: core::ptr::null(),
     value: core::ptr::null(),
-    values: [],
+    values: [
+        &inner_map3 as *const inner_map3 as *const inner_map_dyn_tmpl,
+        &inner_map4 as *const inner_map4 as *const inner_map_dyn_tmpl,
+        &inner_map5 as *const inner_map5 as *const inner_map_dyn_tmpl,
+    ],
 };
 
 // struct outer_hash { __uint(type, HASH_OF_MAPS); __uint(max_entries, 5);
@@ -154,7 +153,7 @@ struct outer_hash_def {
     r#type: *const [i32; HASH_OF_MAPS],
     max_entries: *const [i32; 5],
     key: *const i32,
-    values: [*const InnerMap; 0],
+    values: [*const InnerMap; 5],
 }
 unsafe impl Sync for outer_hash_def {}
 
@@ -164,7 +163,13 @@ static outer_hash: outer_hash_def = outer_hash_def {
     r#type: core::ptr::null(),
     max_entries: core::ptr::null(),
     key: core::ptr::null(),
-    values: [],
+    values: [
+        &inner_map2,
+        core::ptr::null(),
+        core::ptr::null(),
+        core::ptr::null(),
+        &inner_map1,
+    ],
 };
 
 // struct sockarr_sz1/sz2 { __uint(type, REUSEPORT_SOCKARRAY);
@@ -189,7 +194,7 @@ struct outer_sockarr_def {
     max_entries: *const [i32; 1],
     key: *const i32,
     value: *const i32,
-    values: [*const SockArrSz1; 0],
+    values: [*const SockArrSz1; 1],
 }
 unsafe impl Sync for outer_sockarr_def {}
 
@@ -200,7 +205,7 @@ static outer_sockarr: outer_sockarr_def = outer_sockarr_def {
     max_entries: core::ptr::null(),
     key: core::ptr::null(),
     value: core::ptr::null(),
-    values: [],
+    values: [&sockarr_sz1],
 };
 
 // int input = 0;

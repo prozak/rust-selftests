@@ -14,13 +14,10 @@
 // translation's job is to keep the same call/lock structure that the
 // kernel verifier rejects for the same reason, not to make anything load.
 //
-// map_of_maps (BPF_MAP_TYPE_ARRAY_OF_MAPS) uses the zero-length `values`
-// array-of-maps idiom (see progs/timer_mim.rs): the load-time slot
-// population is unfixable in this pipeline, but every consumer here is
-// load-only (test_spin_lock_fail_prog never calls bpf_prog_test_run on
-// these programs), so the inner-map BTF typing the verifier needs for
-// `bpf_map_lookup_elem(bpf_map_lookup_elem(&map_of_maps, ...), ...)` is
-// unaffected -- only the runtime fd population (irrelevant here) is lost.
+// map_of_maps is BPF_MAP_TYPE_ARRAY_OF_MAPS with `.values = { [0] =
+// &array_map }`, declared as `values: [*const ArrayMap; 1]`;
+// scripts/btf_map_slots.py rewrites the BTF member to the zero-length array
+// libbpf demands.
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::ctx::__sk_buff;
@@ -63,10 +60,7 @@ struct map_of_maps_def {
     max_entries: *const [i32; 1],
     key: *const i32,
     value: *const i32,
-    // Zero-length: see the file-level comment / timer_mim.rs. Carries the
-    // inner map's BTF pointer type (`*const ArrayMap`) for the verifier's
-    // static typing even with no populated slots.
-    values: [*const ArrayMap; 0],
+    values: [*const ArrayMap; 1],
 }
 unsafe impl Sync for map_of_maps_def {}
 
@@ -77,7 +71,7 @@ static map_of_maps: map_of_maps_def = map_of_maps_def {
     max_entries: core::ptr::null(),
     key: core::ptr::null(),
     value: core::ptr::null(),
-    values: [],
+    values: [&array_map],
 };
 
 // C: `static struct bpf_spin_lock lockA/lockB SEC(".data.A"/".data.B");` --

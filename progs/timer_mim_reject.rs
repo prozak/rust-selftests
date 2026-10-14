@@ -13,13 +13,10 @@
 // bpf_timer_init() — a map-identity mismatch the verifier must reject at
 // load time, independent of the null checks' runtime reachability.
 //
-// outer_arr is BPF_MAP_TYPE_ARRAY_OF_MAPS with a static
-// `.values = {[ARRAY_KEY] = &inner_htab}` designated initializer; rustc
-// can't replicate Clang's divergent codegen/debuginfo sizing for that
-// flexible-array-member trick (see prog-array-static-values-init-unfixable
-// memory), so the values array here stays zero-length and the slots go
-// unpopulated at load time — same workaround as inner_array_lookup.rs /
-// update_map_in_htab.rs.
+// outer_arr is BPF_MAP_TYPE_ARRAY_OF_MAPS with `.values = {[ARRAY_KEY] =
+// &inner_htab}`, declared as `values: [*const InnerMap; 2]` with slot 0
+// null; scripts/btf_map_slots.py rewrites the BTF member to the zero-length
+// array libbpf demands.
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::{
@@ -68,7 +65,7 @@ struct outer_arr_def {
     max_entries: *const [i32; 2],
     key_size: *const [i32; 4],
     value_size: *const [i32; 4],
-    values: [*const InnerMap; 0],
+    values: [*const InnerMap; 2],
 }
 unsafe impl Sync for outer_arr_def {}
 
@@ -79,7 +76,7 @@ static outer_arr: outer_arr_def = outer_arr_def {
     max_entries: core::ptr::null(),
     key_size: core::ptr::null(),
     value_size: core::ptr::null(),
-    values: [],
+    values: [core::ptr::null(), &inner_htab],
 };
 
 #[no_mangle]

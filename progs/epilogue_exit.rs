@@ -1,47 +1,51 @@
 // SPDX-License-Identifier: GPL-2.0
 #![no_std]
 #![no_main]
+#![feature(asm_experimental_arch)]
 
 // Direct translation of tools/testing/selftests/bpf/progs/epilogue_exit.c
 // (bpf-rs-core idiom).
 //
-// test_epilogue_exit is `__naked` in the C source: raw register asm with two
-// literal `exit;` instructions (one mid-function, one at the true end),
-// relying on the struct_ops "test_epilogue" attach_func_name to have the
-// kernel's gen_epilogue verifier callback splice epilogue code in before
-// each exit (see bpf_testmod.c's st_ops_gen_epilogue: it loads args->a,
-// adds 10000, stores it back, and sets the final retval to args->a * 2).
-// That splicing is a generic, load-time mechanism keyed only on
-// attach_func_name == "test_epilogue" plus the raw exit opcodes it finds in
-// the program -- it doesn't care whether those exits come from hand-written
-// asm or ordinary compiled control flow, and with no BTF_KIND_DECL_TAG
-// __xlated/__retval annotations surviving translation (rustc can't emit
-// them), test_loader's parse_test_spec finds zero tags: mode_mask defaults
-// to PRIV/expect-success and `execute` stays false, so should_do_test_run()
-// never actually attaches struct_ops or runs the two syscall progs -- the
-// only oracle is that all three programs load/verify successfully. So a
-// plain safe if/else reproducing the same two (args->a, retval-before-
-// epilogue-overwrite) outcomes is fully equivalent here, and avoids two
-// asm-encoding dead ends: `#[unsafe(naked)]`/naked_asm! bodies are emitted
-// as bare `declare` + module-asm text (no LLVM `define`, no debuginfo), so
-// add_ksyms.py's BTF pass can't see it's locally defined and misfiles it
-// into `.ksyms` as an extern (kfunc-style) declaration -- libbpf then
-// rejects the object with "section mismatch" at skeleton-gen time; and an
-// ordinary fn wrapping the same raw asm (even with `options(noreturn)`)
-// still needs a real i32-returning tail past a `noreturn` asm block, and
-// the pipeline's add_ksyms.py deliberately rewrites any surviving
-// `unreachable` terminator into a real `ret 0` (comment: "BPF verifier
-// requires every subprogram to end with exit or jmp") rather than eliding
-// it, which the verifier then flags as a genuinely-unreachable trailing
-// instruction (our own raw asm's last op is already a real `exit`).
-//
-// This mirrors struct_ops_assoc_reuse.rs's ctx-handling idiom: ctx is the
-// raw `u64 *` args array (BPF_PROG-style), so ctx[0] is the `st_ops_args *`
-// (matching C's `r1 = *(u64 *)(r1 +0)`).
+// test_epilogue_exit is `__naked` in the C source: hand-written BPF asm with
+// two `exit;` instructions. The struct_ops "test_epilogue" member makes the
+// kernel's gen_epilogue callback (bpf_testmod.c) splice its epilogue in at
+// the first exit and turn the second into a jump back to it. The C's
+// `__xlated` tags assert that rewritten listing line by line, so the body
+// is carried verbatim as raw asm (// BPF_NAKED:, scripts/naked_abi.py) and
+// every tag is mirrored by test_tags! below.
 
-use bpf_rs_core::bpf_object;
-use bpf_rs_core::progs::fentry_arg as arg;
+use bpf_rs_core::{bpf_object, test_tags};
 use core::ffi::c_void;
+
+// The C's tag comments: 0 saves the __u64 *ctx to the stack; 1-7 are the
+// main prog; 8-15 the spliced epilogue; 16-19 the second part of the main
+// prog after the first exit, where 18 clears r1 so an off-by-1 jump would
+// show, and 19 jumps back to the start of the epilogue, which reloads r1.
+test_tags! {
+    test_epilogue_exit: __success,
+        __xlated("0: *(u64 *)(r10 -8) = r1"),
+        __xlated("1: r1 = *(u64 *)(r1 +0)"),
+        __xlated("2: r2 = *(u64 *)(r1 +0)"),
+        __xlated("3: r3 = 0"),
+        __xlated("4: r4 = 1"),
+        __xlated("5: if r2 == 0x0 goto pc+10"),
+        __xlated("6: r0 = 0"),
+        __xlated("7: *(u64 *)(r1 +0) = r3"),
+        __xlated("8: r1 = *(u64 *)(r10 -8)"),
+        __xlated("9: r1 = *(u64 *)(r1 +0)"),
+        __xlated("10: r6 = *(u64 *)(r1 +0)"),
+        __xlated("11: r6 += 10000"),
+        __xlated("12: *(u64 *)(r1 +0) = r6"),
+        __xlated("13: r0 = r6"),
+        __xlated("14: r0 *= 2"),
+        __xlated("15: exit"),
+        __xlated("16: *(u64 *)(r1 +0) = r4"),
+        __xlated("17: r0 = 1"),
+        __xlated("18: r1 = 0"),
+        __xlated("19: gotol pc-12");
+    syscall_epilogue_exit0: __retval(20000);
+    syscall_epilogue_exit1: __retval(20002);
+}
 
 #[allow(non_camel_case_types)]
 #[repr(C)]
@@ -55,23 +59,31 @@ extern "C" {
 
 #[link_section = "struct_ops/test_epilogue_exit"]
 #[no_mangle]
-extern "C" fn test_epilogue_exit(ctx: *const u64) -> i32 {
-    let args = arg(ctx, 0) as *mut st_ops_args;
+// BPF_NAKED: test_epilogue_exit
+extern "C" fn test_epilogue_exit() -> i32 {
     unsafe {
-        if (*args).a == 0 {
-            (*args).a = 1;
-            1
-        } else {
-            (*args).a = 0;
-            0
-        }
+        core::arch::asm!(
+            "r1 = *(u64 *)(r1 +0);",
+            "r2 = *(u64 *)(r1 +0);",
+            "r3 = 0;",
+            "r4 = 1;",
+            "if r2 == 0 goto +3;",
+            "r0 = 0;",
+            "*(u64 *)(r1 + 0) = r3;",
+            "exit;",
+            "*(u64 *)(r1 + 0) = r4;",
+            "r0 = 1;",
+            "r1 = 0;",
+            "exit;",
+            options(noreturn)
+        );
     }
 }
 
 #[allow(non_camel_case_types)]
 #[repr(C)]
 struct bpf_testmod_st_ops {
-    test_epilogue: extern "C" fn(*const u64) -> i32,
+    test_epilogue: extern "C" fn() -> i32,
 }
 
 unsafe impl Sync for bpf_testmod_st_ops {}

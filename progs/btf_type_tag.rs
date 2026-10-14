@@ -5,8 +5,9 @@
 // Direct translation of tools/testing/selftests/bpf/progs/btf_type_tag.c
 //
 // The C source's btf_type_tag attribute chain (`int __tag1 * __tag1 __tag2
-// *p`) only exists to exercise BTF_KIND_TYPE_TAG emission; rustc cannot
-// emit that BTF kind (see memory: btf-type-tag-uptr-kptr-unfixable), so
+// *p`) only exists to exercise BTF_KIND_TYPE_TAG emission. scripts/btf_type_tags.py adds
+// one tag between a member's pointer and its pointee; it cannot build this
+// chain of tags on nested pointers (#41, #42), so
 // this is always the `#else` branch: skip_tests = true and `g.p` is a
 // plain `int **` with no tags. prog_tests/btf_tag.c's test_btf_type_tag()
 // only asserts open_and_load succeeds and then checks skip_tests to decide

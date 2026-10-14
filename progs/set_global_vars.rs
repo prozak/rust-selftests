@@ -15,8 +15,7 @@
 // veristat's field-path walker (adjust_var_secinfo_member in veristat.c)
 // auto-flattens through a member ONLY when that member's own BTF name_off is
 // empty (a truly anonymous struct/union field) -- exactly the CO-RE
-// auto-flatten rule. rustc never emits a nameless composite (see
-// anonymous-struct-array-member-unfixable memory), so instead of trying to
+// auto-flatten rule. rustc never emits a nameless composite (#42), so instead of trying to
 // reproduce the C source's anonymous wrapper structs, every C anonymous
 // wrapper is dropped here and its members hoisted directly onto the parent
 // as plain named fields -- which is exactly how the C source's own field

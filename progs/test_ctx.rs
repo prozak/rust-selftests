@@ -20,10 +20,13 @@ static mut count_softirq: i32 = 0;
 static mut count_task: i32 = 0;
 
 // C's bpf_in_task()/bpf_in_hardirq()/bpf_in_serving_softirq() (bpf_experimental.h)
-// read a percpu kernel symbol (__preempt_count or pcpu_hot) via bpf_this_cpu_ptr;
-// rustc emits no BTF VAR for `extern "C" { static X: T; }`, so that ksym can't be
-// resolved from here. Each probe below is only ever invoked from the exact
-// context its name implies (this syscall prog: task context only;
+// read a percpu kernel symbol (__preempt_count, or pcpu_hot behind a CO-RE
+// field-exists check) via bpf_this_cpu_ptr. The weak ksyms can be declared
+// now (`// BTF_KSYM:`), but bpf_in_task()/bpf_in_serving_softirq() also read
+// the CONFIG_PREEMPT_RT __kconfig extern, which the pipeline cannot provide
+// (#8); bpf_in_hardirq() alone does not and is not translated yet (#47).
+// Each probe below is only ever invoked from the exact context its name
+// implies (this syscall prog: task context only;
 // bpf_testmod_test_hardirq_fn: only called from an IRQ_WORK_INIT_HARD callback;
 // bpf_testmod_test_softirq_fn: only called from a tasklet), so the guard is
 // always true and the count is bumped unconditionally.

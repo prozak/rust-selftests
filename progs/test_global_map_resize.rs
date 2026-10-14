@@ -89,8 +89,8 @@ static mut percpu_arr: [i32; 1] = [0; 1];
 // C has `extern int LINUX_KERNEL_VERSION __kconfig;` here and stores it into
 // version_sink on every run, purely to exercise a libbpf regression path
 // (extern + datasec resize invalidating BTF type pointers) that no
-// prog_tests assertion actually checks the value of. Unfixable in this
-// idiom: rustc's `extern "C" { static X: T; }` produces a plain
+// prog_tests assertion actually checks the value of. Not possible yet
+// (#8): rustc's `extern "C" { static X: T; }` produces a plain
 // `@X = external global` LLVM global with no attached debug info (unlike
 // clang, which emits a DIGlobalVariable(isDefinition: false) for
 // `extern ... __kconfig`), so no BTF extern-linkage VAR is ever generated

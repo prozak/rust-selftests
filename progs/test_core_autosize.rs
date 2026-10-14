@@ -123,10 +123,8 @@ struct test_struct___signed {
 //    before `gen skeleton`) hard-errors ("failed to find BTF info for
 //    global/extern symbol") on any GLOBAL-bind object symbol whose BTF is
 //    missing -- so a global_asm!-hand-laid, BTF-less symbol (the usual fix
-//    for rustc's alphabetical mono-item scatter -- see
-//    bss-global-order-fix-via-global-asm, and
-//    rustc-mono-item-order-by-symbol-name-unfixable, which already notes
-//    this bypass "forfeits BTF ... info") is not an option.
+//    for rustc's alphabetical mono-item scatter, #30) forfeits the
+//    symbol's BTF, so it is not an option.
 //  - `prog_tests/core_autosize.c` reads the whole `.bss` map as one raw byte
 //    blob (`bpf_map__lookup_elem(bss_map, ..., &out, sizeof(out), 0)`) into
 //    a userspace struct whose members are exactly these 23 globals in C

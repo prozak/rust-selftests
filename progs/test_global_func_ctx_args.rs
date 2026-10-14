@@ -12,8 +12,8 @@
 // mechanism (one subprog reused, with a *different* concrete ctx type, by
 // several entry programs of different program types).
 //
-// rustc cannot emit BTF_KIND_DECL_TAG, so `__arg_ctx` itself is
-// untranslatable (see TRANSLATING.md). The verifier's global-subprog ctx
+// scripts/btf_test_tags.py cannot emit a parameter decl tag yet (#44),
+// so `__arg_ctx` itself is not translated. The verifier's global-subprog ctx
 // check (btf_is_prog_ctx_type in kernel/bpf/btf.c) has a second path that
 // doesn't need any tag at all: it accepts a PTR argument whose pointee is a
 // *named* struct, purely by comparing that name against the program type's

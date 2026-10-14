@@ -3,7 +3,7 @@
 #![no_main]
 
 // Direct translation of tools/testing/selftests/bpf/progs/connect_unix_prog.c
-// (bpf-rs-core idiom). See getsockname_unix_prog.rs for the bpf_core_cast
+// (bpf-rs-core idiom). See getsockname_unix_prog.rs and #48 for the bpf_core_cast
 // rationale: struct sockaddr_un has no CO-RE-reachable path from
 // bpf_sock_addr_kern, so instead of retyping the pointer we read the bytes
 // directly. sun_path sits right after the 2-byte sun_family (no padding,

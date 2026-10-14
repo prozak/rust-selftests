@@ -8,8 +8,8 @@
 //
 // task_local_data.bpf.h's map values (struct tld_map_value) carry
 // `struct tld_data_u __uptr *data;` / `struct tld_meta_u __uptr *meta;`
-// fields. `__uptr` is a Clang BTF_KIND_TYPE_TAG that rustc cannot emit (see
-// sweep/failed/uptr_map_failure.rs), so the kernel never classifies these
+// fields. scripts/btf_type_tags.py can add the `uptr` tag, but this
+// translation predates that and does not use it yet (#46), so the kernel never classifies these
 // fields as BPF_UPTR and direct LDX dereferences of the pointee (the C
 // original's `tld_obj->data_map->meta->cnt`-style chains) get rejected as
 // "invalid mem access 'scalar'" since the field is just an opaque u64 to the

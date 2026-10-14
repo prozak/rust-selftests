@@ -9,7 +9,7 @@
 // test_spin_lock_fail_prog(): it force-autoloads exactly one program by
 // name, asserts the load *fails*, then regex-matches the kernel verifier
 // log against an expected message. This is not the usual bpf_misc.h
-// __failure/__msg decl-tag mechanism (untranslatable per TRANSLATING.md) --
+// __failure/__msg decl-tag mechanism (test_tags! in Rust) --
 // it's a hand-written userspace test that itself expects rejection, so the
 // translation's job is to keep the same call/lock structure that the
 // kernel verifier rejects for the same reason, not to make anything load.

@@ -5,8 +5,8 @@
 // Direct translation of tools/testing/selftests/bpf/progs/bpf_iter_ipv6_route.c
 // (bpf-rs-core idiom).
 //
-// C's `extern bool CONFIG_IPV6_SUBTREES __kconfig __weak;` is elided: rustc
-// emits no BTF for an extern static (kconfig externs are unfixable), and
+// C's `extern bool CONFIG_IPV6_SUBTREES __kconfig __weak;` is elided: the
+// pipeline cannot provide __kconfig externs (#8), and
 // prog_tests/bpf_iter.c's test_ipv6_route() only drives a dummy read that
 // discards the printed content ("not check contents, but ensure read() ends
 // without error"), so the CONFIG_IPV6_SUBTREES branch is hardcoded to the C

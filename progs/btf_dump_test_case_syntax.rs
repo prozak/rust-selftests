@@ -6,7 +6,7 @@
 // tools/testing/selftests/bpf/progs/btf_dump_test_case_syntax.c
 // (bpf-rs-core idiom).
 //
-// UNFIXABLE. This file has no SEC() program at all: it exists purely so
+// Not translatable from Rust source (reasons below; #29, #42). This file has no SEC() program at all: it exists purely so
 // prog_tests/btf_dump.c can btf__parse_elf() the compiled object, walk
 // every BTF type ID from 1..type_cnt with btf_dump__dump_type(), and
 // byte-diff the resulting C-syntax text against the START/END-EXPECTED-

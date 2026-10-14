@@ -7,9 +7,9 @@
 //
 // The C source tags throwing_exception_cb_extension and throwing_extension
 // with __exception_cb(exception_cb), a btf_decl_tag("exception_callback:...")
-// on the program's main subprog. rustc/LLVM cannot emit BTF_KIND_DECL_TAG (see
-// TRANSLATING.md, and test_global_func1.rs / verifier_jit_inline.rs for prior
-// confirmation), so the decl tag itself is dropped.
+// on the program's main subprog. scripts/btf_test_tags.py
+// does not emit `exception_callback:` yet (#44), so the decl tag itself is
+// dropped.
 //
 // Without the tag, `bpf_throw(cookie)` for a program with no registered
 // exception callback is defined (kernel/bpf/verifier.c, the KF_bpf_throw

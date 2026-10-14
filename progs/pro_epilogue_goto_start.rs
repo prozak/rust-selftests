@@ -9,10 +9,11 @@
 // The C source implements each struct_ops callback as a `__naked` function
 // with hand-written BPF asm whose accompanying `__xlated(...)` decl tags
 // assert the exact instruction sequence the kernel's struct_ops
-// prologue/epilogue trampoline splices around it. rustc cannot emit
-// BTF_KIND_DECL_TAG, so test_loader (RUN_TESTS) sees no tags on this object
-// and just checks load success (see
-// [[negative-verifier-tests-need-loadable-translation]]). Tracing the naked
+// prologue/epilogue trampoline splices around it. This
+// translation carries no `__xlated` tags, so test_loader (RUN_TESTS) just
+// checks load success. test_tags! and `// BPF_NAKED:` could reproduce the
+// tags and the asm bodies; whether translations should carry `__xlated` is
+// the open decision in #33. Tracing the naked
 // asm through: r1 (the raw ctx pointer, never 0 or 1) drives a
 // state-machine of backward gotos that always converges on `r0 = 0; exit`
 // without ever touching args->a itself — the actual +1000/+10000

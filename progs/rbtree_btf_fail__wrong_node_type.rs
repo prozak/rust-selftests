@@ -13,14 +13,15 @@
 // decl tag and rejects load if the referenced field isn't a graph node of
 // the matching kind — the C comment says "BTF load should fail".
 //
-// rustc/LLVM cannot emit BTF_KIND_DECL_TAG at all (no clang
-// __attribute__((btf_decl_tag)) equivalent in the pipeline), so `groot`
-// reaches the kernel with no "contains:" tag whatsoever. btf_find_graph_root()
+// The pipeline cannot emit a `contains:` decl tag yet (#44), so `groot`
+// reaches the kernel with no tag at all. btf_find_graph_root()
 // treats a missing tag the same as a mismatched one (btf_find_decl_tag_value()
 // returns -ENOENT, folded to -EINVAL) — so the object's own BTF blob is
 // rejected during load, which is exactly the failure this test asserts via
-// `ASSERT_ERR_PTR(skel, "...__open_and_load unexpected success")`. The
-// struct/program shape below is otherwise a straight translation.
+// `ASSERT_ERR_PTR(skel, "...__open_and_load unexpected success")`.
+// The test therefore passes for the wrong reason: the C object is rejected
+// for a mismatched tag, this one for a missing tag (#44). The struct/program
+// shape below is otherwise a straight translation.
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::{bpf_spin_lock, bpf_spin_unlock};

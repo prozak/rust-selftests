@@ -9,11 +9,11 @@
 // The C source implements `test_kfunc_pro_epilogue` as a `__naked` function
 // with hand-written BPF asm so the accompanying `__xlated(...)` decl tags
 // can assert the *exact* instruction sequence the kernel's struct_ops
-// prologue/epilogue trampoline splices around it. rustc cannot emit
-// BTF_KIND_DECL_TAG, so test_loader (RUN_TESTS) sees no tags on this
-// object and just checks load success (see
-// [[negative-verifier-tests-need-loadable-translation]] for the same
-// decl-tag gap on __failure/__msg). The trampoline's prologue/epilogue
+// prologue/epilogue trampoline splices around it. This
+// translation carries no `__xlated` tags, so test_loader (RUN_TESTS) just
+// checks load success. test_tags! and `// BPF_NAKED:` could reproduce the
+// tags and the asm body; whether translations should carry `__xlated` is
+// the open decision in #33. The trampoline's prologue/epilogue
 // splicing itself is unconditional kernel-side behavior keyed off the
 // `test_pro_epilogue` struct_ops member (bpf_testmod.c), independent of
 // how the callback body is written — so an ordinary (non-naked) function

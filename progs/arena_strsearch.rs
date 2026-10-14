@@ -31,9 +31,9 @@
 // (`check_helper_mem_access`'s switch) do not include `PTR_TO_ARENA` — only
 // a pointee tagged `btf_type_tag("arena")` (what C's `__arena` qualifier
 // emits) gets the permissive `ARG_PTR_TO_ARENA` classification that accepts
-// `PTR_TO_ARENA`/`SCALAR_VALUE` registers. rustc cannot emit
-// `BTF_KIND_TYPE_TAG` (same wall as [[btf-type-tag-uptr-kptr-unfixable]]),
-// so any GLOBAL Rust function taking an arena-derived pointer argument is
+// `PTR_TO_ARENA`/`SCALAR_VALUE` registers. scripts/btf_type_tags.py tags
+// struct members and globals but not function parameters (#42), so any
+// GLOBAL Rust function taking an arena-derived pointer argument is
 // rejected at every call site with "Caller passes invalid args into
 // func#N", regardless of how the pointer was produced.
 //

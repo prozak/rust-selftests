@@ -37,7 +37,7 @@
 // at byte 280 = dev's CO-RE offset + 8, confirmed via
 // `bpftool btf dump file vmlinux`). `BPF_CORE_READ_BITFIELD` needs
 // BYTE_SIZE/LSHIFT_U64/RSHIFT_U64 CO-RE relocs this pipeline doesn't
-// implement (see core-reloc-bitfields-unfixable), so the containing byte is
+// implement (#42), so the containing byte is
 // probe-read directly and the two bits extracted by hand.
 
 use core::ffi::c_void;

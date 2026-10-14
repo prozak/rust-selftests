@@ -13,12 +13,14 @@
 // `bpf_rbtree_add()`. The kernel's btf_find_graph_root() resolves the
 // "contains:" BTF decl tag and rejects load on the type/offset mismatch.
 //
-// rustc/LLVM cannot emit BTF_KIND_DECL_TAG at all, so `groot` reaches the
-// kernel with no "contains:" tag whatsoever regardless of which type we
+// The pipeline cannot emit a `contains:` decl tag yet (#44), so `groot`
+// reaches the kernel with no "contains:" tag whatsoever regardless of which type we
 // actually add — btf_find_graph_root() treats a missing tag the same as a
 // mismatched one (-ENOENT folded to -EINVAL), so the object's own BTF blob
 // is rejected during load, which is exactly the failure this test asserts
-// via `ASSERT_ERR_PTR(skel, "...__open_and_load unexpected success")`. The
+// via `ASSERT_ERR_PTR(skel, "...__open_and_load unexpected success")`.
+// The test therefore passes for the wrong reason: the C object is rejected
+// for adding the wrong type, this one for a missing tag (#44). The
 // struct/program shape below is otherwise a straight translation.
 
 use bpf_rs_core::bpf_object;

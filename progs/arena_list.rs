@@ -15,7 +15,8 @@
 // language-level construct for an address-space-qualified pointer type on
 // this target (the bpfel-unknown-none-v4 datalayout declares no AS-1
 // pointer info, and there is no stable/unstable attribute to request one),
-// so `addrspacecast` cannot be emitted from Rust source and the arena
+// so `addrspacecast` cannot be emitted from Rust source (#42; arena_atomics.rs
+// and arena_spin_lock.rs hand-encode the instruction instead) and the arena
 // allocator/list logic is unreachable here. This translation therefore
 // takes the C source's own `#else` fallback branch — the one it ships for
 // compilers that lack the address-space-cast feature: both programs just

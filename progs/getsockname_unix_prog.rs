@@ -5,6 +5,10 @@
 // Direct translation of tools/testing/selftests/bpf/progs/getsockname_unix_prog.c
 // (bpf-rs-core idiom).
 //
+// The type-id limitation described below is gone: scripts/type_id.py emits
+// BPF_TYPE_ID_TARGET (see tcp_ca_untrusted_btf_write.rs). Converting this
+// file to bpf_core_cast is #48.
+//
 // The C original does:
 //   sa_kern_unaddr = bpf_core_cast(sa_kern->uaddr, struct sockaddr_un);
 //   memcmp(sa_kern_unaddr->sun_path, SERVUN_REWRITE_ADDRESS, ...)

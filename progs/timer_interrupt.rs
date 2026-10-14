@@ -7,10 +7,11 @@
 //
 // The C original's get_preempt_count() reads a per-CPU kernel data symbol
 // on x86 (`__preempt_count`, falling back to `pcpu_hot.preempt_count`),
-// both declared `extern ... __ksym`. Per TRANSLATING.md, a data (non-fn)
-// `__ksym` extern is unfixable here: rustc's `extern "C" { static X: T; }`
-// carries no debuginfo, so no BTF extern-linkage VAR is ever generated for
-// it and libbpf's static linker fails before load. This mirrors the C
+// both declared `extern ... __ksym __weak`. Those can be declared now
+// (`// BTF_KSYM:`, scripts/ksym_vars.py), but the pcpu_hot fallback also
+// needs a CO-RE field-exists check on a `___local` flavor, and
+// bpf_in_interrupt() reads the CONFIG_PREEMPT_RT __kconfig extern, which the
+// pipeline cannot provide (#8). Not translated yet (#47). This mirrors the C
 // source's own fallback for archs it doesn't recognize (arm64/powerpc/
 // s390/loongarch branches, `#else return 0;`), which is exactly what
 // get_preempt_count() below reproduces unconditionally.

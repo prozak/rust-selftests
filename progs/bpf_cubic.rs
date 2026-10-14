@@ -20,9 +20,8 @@
 // [[btf-second-field-access-same-root-crashes-opt]].
 //
 // `extern unsigned long CONFIG_HZ __kconfig;` is dropped: prog_tests never
-// reads skel->kconfig, and per [[kconfig-extern-userspace-field-access-unfixable]]
-// rustc emits no BTF for extern statics, so keeping the extern would abort
-// skeleton regen regardless. HZ is hardcoded to 1000, this session's
+// reads skel->kconfig, and the pipeline cannot provide __kconfig externs
+// (#8). HZ is hardcoded to 1000, this session's
 // FLAVOR=qemu test kernel's CONFIG_HZ (bpf-next-x86 checkout's .config).
 //
 // `tcp_is_cwnd_limited()`'s `is_cwnd_limited:1` bitfield has no plain

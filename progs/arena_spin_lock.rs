@@ -54,7 +54,7 @@
 // preserving the varying-hold-time behaviour the subtests parametrize on.
 //
 // CONFIG_NR_CPUS is dropped: it's a `__kconfig` extern
-// ([[kconfig-extern-userspace-field-access-unfixable]]) whose only use here
+// (the pipeline cannot provide those, #8) whose only use here
 // (`if (CONFIG_NR_CPUS > 1024) return -EOPNOTSUPP;`) is a guard against a
 // kernel config value that is always far below 1024 in this harness's test
 // kernel; the branch is unreachable in practice on the C side too.

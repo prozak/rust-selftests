@@ -9,8 +9,9 @@
 // compiler can emit BTF_KIND_DECL_TAG it tags skip_tests/key_t.b/value_t/foo
 // with __tag1/__tag2 and leaves skip_tests false; otherwise it falls back to
 // `bool skip_tests = true;` with no tags at all, and prog_tests/btf_tag.c's
-// test_btf_decl_tag() SKIPs on skip_tests. rustc cannot emit
-// BTF_KIND_DECL_TAG (see TRANSLATING.md), so this takes that same fallback
+// test_btf_decl_tag() SKIPs on skip_tests. scripts/btf_test_tags.py
+// emits only test_loader tags on programs, not tags on variables, members
+// or typedefs (#44), so this takes that same fallback
 // path: no tag attributes, skip_tests = true. The map/struct/program shapes
 // still need to load cleanly since the test does open_and_load() before
 // checking skip_tests.

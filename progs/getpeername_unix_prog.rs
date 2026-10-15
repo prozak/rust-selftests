@@ -5,40 +5,54 @@
 // Direct translation of tools/testing/selftests/bpf/progs/getpeername_unix_prog.c
 // (bpf-rs-core idiom).
 //
-// The type-id limitation described below is gone: scripts/type_id.py emits
-// BPF_TYPE_ID_TARGET (see tcp_ca_untrusted_btf_write.rs). Converting this
-// file to bpf_core_cast is #48.
-//
-// The C source's post-rewrite sanity checks (bpf_core_cast(sa_kern->uaddr,
-// struct sockaddr_un) + memcmp against SERVUN_REWRITE_ADDRESS) are dead code:
-// every branch of the C function -- ret != 0, uaddrlen mismatch, memcmp
-// mismatch, and the final fallthrough -- returns 1. bpf_core_cast also needs
-// a BPF_TYPE_ID_TARGET CO-RE relocation (bpf_core_type_id_kernel), which
-// btf-macros doesn't emit (only field byte_offset/field_exists relocations,
-// see tcp_ca_untrusted_btf_write.rs). Since those checks can never change
-// the return value, this translation reproduces only the behavior userspace
-// actually observes: bpf_cast_to_kern_ctx() + bpf_sock_addr_set_sun_path()
-// rewriting the peer's AF_UNIX address, then unconditionally returning 1.
+// bpf_core_cast(sa_kern->uaddr, struct sockaddr_un) is
+// bpf_rdonly_cast(ptr, bpf_core_type_id_kernel(struct sockaddr_un)); the type
+// id is the BTF_TYPE_ID declaration below (scripts/type_id.py).
+// offsetof(struct sockaddr_un, sun_path) is a CO-RE relocation in the C;
+// here it is the UAPI constant 2 (sun_family is a 2-byte
+// __kernel_sa_family_t immediately followed by sun_path), the value that
+// relocation resolves to on every kernel.
 
-use core::ffi::c_void;
+// BTF_TYPE_ID: tid_sockaddr_un struct sockaddr_un
+
 
 use bpf_rs_core::bpf_object;
+use btf_macros::btf;
+use core::ffi::c_void;
 
-// C's `__u8 SERVUN_REWRITE_ADDRESS[] = "\0bpf_cgroup_unix_test_rewrite";` is a
-// non-static, nonzero-initialized file-scope global -> a real GLOBAL OBJECT
-// symbol in the C object (must be matched by name) that lands in .data (not
-// .rodata). Both facts matter here: bpf_sock_addr_set_sun_path's `sun_path`
-// kfunc argument is mirrored by add_ksyms.py from the kernel's real BTF
-// proto, which strips the `const` qualifier while resolving the pointee
-// (add_ksyms.py's typedef/const/volatile/restrict resolve() chain), so the
-// verifier treats the argument as writable memory; a .rodata pointer there
-// is rejected ("write into map forbidden"), matching why the C original
-// itself never made this array `const`.
-#[no_mangle]
-static mut SERVUN_REWRITE_ADDRESS: [u8; 30] = *b"\0bpf_cgroup_unix_test_rewrite\0";
+/// UAPI struct bpf_sock_addr (linux/bpf.h). sk is a __bpf_md_ptr union,
+/// represented as u64. No field is read here; the type only needs to carry
+/// the right BTF name for the ctx parameter.
+#[allow(non_camel_case_types)]
+#[repr(C)]
+pub struct bpf_sock_addr {
+    pub user_family: u32,
+    pub user_ip4: u32,
+    pub user_ip6: [u32; 4],
+    pub user_port: u32,
+    pub family: u32,
+    pub r#type: u32,
+    pub protocol: u32,
+    pub msg_src_ip4: u32,
+    pub msg_src_ip6: [u32; 4],
+    pub sk: u64,
+}
+
+#[btf]
+struct bpf_sock_addr_kern {
+    uaddr: *mut u8,
+    uaddrlen: u32,
+}
+
+#[btf]
+struct sockaddr_un {
+    sun_path: [u8; 108],
+}
 
 extern "C" {
-    fn bpf_cast_to_kern_ctx(ctx: *mut c_void) -> *mut c_void;
+    fn bpf_rdonly_cast(obj: *const c_void, btf_id: u32) -> *mut c_void;
+    fn tid_sockaddr_un() -> u64;
+    fn bpf_cast_to_kern_ctx(obj: *const c_void) -> *mut c_void;
     fn bpf_sock_addr_set_sun_path(
         sa_kern: *mut c_void,
         sun_path: *const u8,
@@ -46,16 +60,54 @@ extern "C" {
     ) -> i32;
 }
 
+// offsetof(struct sockaddr_un, sun_path): sun_family is a 2-byte
+// __kernel_sa_family_t immediately followed by sun_path, no padding.
+const SUN_PATH_OFFSET: u32 = 2;
+const SERVUN_REWRITE_LEN: usize = 30;
+const PATH_LEN: usize = SERVUN_REWRITE_LEN - 1;
+
+// C's SERVUN_REWRITE_ADDRESS is a plain (non-const) global, so clang places
+// it in .data; a Rust `static` (no `mut`) is truly immutable and rustc
+// places it in .rodata instead, which loads as a read-only map and makes
+// bpf_sock_addr_set_sun_path's (const-ness dropped by the ksym pipeline,
+// see below) write-classified access get rejected with "write into map
+// forbidden". `static mut` reproduces the C section placement.
+#[no_mangle]
+static mut SERVUN_REWRITE_ADDRESS: [u8; SERVUN_REWRITE_LEN] =
+    *b"\0bpf_cgroup_unix_test_rewrite\0";
+
 #[link_section = "cgroup/getpeername_unix"]
 #[no_mangle]
-extern "C" fn getpeername_unix_prog(ctx: *const c_void) -> i32 {
-    unsafe {
-        let sa_kern = bpf_cast_to_kern_ctx(ctx as *mut c_void);
-        bpf_sock_addr_set_sun_path(
-            sa_kern,
-            core::ptr::addr_of!(SERVUN_REWRITE_ADDRESS) as *const u8,
-            29,
-        );
+extern "C" fn getpeername_unix_prog(ctx: *const bpf_sock_addr) -> i32 {
+    let sa_kern =
+        unsafe { bpf_cast_to_kern_ctx(ctx as *const c_void) } as *mut bpf_sock_addr_kern;
+    let sa_kern_ref = unsafe { &*sa_kern };
+
+    let servun_ptr = core::ptr::addr_of!(SERVUN_REWRITE_ADDRESS) as *const u8;
+    let path_len = PATH_LEN as u32;
+    let unaddrlen = SUN_PATH_OFFSET + path_len;
+
+    let ret = unsafe { bpf_sock_addr_set_sun_path(sa_kern as *mut c_void, servun_ptr, path_len) };
+    if ret != 0 {
+        return 1;
+    }
+
+    let uaddrlen = unsafe { *sa_kern_ref.uaddrlen().as_ptr() };
+    if uaddrlen != unaddrlen {
+        return 1;
+    }
+
+    let uaddr = unsafe { *sa_kern_ref.uaddr().as_ptr() };
+    let sa_kern_unaddr =
+        unsafe { bpf_rdonly_cast(uaddr as *const c_void, tid_sockaddr_un() as u32) }
+            as *const sockaddr_un;
+    let sun_path = unsafe { (*sa_kern_unaddr).sun_path().as_ptr() } as *const u8;
+    let mut i = 0usize;
+    while i < PATH_LEN {
+        if unsafe { *sun_path.add(i) != *servun_ptr.add(i) } {
+            return 1;
+        }
+        i += 1;
     }
 
     1

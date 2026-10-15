@@ -5,20 +5,16 @@
 // Direct translation of tools/testing/selftests/bpf/progs/getpeername_unix_prog.c
 // (bpf-rs-core idiom).
 //
-// The type-id limitation described below is gone: scripts/type_id.py emits
-// BPF_TYPE_ID_TARGET (see tcp_ca_untrusted_btf_write.rs). Converting this
-// file to bpf_core_cast is #48.
-//
 // The C source's post-rewrite sanity checks (bpf_core_cast(sa_kern->uaddr,
 // struct sockaddr_un) + memcmp against SERVUN_REWRITE_ADDRESS) are dead code:
 // every branch of the C function -- ret != 0, uaddrlen mismatch, memcmp
-// mismatch, and the final fallthrough -- returns 1. bpf_core_cast also needs
-// a BPF_TYPE_ID_TARGET CO-RE relocation (bpf_core_type_id_kernel), which
-// btf-macros doesn't emit (only field byte_offset/field_exists relocations,
-// see tcp_ca_untrusted_btf_write.rs). Since those checks can never change
-// the return value, this translation reproduces only the behavior userspace
-// actually observes: bpf_cast_to_kern_ctx() + bpf_sock_addr_set_sun_path()
+// mismatch, and the final fallthrough -- returns 1. The faithful translation
+// (branch llvm23-unix-rdonly-cast) crashes LLVM's opt, up to LLVM 23, on the
+// unused preserve.field.info calls it leaves behind (#49). Until the
+// toolchain has the fix, this translation reproduces only the behavior
+// userspace observes: bpf_cast_to_kern_ctx() + bpf_sock_addr_set_sun_path()
 // rewriting the peer's AF_UNIX address, then unconditionally returning 1.
+// The prover sees the missing cast, hence the waiver.
 
 use core::ffi::c_void;
 

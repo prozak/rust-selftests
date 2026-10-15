@@ -103,6 +103,10 @@ weekly kernel-gap reporting continues in its existing workflow.
   every row, so the proof sweep was repeated in full with
   `equiv/guard.py --all` (418 EQUIV, one more than the nightly). The six
   objects were re-run through the gate one at a time and pass.
+  The sweep was repeated once more after the checker gained a
+  `bpf_rdonly_cast` model and three translations were converted to it
+  (425 EQUIV / 110 BAIL / 34 TIMEOUT / 13 UNKNOWN / 13 NOPROGS, the same
+  single INEQUIV).
 - 2026-10-10: all 596 runtime rows on unpatched bpf-next built by the
   scripts above. 581 PASS / 7 FAIL / 8 NO-ORACLE and one INEQUIV. The
   guests ran emulated, without KVM, which went unnoticed until afterwards,

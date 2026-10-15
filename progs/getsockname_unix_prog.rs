@@ -5,22 +5,16 @@
 // Direct translation of tools/testing/selftests/bpf/progs/getsockname_unix_prog.c
 // (bpf-rs-core idiom).
 //
-// The type-id limitation described below is gone: scripts/type_id.py emits
-// BPF_TYPE_ID_TARGET (see tcp_ca_untrusted_btf_write.rs). Converting this
-// file to bpf_core_cast is #48.
-//
 // The C original does:
 //   sa_kern_unaddr = bpf_core_cast(sa_kern->uaddr, struct sockaddr_un);
 //   memcmp(sa_kern_unaddr->sun_path, SERVUN_REWRITE_ADDRESS, ...)
-// bpf_core_cast expands to bpf_rdonly_cast(ptr, bpf_core_type_id_kernel(struct
-// sockaddr_un)) -- a BPF_TYPE_ID_TARGET CO-RE relocation this pipeline cannot
-// emit (btf-macros only emits field byte_offset/field_exists relocations).
-// struct sockaddr_un has no CO-RE-reachable path from bpf_sock_addr_kern
-// either way, so instead of retyping the pointer we read the bytes directly:
-// sun_path sits right after the 2-byte sun_family (no padding, standard UAPI
-// layout), so `uaddr + 2` for `path_len` bytes via bpf_probe_read_kernel is
-// exactly the memory memcmp() would have walked, without needing the pointer
-// to carry a verifier-tracked struct sockaddr_un type.
+// The faithful translation (branch llvm23-unix-rdonly-cast, the same pattern
+// as connect_unix_prog.rs) crashes LLVM's opt, up to LLVM 23, on the unused
+// preserve.field.info calls it leaves behind (#49). Until the toolchain has
+// the fix, this file reads the bytes directly: sun_path sits right after the
+// 2-byte sun_family (standard UAPI layout, no padding), so `uaddr + 2` for
+// `path_len` bytes via bpf_probe_read_kernel is exactly the memory memcmp()
+// would have walked. The prover sees the missing cast, hence the waiver.
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::bpf_probe_read_kernel;

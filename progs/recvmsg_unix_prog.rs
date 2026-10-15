@@ -5,22 +5,16 @@
 // Direct translation of tools/testing/selftests/bpf/progs/recvmsg_unix_prog.c
 // (bpf-rs-core idiom).
 //
-// The type-id limitation described below is gone: scripts/type_id.py emits
-// BPF_TYPE_ID_TARGET (see tcp_ca_untrusted_btf_write.rs). Converting this
-// file to bpf_core_cast is #48.
-//
 // The C original's `sa_kern_unaddr = bpf_core_cast(sa_kern->uaddr, struct
-// sockaddr_un)` expands to `bpf_rdonly_cast(ptr, bpf_core_type_id_kernel(...))`,
-// which needs a clang `__builtin_btf_type_id` TYPE_ID CO-RE relocation; this
-// toolchain's field_reloc pass only supports FIELD_BYTE_OFFSET/FIELD_EXISTS
-// relocations, not TYPE_ID (see rust-bpf/bpf-postproc/src/field_reloc.rs), so
-// that specific cast can't be reproduced. `struct sockaddr_un` is stable UAPI
-// (2-byte sun_family, then sun_path immediately follows, no padding) rather
-// than an internal kernel struct, so the cast is unnecessary anyway: reading
-// `sa_kern->uaddr` (a plain named field of `bpf_sock_addr_kern`, relocatable
-// by byte offset like any other CO-RE field) and computing `+2` by hand,
-// fault-tolerantly loaded via `bpf_probe_read_kernel`, reproduces the same
-// bytes the original macro would have exposed through `sun_path`.
+// sockaddr_un)` expands to `bpf_rdonly_cast(ptr, bpf_core_type_id_kernel(...))`.
+// The faithful translation (branch llvm23-unix-rdonly-cast, the same pattern
+// as connect_unix_prog.rs) crashes LLVM's opt, up to LLVM 23, on the unused
+// preserve.field.info calls it leaves behind (#49). Until the toolchain has
+// the fix, this file reads the bytes directly: `struct sockaddr_un` is stable
+// UAPI (2-byte sun_family, then sun_path, no padding), so reading
+// `sa_kern->uaddr` and computing `+2` by hand, loaded via
+// `bpf_probe_read_kernel`, gives the same bytes the cast would have exposed
+// through `sun_path`. The prover sees the missing cast, hence the waiver.
 
 use core::ffi::c_void;
 

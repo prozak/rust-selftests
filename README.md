@@ -135,14 +135,15 @@ now store their kptrs as the C does, where they used to release them
 immediately). Each was re-run on its own and passes.
 
 **Proof sweep** (same 596 objects, 180 s each; re-run in full after that
-change):
+change, and again after the checker learned `bpf_rdonly_cast`, the kfunc
+behind `bpf_core_cast`):
 
 | | objects |
 |---|---:|
-| EQUIV — every program proved equivalent to its C original | 418 |
-| BAIL — the checker met something it does not model | 120 |
-| TIMEOUT | 32 |
-| UNKNOWN | 12 |
+| EQUIV — every program proved equivalent to its C original | 425 |
+| BAIL — the checker met something it does not model | 110 |
+| TIMEOUT | 34 |
+| UNKNOWN | 13 |
 | NOPROGS — the object has no programs | 13 |
 | INEQUIV | 1 |
 
@@ -154,6 +155,11 @@ in the checker. Its runtime test passes: most of the kfuncs involved
 return clean values on the test machine, and the two that were seen not to
 are not called directly (the source says where). Until the build masks
 these returns, `make ci-local` fails on this object.
+
+Three of the EQUIV rows (`getsockname_unix_prog`, `getpeername_unix_prog`,
+`recvmsg_unix_prog`) prove only with a waiver: their C calls
+`bpf_core_cast` and the translations do not yet, because the faithful
+translation crashes LLVM (#49).
 
 ## Reproducing it
 

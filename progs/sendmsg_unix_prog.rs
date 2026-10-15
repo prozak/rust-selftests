@@ -5,32 +5,17 @@
 // Direct translation of tools/testing/selftests/bpf/progs/sendmsg_unix_prog.c
 // (bpf-rs-core idiom).
 //
-// The type-id limitation described below is gone: scripts/type_id.py emits
-// BPF_TYPE_ID_TARGET (see tcp_ca_untrusted_btf_write.rs). Converting this
-// file to bpf_core_cast is #48.
-//
-// The C original re-types sa_kern->uaddr via
-// bpf_core_cast(sa_kern->uaddr, struct sockaddr_un), which expands to
-// bpf_rdonly_cast(ptr, bpf_core_type_id_kernel(struct sockaddr_un)) — the
-// type-id argument is a BPF_CORE_TYPE_ID_KERNEL relocation, a CO-RE kind
-// btf-macros does not emit (it only emits byte_offset/field_exists field
-// relocations). Passing btf_id 0 instead (the only thing this pipeline can
-// produce) would make bpf_rdonly_cast return PTR_TO_MEM with mem_size == 0,
-// which rejects any access at all — not usable here since we genuinely need
-// to read sun_path.
-//
-// struct sockaddr_un is a stable UAPI layout (sun_path always immediately
-// follows the 2-byte sa_family_t, see include/uapi/linux/un.h), so instead
-// of retyping the pointer we read sa_kern->uaddr as a raw address (an
-// ordinary CO-RE field access, matched by name against the kernel's
-// struct bpf_sock_addr_kern — the same mechanism the C source uses for
-// sa_kern->uaddrlen), add the constant sun_path offset by hand, and reach
-// the bytes with bpf_probe_read_kernel(). bpf_probe_read_kernel's pointer
-// argument is ARG_ANYTHING, so the verifier never needs to know the
-// pointee's BTF type at all.
+// bpf_core_cast(sa_kern->uaddr, struct sockaddr_un) is
+// bpf_rdonly_cast(ptr, bpf_core_type_id_kernel(struct sockaddr_un)); the type
+// id is the BTF_TYPE_ID declaration below (scripts/type_id.py).
+// offsetof(struct sockaddr_un, sun_path) is a CO-RE relocation in the C;
+// here it is the UAPI constant 2 (sun_family is a 2-byte
+// __kernel_sa_family_t immediately followed by sun_path), the value that
+// relocation resolves to on every kernel.
+
+// BTF_TYPE_ID: tid_sockaddr_un struct sockaddr_un
 
 use bpf_rs_core::bpf_object;
-use bpf_rs_core::helpers::bpf_probe_read_kernel;
 use btf_macros::btf;
 use core::ffi::c_void;
 
@@ -59,7 +44,14 @@ struct bpf_sock_addr_kern {
     uaddrlen: u32,
 }
 
+#[btf]
+struct sockaddr_un {
+    sun_path: [u8; 108],
+}
+
 extern "C" {
+    fn bpf_rdonly_cast(obj: *const c_void, btf_id: u32) -> *mut c_void;
+    fn tid_sockaddr_un() -> u64;
     fn bpf_cast_to_kern_ctx(ctx: *mut c_void) -> *mut c_void;
     fn bpf_sock_addr_set_sun_path(
         sa_kern: *mut c_void,
@@ -85,17 +77,6 @@ const SUN_PATH_OFFSET: usize = 2;
 // compiler-appended trailing NUL.
 const REWRITE_LEN: usize = 29;
 
-fn bytes_equal(a: *const u8, b: *const u8, len: usize) -> bool {
-    for i in 0..len {
-        let x = unsafe { core::ptr::read_volatile(a.add(i)) };
-        let y = unsafe { core::ptr::read_volatile(b.add(i)) };
-        if x != y {
-            return false;
-        }
-    }
-    true
-}
-
 #[link_section = "cgroup/sendmsg_unix"]
 #[no_mangle]
 extern "C" fn sendmsg_unix_prog(ctx: *const bpf_sock_addr) -> i32 {
@@ -119,19 +100,16 @@ extern "C" fn sendmsg_unix_prog(ctx: *const bpf_sock_addr) -> i32 {
     }
 
     let uaddr = *sa_kern_ref.uaddr().get().unwrap();
-    if uaddr.is_null() {
-        return 0;
-    }
-    let sun_path_ptr = unsafe { uaddr.add(SUN_PATH_OFFSET) };
-
-    let mut buf = [0u8; REWRITE_LEN];
-    let n = bpf_probe_read_kernel(&mut buf, REWRITE_LEN as u32, sun_path_ptr as *const c_void);
-    if n != 0 {
-        return 0;
-    }
-
-    if !bytes_equal(buf.as_ptr(), rewrite_addr, REWRITE_LEN) {
-        return 0;
+    let sa_kern_unaddr =
+        unsafe { bpf_rdonly_cast(uaddr as *const c_void, tid_sockaddr_un() as u32) }
+            as *const sockaddr_un;
+    let sun_path = unsafe { (*sa_kern_unaddr).sun_path().as_ptr() } as *const u8;
+    let mut i = 0usize;
+    while i < REWRITE_LEN {
+        if unsafe { *sun_path.add(i) != *rewrite_addr.add(i) } {
+            return 0;
+        }
+        i += 1;
     }
 
     1

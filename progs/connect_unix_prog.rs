@@ -3,14 +3,18 @@
 #![no_main]
 
 // Direct translation of tools/testing/selftests/bpf/progs/connect_unix_prog.c
-// (bpf-rs-core idiom). See getsockname_unix_prog.rs and #48 for the bpf_core_cast
-// rationale: struct sockaddr_un has no CO-RE-reachable path from
-// bpf_sock_addr_kern, so instead of retyping the pointer we read the bytes
-// directly. sun_path sits right after the 2-byte sun_family (no padding,
-// standard UAPI layout).
+// (bpf-rs-core idiom). //
+// bpf_core_cast(sa_kern->uaddr, struct sockaddr_un) is
+// bpf_rdonly_cast(ptr, bpf_core_type_id_kernel(struct sockaddr_un)); the type
+// id is the BTF_TYPE_ID declaration below (scripts/type_id.py).
+// offsetof(struct sockaddr_un, sun_path) is a CO-RE relocation in the C;
+// here it is the UAPI constant 2 (sun_family is a 2-byte
+// __kernel_sa_family_t immediately followed by sun_path), the value that
+// relocation resolves to on every kernel.
+
+// BTF_TYPE_ID: tid_sockaddr_un struct sockaddr_un
 
 use bpf_rs_core::bpf_object;
-use bpf_rs_core::helpers::bpf_probe_read_kernel;
 use btf_macros::btf;
 use core::ffi::c_void;
 
@@ -38,7 +42,14 @@ struct bpf_sock_addr_kern {
     uaddrlen: u32,
 }
 
+#[btf]
+struct sockaddr_un {
+    sun_path: [u8; 108],
+}
+
 extern "C" {
+    fn bpf_rdonly_cast(obj: *const c_void, btf_id: u32) -> *mut c_void;
+    fn tid_sockaddr_un() -> u64;
     fn bpf_cast_to_kern_ctx(obj: *const c_void) -> *mut c_void;
     fn bpf_sock_addr_set_sun_path(
         sa_kern: *mut c_void,
@@ -85,14 +96,13 @@ extern "C" fn connect_unix_prog(ctx: *const bpf_sock_addr) -> i32 {
     }
 
     let uaddr = unsafe { *sa_kern_ref.uaddr().as_ptr() };
-    let sun_path = unsafe { (uaddr as *const u8).add(SUN_PATH_OFFSET as usize) };
-
-    let mut buf = [0u8; PATH_LEN];
-    bpf_probe_read_kernel(&mut buf, path_len, sun_path as *const c_void);
-
+    let sa_kern_unaddr =
+        unsafe { bpf_rdonly_cast(uaddr as *const c_void, tid_sockaddr_un() as u32) }
+            as *const sockaddr_un;
+    let sun_path = unsafe { (*sa_kern_unaddr).sun_path().as_ptr() } as *const u8;
     let mut i = 0usize;
     while i < PATH_LEN {
-        if buf[i] != unsafe { *servun_ptr.add(i) } {
+        if unsafe { *sun_path.add(i) != *servun_ptr.add(i) } {
             return 0;
         }
         i += 1;

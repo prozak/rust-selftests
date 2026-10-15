@@ -433,6 +433,32 @@ def test_kfunc_private_buffer_address_is_not_observable():
     assert kverdict(a, b, ra, rb) == "EQUIV"
 
 
+def rdonly_cast(btf_id, load_through_result=True):
+    """r0 = *(u32 *)bpf_rdonly_cast(ctx, btf_id): the load goes through the
+    returned pointer, or through the saved ctx pointer instead."""
+    setup = (asm.mov64_reg(R6, R1), asm.mov64_imm(R2, btf_id))
+    code = asm.prog(*setup, asm.raw(0x85, src=2, imm=-1),
+                    asm.ldx(4, R0, R0 if load_through_result else R6, 0),
+                    asm.exit_())
+    return code, {len(asm.prog(*setup)): "bpf_rdonly_cast"}
+
+
+def test_rdonly_cast_returns_its_argument():
+    """The cast only retypes the pointer: reading through the result is
+    reading through the argument."""
+    (a, ra), (b, rb) = rdonly_cast(5), rdonly_cast(5, False)
+    va, detail = compare(a, b, kfuncs=["bpf_rdonly_cast"], relocs=ra)
+    assert va == "EQUIV", detail
+
+
+def test_rdonly_cast_to_a_different_type_is_detected():
+    """The BTF id decides what the verifier lets the program read, so a
+    cast to another type is a difference."""
+    (a, ra), (b, rb) = rdonly_cast(5), rdonly_cast(6)
+    va, _ = compare(a, b, kfuncs=["bpf_rdonly_cast"], relocs=ra)
+    assert va == "INEQUIV"
+
+
 # ------------------------------------------------- pointer provenance
 
 def test_probe_read_carries_a_stored_pointer():

@@ -1809,6 +1809,12 @@ class Executor:
             return one(err())
         if name in KFUNC_IDENTITY:
             return one(regs[1])
+        if name == "bpf_rdonly_cast":
+            # returns its first argument; the BTF id (a TYPE_ID_TARGET value,
+            # already resolved against the kernel BTF) only types the result
+            # for the verifier, so the two objects must agree on it
+            event(self._val_bytes(regs[2], 4, what))
+            return one(regs[1])
         if name == "bpf_local_irq_save":
             # writes the saved flags word; a shared oracle, restore reads it
             # back through the event so save/restore pairing must match

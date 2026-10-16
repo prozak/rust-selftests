@@ -391,9 +391,8 @@ fn dump_tcp_sock(seq: *mut c_void, tp: *mut tcp_sock, uid: u32, seq_num: u32) ->
         read_snd_ssthresh(tp) as i64
     };
 
-    static FMT_TCP3: [u8; 22] = *b"%pK %lu %lu %u %u %d\n\0";
-    let params_tcp3: [u64; 6] = [
-        tp as u64,
+    static FMT_TCP3: [u8; 20] = *b"0 %lu %lu %u %u %d\n\0";
+    let params_tcp3: [u64; 5] = [
         jiffies_to_clock_t(icsk_rto as u64),
         jiffies_to_clock_t(ato as u64),
         (((quick as u32) << 1) | pingpong_mode) as u64,
@@ -437,8 +436,8 @@ fn dump_tw_sock(seq: *mut c_void, tw: *mut inet_timewait_sock, uid: u32, seq_num
     let tw_substate = unsafe { *tw_ref.tw_substate().as_ptr() };
     let refcnt = unsafe { *skc_ref.skc_refcnt().refs().counter().as_ptr() } as i64 as u64;
 
-    static FMT_TWREQ2: [u8; 50] = *b"%02X %08X:%08X %02X:%08lX %08X %5d %8d %d %d %pK\n\0";
-    let params_twreq2: [u64; 11] = [
+    static FMT_TWREQ2: [u8; 48] = *b"%02X %08X:%08X %02X:%08lX %08X %5d %8d %d %d 0\n\0";
+    let params_twreq2: [u64; 10] = [
         tw_substate as u64,
         0,
         0,
@@ -449,7 +448,6 @@ fn dump_tw_sock(seq: *mut c_void, tw: *mut inet_timewait_sock, uid: u32, seq_num
         0,
         0,
         refcnt,
-        tw as u64,
     ];
     bpf_seq_printf(
         seq,
@@ -500,8 +498,8 @@ fn dump_req_sock(seq: *mut c_void, req: *mut request_sock, uid: u32, seq_num: u3
     let syncookie_timeout_byte = unsafe { *num_retrans_ptr.add(1) };
     let num_timeout = (syncookie_timeout_byte >> 1) & 0x7F;
 
-    static FMT_TWREQ2: [u8; 50] = *b"%02X %08X:%08X %02X:%08lX %08X %5d %8d %d %d %pK\n\0";
-    let params_twreq2: [u64; 11] = [
+    static FMT_TWREQ2: [u8; 48] = *b"%02X %08X:%08X %02X:%08lX %08X %5d %8d %d %d 0\n\0";
+    let params_twreq2: [u64; 10] = [
         TCP_SYN_RECV as u64,
         0,
         0,
@@ -512,7 +510,6 @@ fn dump_req_sock(seq: *mut c_void, req: *mut request_sock, uid: u32, seq_num: u3
         0,
         0,
         0,
-        req as u64,
     ];
     bpf_seq_printf(
         seq,

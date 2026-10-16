@@ -211,8 +211,8 @@ extern "C" fn dump_udp6(ctx: *const bpf_iter__udp) -> i32 {
     let sk_drops1 = unsafe { *udp_ref.drop_counters().drops1().counter().as_ptr() };
     let drops = sk_drops0.wrapping_add(sk_drops1);
 
-    static FMT2: [u8; 54] = *b"%02X %08X:%08X %02X:%08lX %08X %5u %8d %lu %d %pK %u\n\0";
-    let params2: [u64; 12] = [
+    static FMT2: [u8; 52] = *b"%02X %08X:%08X %02X:%08lX %08X %5u %8d %lu %d 0 %u\n\0";
+    let params2: [u64; 11] = [
         sk_state as u64,
         (sk_wmem_alloc.wrapping_sub(1)) as i64 as u64,
         rqueue as i64 as u64,
@@ -223,7 +223,6 @@ extern "C" fn dump_udp6(ctx: *const bpf_iter__udp) -> i32 {
         0,
         ino,
         sk_refcnt as i64 as u64,
-        udp_sk as u64,
         drops as i64 as u64,
     ];
     bpf_seq_printf(

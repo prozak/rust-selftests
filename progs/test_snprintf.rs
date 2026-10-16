@@ -86,7 +86,7 @@ static ip_fmt: [u8; 11] = *b"%pi4 %pI6\0\0";
 static sym_fmt: [u8; 12] = *b"%ps %pS %pB\0";
 #[link_section = ".rodata"]
 #[no_mangle]
-static addr_fmt: [u8; 15] = *b"%pK %px %p\0\0\0\0\0";
+static addr_fmt: [u8; 7] = *b"%px %p\0";
 #[link_section = ".rodata"]
 #[no_mangle]
 static str_fmt: [u8; 33] = *b"%s % 9c %+2c %-3c %04c %0c %+05s\0";
@@ -169,7 +169,7 @@ extern "C" fn handler(_ctx: *const c_void) -> i32 {
     }
 
     // Kernel pointers.
-    let addr_args: [u64; 3] = [0u64, 0xFFFF00000ADD4E55u64, 0xFFFF00000ADD4E55u64];
+    let addr_args: [u64; 2] = [0xFFFF00000ADD4E55u64, 0xFFFF00000ADD4E55u64];
     unsafe {
         addr_ret = bpf_snprintf(
             core::ptr::addr_of_mut!(addr_out) as *mut c_void,

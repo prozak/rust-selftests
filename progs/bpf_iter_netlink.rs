@@ -100,7 +100,7 @@ extern "C" fn dump_netlink(ctx: *const bpf_iter__netlink) -> i32 {
     let s = nlk_ref.sk();
 
     if meta.seq_num == 0 {
-        static FMT0: [u8; 90] = *b"sk               Eth Pid        Groups   Rmem     Wmem     Dump  Locks    Drops    Inode\n\0";
+        static FMT0: [u8; 76] = *b"sk Eth Pid        Groups   Rmem     Wmem     Dump  Locks    Drops    Inode\n\0";
         bpf_seq_printf(
             meta.seq,
             FMT0.as_ptr() as *const c_void,
@@ -111,8 +111,8 @@ extern "C" fn dump_netlink(ctx: *const bpf_iter__netlink) -> i32 {
     }
 
     let sk_protocol = unsafe { *s.sk_protocol().as_ptr() } as u64;
-    static FMT1: [u8; 10] = *b"%pK %-3d \0";
-    let params1: [u64; 2] = [nlk as u64, sk_protocol];
+    static FMT1: [u8; 9] = *b"0  %-3d \0";
+    let params1: [u64; 1] = [sk_protocol];
     bpf_seq_printf(
         meta.seq,
         FMT1.as_ptr() as *const c_void,

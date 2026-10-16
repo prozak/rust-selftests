@@ -66,6 +66,11 @@ NULLARY = {
     "__arch_riscv64": "test_arch=RISCV64",
     "__arch_s390x": "test_arch=s390x",
     "__arch_loongarch": "test_arch=LOONGARCH",
+    # bpf-next 2026-10: prepare the object privileged before the unpriv load,
+    # and gate a program on the kernel's >512-byte stack support
+    "__prepare_priv": "test_prepare_priv",
+    "__load_if_large_stack": "stack_mode=large",
+    "__load_if_no_large_stack": "stack_mode=small",
 }
 
 VALUED = {
@@ -73,6 +78,9 @@ VALUED = {
     "__not_msg": "test_expect_not_msg",
     "__msg_unpriv": "test_expect_msg_unpriv",
     "__not_msg_unpriv": "test_expect_not_msg_unpriv",
+    # bpf-next 2026-10: the match must be the log line right after the last
+    "__msg_next": "test_expect_msg_next",
+    "__msg_next_unpriv": "test_expect_msg_next_unpriv",
     "__xlated": "test_expect_xlated",
     "__xlated_unpriv": "test_expect_xlated_unpriv",
     "__jited": "test_jited",

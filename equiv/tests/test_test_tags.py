@@ -68,6 +68,24 @@ test_tags! {
         ("b", ["test_skip=needs a KASAN kernel"])]
 
 
+def test_2026_10_tags_pass_through(tmp_path):
+    # __msg_next, __msg_next_unpriv, __prepare_priv and the large-stack gates
+    # landed in bpf_misc.h between the 3ccdb078 and 645f5fcf pins.
+    src = write(tmp_path, '''
+test_tags! {
+    a: __failure, __msg("x"), __msg_next("y"), __prepare_priv;
+    b: __load_if_large_stack, __success;
+    c: __load_if_no_large_stack, __failure_unpriv, __msg_next_unpriv("z");
+}
+''')
+    assert T.parse_source(src) == [
+        ("a", ["test_expect_failure", "test_expect_msg=x",
+               "test_expect_msg_next=y", "test_prepare_priv"]),
+        ("b", ["stack_mode=large", "test_expect_success"]),
+        ("c", ["stack_mode=small", "test_expect_failure_unpriv",
+               "test_expect_msg_next_unpriv=z"])]
+
+
 def test_no_declaration_is_not_an_error(tmp_path):
     assert T.parse_source(write(tmp_path, "fn main() {}\n")) == []
 

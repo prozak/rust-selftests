@@ -18,7 +18,8 @@
 # .cmd files record the shared tree's absolute path; they are rewritten to
 # the worker's own path, or make would read the shared tree's dependencies.
 # bpftool is shared read-only (swap-and-test.sh finds it beside the output
-# directory). --clean removes every worker tree.
+# directory). --clean removes every worker tree, overlay upper dirs
+# included (ci_nightly.py's and gate.py's default mode).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -29,6 +30,14 @@ FLAVOR_DIR="$(basename "${SRC}")"                  # selftests-output-qemu
 BPFTOOL_DIR="bpftool-output-${FLAVOR_DIR#selftests-output-}"
 
 if [ "${1:-}" = --clean ]; then
+    # A gate holds the shared output's lock while its overlay upper/ dirs
+    # are in use (ci_nightly.py, gate.py).
+    if [ -e "${SRC}/.ci-nightly.lock" ] && ! flock -n "${SRC}/.ci-nightly.lock" true; then
+        echo "a gate is running against ${SRC}; not cleaning ${GATE}" >&2; exit 1
+    fi
+    # overlayfs leaves work/work behind with mode 000; rm -rf cannot
+    # descend into it as is
+    [ ! -d "${GATE}" ] || chmod -R u+rwx "${GATE}"
     rm -rf "${GATE}"
     exit 0
 fi

@@ -344,7 +344,7 @@ ci-local: restore-all ci-fast check-kernel-commit $(BLDDIR)/vmlinux.btf
 # sequences recursive make calls even when the caller supplies -j.
 NIGHTLY_JOBS ?= 8
 NIGHTLY_BUILD_JOBS ?= 4
-NIGHTLY_GATE_WORKERS ?= 1
+NIGHTLY_GATE_WORKERS ?= 4
 NIGHTLY_OUT ?=
 ci-nightly:
 	$(PYZ3) scripts/ci_nightly.py --jobs $(NIGHTLY_JOBS) --build-jobs $(NIGHTLY_BUILD_JOBS) \

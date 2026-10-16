@@ -43,7 +43,7 @@
 | bpf_iter_setsockopt | PASS | — | Summary: 2/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | bpf_iter_setsockopt_unix | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | bpf_iter_sockmap | PASS | — | Summary: 5/74 PASSED, 0 SKIPPED, 0/0 FAILED |
-| bpf_iter_task_btf | PASS | — | Summary: 4/38 PASSED, 1 SKIPPED, 0/0 FAILED |
+| bpf_iter_task_btf | PASS | — | Summary: 4/39 PASSED, 0 SKIPPED, 0/0 FAILED |
 | bpf_iter_task_file | PASS | — | Summary: 4/39 PASSED, 0 SKIPPED, 0/0 FAILED |
 | bpf_iter_task_stack | PASS | — | Summary: 4/39 PASSED, 0 SKIPPED, 0/0 FAILED |
 | bpf_iter_task_vmas | PASS | — | Summary: 4/39 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -223,6 +223,7 @@
 | netcnt_prog | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | netif_receive_skb | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
 | netns_cookie_prog | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |
+| normal_map_btf | PASS | — | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | perf_event_stackmap | PASS | — | Summary: 1/0 PASSED, 1 SKIPPED, 0/0 FAILED |
 | prepare | PASS | — | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | priv_freplace_prog | PASS | — | Summary: 1/13 PASSED, 0 SKIPPED, 0/0 FAILED |
@@ -551,7 +552,7 @@
 | test_xdp_with_cpumap_helpers | PASS | — | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_xdp_with_devmap_frags_helpers | PASS | — | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
 | test_xdp_with_devmap_helpers | PASS | — | Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED |
-| timer | PASS | — | Summary: 14/3 PASSED, 1 SKIPPED, 0/0 FAILED |
+| timer | PASS | — | Summary: 14/3 PASSED, 0 SKIPPED, 0/0 FAILED |
 | timer_crash | PASS | — | Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED |
 | timer_interrupt | PASS | — | Summary: 14/3 PASSED, 0 SKIPPED, 0/0 FAILED |
 | timer_lockup | PASS | — | Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED |

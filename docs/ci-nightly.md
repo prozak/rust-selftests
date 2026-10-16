@@ -14,14 +14,16 @@ module hashes.
 
 ```sh
 make ci-nightly
-make ci-nightly NIGHTLY_OUT=nightly/my-run NIGHTLY_JOBS=8 NIGHTLY_BUILD_JOBS=4
+make ci-nightly NIGHTLY_OUT=nightly/my-run NIGHTLY_JOBS=8 NIGHTLY_BUILD_JOBS=4 \
+    NIGHTLY_GATE_WORKERS=4
 ```
 
 The output directory must not already exist. Defaults are a UTC timestamp
-under ignored `nightly/`, eight proof workers, and four build workers.
-Both worker settings accept 1–8. QEMU consumers run **serially**; the
-default guest size for this driver is four CPUs, overridable with
-`QEMU_CPUS`. Allow a few hours for the full runtime gate.
+under ignored `nightly/`, eight proof workers, four build workers and four
+QEMU gate workers. All three worker settings accept 1–8. The default guest
+size for this driver is four CPUs, overridable with `QEMU_CPUS`. With four
+gate workers the runtime gate takes about an hour; with one, serially in
+the shared selftests output, about three and a half.
 
 Do not run other builds, swaps, guards, or QEMU drivers against this
 checkout/shared selftests output during nightly. An advisory lock prevents
@@ -45,7 +47,22 @@ The driver sequences every stage even if the outer make uses `-j`:
    but never its hash-cache fast path or baseline-writing path.
 5. Compare verdicts with `HEAD:equiv/results/baseline.tsv`. Save all changes,
    including added/removed rows; flag previously proved objects losing proof.
-6. Run every translation's QEMU consumers through `swap-and-test.sh`.
+6. Run every translation's QEMU consumers through `swap-and-test.sh`,
+   `NIGHTLY_GATE_WORKERS` objects at a time. Each run happens in a private
+   overlayfs layer over the shared selftests output
+   (`scripts/gate-overlay.sh`): the swapped object, the regenerated
+   skeleton, the consuming test object and the relinked `test_progs` land
+   in the worker's upper directory (about 40 MB per object), the guest
+   mounts the same overlay before running `test_progs`, and the shared
+   output is never written, so going back to C costs nothing. The objects
+   listed in `scripts/gate-serial` run afterwards, one at a time, in the
+   shared output itself, as a single worker does: the `bpf_iter_*` objects,
+   whose `task_vma` subtest compares a mapped file's path and device with
+   `/proc/self/maps` and sees the overlay's lower file instead, and
+   `fentry_recursive` (#52). `--gate-mode copy` (`scripts/gate-workers.sh`)
+   gives each worker a trimmed copy of the output instead, about 0.7 GB
+   each, for hosts without unprivileged user namespaces; `make
+   clean-gate-workers` removes the copies.
    A failed Rust run is retried with C to distinguish C-PASS, C-FAIL, and
    missing-consumer results. Successful Rust runs restore C and rebuild
    derived skeletons/test binaries without a second guest boot.
@@ -55,6 +72,14 @@ The driver sequences every stage even if the outer make uses `-j`:
    active swap also attempts to rebuild its C skeletons/test binary.
    Further interrupts are ignored during cleanup. A failed derived rebuild
    still attempts the final C object restore and marks the report ERROR.
+
+The guests must run under KVM. `scripts/qemu-test-progs` opens `/dev/kvm`
+before booting, and the driver stops the gate at the first guest log that
+reports an emulated CPU (`QEMU TCG CPU`): the 2026-10-10 run and a
+2026-10-15 run made while `/dev/kvm` was unusable showed that emulated
+guests fail timing tests the C objects fail too (`test_tc_edt`,
+`tracing_multi_*`) and Oops in `fentry_attach_stress` (#52, clean 10/10
+under KVM), so an emulated run's verdicts are not evidence either way.
 
 Under QEMU, the consuming selftests check verifier acceptance/rejection
 as well as runtime assertions. The old issue's standalone `make verify`
@@ -95,8 +120,20 @@ weekly kernel-gap reporting continues in its existing workflow.
 
 ## Runs
 
-- 2026-10-12, the current baselines: the same kernel as the run
-  below, with KVM. 588 PASS / 0 FAIL / 8 NO-ORACLE and one INEQUIV
+- 2026-10-16, the current baselines: the same kernel, with four overlay
+  gate workers (now the default). 589 PASS / 0 FAIL / 8 NO-ORACLE for 597
+  objects (`normal_map_btf` is new) and the same single INEQUIV. The gate
+  took 58 minutes against 3 hours 27 minutes serially; the host peaked at
+  6.7 GB used during the proof sweep and 3.3 GB with the four guests up.
+  Every runtime verdict matches the 2026-10-12 row, as did a 20-object
+  comparison of overlay against serial runs made beforehand, once the
+  `bpf_iter_*` objects had moved to `scripts/gate-serial`. Proof:
+  430 EQUIV / 104 BAIL / 36 TIMEOUT / 13 UNKNOWN / 13 NOPROGS. The checker
+  now fills `__kconfig` externs from the pinned kernel's `.config`, which
+  proves `bpf_syscall_macro`, `test_ctx`, `test_global_map_resize`,
+  `test_probe_user` and `timer_interrupt`, and lets `arena_spin_lock` and
+  `bpf_cubic` run to the 180-second limit where they used to bail.
+- 2026-10-12: the same kernel as the run below, with KVM. 588 PASS / 0 FAIL / 8 NO-ORACLE and one INEQUIV
   (`cpumask_success`); the runtime gate took 3 hours 27 minutes.
   `equiv/results/baseline.tsv` is newer than this run: six translations
   were changed afterwards and four waivers removed, which invalidates

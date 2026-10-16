@@ -11,8 +11,8 @@ no aya, no bpf-linker, no libbpf-rs. The object is then dropped in place of
 the one clang built from the C file, and the kernel's unmodified tests decide
 whether it is good.
 
-596 of the 1,008 programs in the kernel tree are translated. In the last
-full run (2026-10-12), 588 of them pass the kernel's tests with the Rust
+597 of the 1,008 programs in the kernel tree are translated. In the last
+full run (2026-10-16), 589 of them pass the kernel's tests with the Rust
 object in place; [Status](#status) has the rest.
 
 ## What "passes" means
@@ -110,42 +110,38 @@ its own.
 
 ## Status
 
-From `make ci-nightly` on 2026-10-12 (the sources of commit `453a499`), on
+From `make ci-nightly` on 2026-10-16 (the sources of commit `fae2fd8`), on
 bpf-next `3ccdb0781382` with no patches. The per-object tables are
 [`qemu/gate/results.md`](qemu/gate/results.md) and
 [`equiv/results/baseline.tsv`](equiv/results/baseline.tsv).
 
-**Runtime gate** (596 objects, serial, 4-CPU KVM guest):
+**Runtime gate** (597 objects, four 4-CPU KVM guests at a time, 58 minutes):
 
 | | objects |
 |---|---:|
-| PASS | 588 |
+| PASS | 589 |
 | FAIL | 0 |
 | NO-ORACLE | 8 |
 
-Nothing was re-run. 54 of the passing rows include skipped subtests.
+Nothing was re-run. 52 of the passing rows include skipped subtests. Every
+verdict matches the previous full run (2026-10-12, one guest at a time,
+3 hours 27 minutes); `normal_map_btf` is the one new object.
 
-The previous run, on 2026-10-10, was made without KVM by accident and
-recorded four failures that the C objects shared (`test_tc_edt` and three
-`tracing_multi_*` objects) and two guest panics during boot. All six pass
-here, on the same kernel.
-
-Six objects were changed after that run (`cpumask_success` and five others
-now store their kptrs as the C does, where they used to release them
-immediately). Each was re-run on its own and passes.
-
-**Proof sweep** (same 596 objects, 180 s each; re-run in full after that
-change, and again after the checker learned `bpf_rdonly_cast`, the kfunc
-behind `bpf_core_cast`):
+**Proof sweep** (same 597 objects, 180 s each):
 
 | | objects |
 |---|---:|
-| EQUIV — every program proved equivalent to its C original | 425 |
-| BAIL — the checker met something it does not model | 110 |
-| TIMEOUT | 34 |
+| EQUIV — every program proved equivalent to its C original | 430 |
+| BAIL — the checker met something it does not model | 104 |
+| TIMEOUT | 36 |
 | UNKNOWN | 13 |
 | NOPROGS — the object has no programs | 13 |
 | INEQUIV | 1 |
+
+Five of the EQUIV rows are new since the checker fills `__kconfig` externs
+(`CONFIG_HZ`, `CONFIG_NR_CPUS`, ...) from the pinned kernel's `.config` as
+libbpf does; two objects that used to bail on them (`arena_spin_lock`,
+`bpf_cubic`) now time out instead.
 
 The INEQUIV is `cpumask_success`. Its kfuncs return `bool`, and on x86-64
 only the low byte of that return is defined. clang masks the result to one
@@ -196,7 +192,11 @@ make -C ../rust-bpf \
 ```
 
 Tested with rust-bpf at `1dc4bb7` plus pull request #6 (`3e35246`), which
-adds the `#[btf_tag]` decl tags the translations use.
+adds the `#[btf_tag]` decl tags the translations use (that exact tree is
+[prozak/rust-bpf `pr6-on-master`](https://github.com/prozak/rust-bpf/tree/pr6-on-master));
+`make` stops with a
+message if the checkout lacks the PR's `btf_tags.py`. A checkout elsewhere
+than `../rust-bpf` is passed as `make RUSTBPF=/path/to/rust-bpf`.
 
 Then:
 
@@ -209,7 +209,9 @@ make restore-all                          # put the C objects back
 `make test-<name>` leaves the Rust object installed; `make restore-all`
 undoes every swap. The whole corpus, with the proof sweep, is
 `make ci-nightly` (see [docs/ci-nightly.md](docs/ci-nightly.md)). Its
-runtime gate is serial and took 3 hours 27 minutes in the 2026-10-12 run.
+runtime gate runs four guests at a time, each over a private overlay of the
+selftests output, and took 58 minutes in the 2026-10-16 run (3 hours 27
+minutes with one guest).
 It needs `pip install -r requirements.txt`, into `.venv/` if you want
 `make` to find it by itself.
 

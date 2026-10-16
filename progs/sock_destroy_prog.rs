@@ -23,6 +23,7 @@ use core::ffi::c_void;
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::{
     bpf_get_socket_cookie, bpf_map_lookup_elem, bpf_map_update_elem, bpf_skc_to_tcp6_sock,
+    bpf_skc_to_tcp_timewait_sock,
 };
 use bpf_rs_core::maps::{self, BpfMap};
 use btf_macros::btf;
@@ -193,6 +194,47 @@ extern "C" fn iter_tcp6_server(ctx: *const bpf_iter__tcp) -> i32 {
         unsafe {
             bpf_sock_destroy(sk_common);
         }
+    }
+
+    0
+}
+
+#[no_mangle]
+static mut tw_found: i32 = 0;
+#[no_mangle]
+static mut tw_destroy_err: i32 = 0;
+
+#[link_section = "iter/tcp"]
+#[no_mangle]
+extern "C" fn iter_tcp6_timewait(ctx: *const bpf_iter__tcp) -> i32 {
+    let ctx = unsafe { &*ctx };
+    let sk_common = ctx.sk_common;
+    if sk_common.is_null() {
+        return 0;
+    }
+
+    let family = unsafe { *(&*sk_common).skc_family().as_ptr() };
+    if family != AF_INET6_FAMILY {
+        return 0;
+    }
+
+    if bpf_skc_to_tcp_timewait_sock(sk_common as *const c_void).is_null() {
+        return 0;
+    }
+
+    let key: u32 = 0;
+    let val = bpf_map_lookup_elem(&tcp_conn_sockets, &key) as *const u64;
+    if val.is_null() {
+        return 0;
+    }
+    // The timewait sock inherits the cookie of the closed client sock.
+    if bpf_get_socket_cookie(sk_common as *const sock_common) != unsafe { *val } {
+        return 0;
+    }
+
+    unsafe {
+        tw_found += 1;
+        tw_destroy_err = bpf_sock_destroy(sk_common);
     }
 
     0

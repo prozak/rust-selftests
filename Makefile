@@ -183,6 +183,11 @@ KSYM_VAR_SRCS := $(shell grep -l '^// BTF_KSYM:' progs/*.rs)
 $(patsubst progs/%.rs,$(BLDDIR)/%-opt.bc,$(KSYM_VAR_SRCS)): scripts/ksym_vars.py
 TYPE_ID_SRCS := $(shell grep -l '^// BTF_TYPE_ID:' progs/*.rs)
 $(patsubst progs/%.rs,$(BLDDIR)/%-opt.bc,$(TYPE_ID_SRCS)): scripts/type_id.py
+# `// BTF_WEAK_KFUNC: name` marks a kfunc the C declares `__ksym __weak` (one
+# that may not exist in the running kernel, like test_ksyms_weak.c's
+# invalid_kfunc): rustc ignores #[linkage = "extern_weak"] on a foreign
+# function, so the object rule weakens the undefined symbol with
+# llvm-objcopy, and libbpf then treats the missing kfunc as optional.
 # usdt.bpf.h's weak maps are ABI exports even though the handler does not
 # reference them (the keep list has them as WEAK OBJECTs too; this predates
 # the keep list's weak symbols and is kept as belt and braces).
@@ -246,7 +251,9 @@ $(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc scripts/naked_abi.py scripts/btf_graph_t
 	$(LLVM_OBJCOPY) \
 		--remove-section=.eh_frame --remove-section=.rel.eh_frame \
 		--remove-section=.gcc_except_table \
-		--strip-symbol=rust_eh_personality $@.tmp $@
+		--strip-symbol=rust_eh_personality \
+		$$(sed -n 's|^// BTF_WEAK_KFUNC: \([A-Za-z_][A-Za-z_0-9]*\)\s*$$|--weaken-symbol=\1|p' progs/$*.rs) \
+		$@.tmp $@
 	@rm -f $@.tmp $@.abi.ll
 	python3 scripts/btf_rename.py $@ progs/$*.rs
 	python3 scripts/btf_map_slots.py $@

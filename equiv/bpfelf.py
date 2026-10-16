@@ -119,7 +119,9 @@ class BpfElf:
         """id -> (kind, name, type/size, vlen, extra). Lazy, id 0 = void.
 
         extra: ARRAY -> (elem_type, nelems); STRUCT/UNION -> [(member name,
-        member type id)]; DATASEC -> [var type id]; else None."""
+        member type id)]; DATASEC -> [var type id]; DECL_TAG ->
+        component_idx (-1 for the declaration itself); INT -> its encoding
+        bits (1 signed, 2 char, 4 bool); else None."""
         if hasattr(self, "_btf"):
             return self._btf
         self._btf = {0: (0, "", 0, 0, None)}
@@ -152,6 +154,10 @@ class BpfElf:
             elif kind == 15:  # DATASEC: (var type, offset, size)
                 extra = [struct.unpack_from("<III", b, pos + 12 + 12 * i)[0]
                          for i in range(vlen)]
+            elif kind == 1:   # INT: BTF_INT_ENCODING
+                extra = (struct.unpack_from("<I", b, pos + 12)[0] >> 24) & 0xF
+            elif kind == 17:  # DECL_TAG: member / parameter index or -1
+                extra, = struct.unpack_from("<i", b, pos + 12)
             self._btf[tid] = (kind, sname(name_off), size_or_type, vlen, extra)
             pos += 12 + self._BTF_EXTRA.get(kind, 0) + self._BTF_PER_VLEN.get(kind, 0) * vlen
             tid += 1

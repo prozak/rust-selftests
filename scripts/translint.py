@@ -19,6 +19,12 @@ Classes checked (suppress per file with `// translint: allow(<class>)`):
                  A message may relax ONLY register/stack-slot/insn-index
                  tokens, via the matcher's own {{regex}} brackets; anything
                  else diverging from the C tag is an error.
+  decl-tags      [ERROR] the C object's other BTF decl tags must be on the
+                 same declaration in the Rust object: `contains:` (the
+                 node type of a bpf_rb_root / bpf_list_head) and
+                 `exception_callback:` change what the kernel accepts, so a
+                 missing one is an ERROR; `arg:*` and free-form tags are a
+                 WARN. Rust emits them with rust-bpf's #[btf_tag].
   printk-count   [ERROR] C and Rust must have the same number of trace-log
                  call sites (bpf_printk / log_err / bpf_trace_printk):
                  dropped logging was 62 real INEQUIV sites.
@@ -269,6 +275,63 @@ def check_test_tags(name, rs_raw):
                    f"{w!r} beyond register/offset relaxation")
 
 
+# Decl tags the kernel acts on: without them it rejects the object, or (an
+# exception callback) runs a different program. The rest only weaken a test.
+LOAD_BEARING_TAGS = ("contains:", "exception_callback:")
+
+
+def decl_tags(obj_path):
+    """The non-test_loader decl tags of a compiled object, as a set of
+    (target kind, target name, component, payload). The component is the
+    member name for a struct/union member, the parameter index for a function
+    parameter, else None. None when the object can't be read."""
+    if not os.path.exists(obj_path):
+        return None
+    try:
+        types = BpfElf(obj_path).btf_types()
+    except Exception:
+        return None
+    kinds = {4: "struct", 5: "union", 8: "typedef", 12: "func", 14: "var"}
+    out = set()
+    for kind, payload, target, _vlen, comp in types.values():
+        if kind != 17 or payload.startswith("comment:"):
+            continue
+        tkind, tname, _t, _v, members = types[target]
+        what = kinds.get(tkind, f"kind{tkind}")
+        if comp < 0:
+            comp = None
+        elif tkind in (4, 5):
+            comp = members[comp][0]
+        out.add((what, tname, comp, payload))
+    return out
+
+
+def check_decl_tags(name):
+    c_obj = os.path.join(C_OBJ_DIR, f"{name}.bpf.o")
+    if os.path.exists(c_obj + ".corig"):
+        c_obj = c_obj + ".corig"
+    want = decl_tags(c_obj)
+    got = decl_tags(os.path.join(REPO, "bld", f"{name}.bpf.o"))
+    if want is None or got is None:
+        return
+
+    def where(t):
+        what, tname, comp, _payload = t
+        if comp is None:
+            return f"{what} {tname}"
+        if what == "func":
+            return f"func {tname} parameter {comp}"
+        return f"{what} {tname}.{comp}"
+
+    for t in sorted(want - got, key=str):
+        level = "ERROR" if t[3].startswith(LOAD_BEARING_TAGS) else "WARN"
+        yield (level, f"C object tags {where(t)} with {t[3]!r}, the "
+                      f"translation does not")
+    for t in sorted(got - want, key=str):
+        yield ("ERROR", f"translation tags {where(t)} with {t[3]!r}, the "
+                        f"C object does not")
+
+
 def lint(name):
     rs_path = os.path.join(REPO, "progs", f"{name}.rs")
     c_path = os.path.join(C_PROGS, f"{name}.c")
@@ -290,6 +353,8 @@ def lint(name):
         emit(level, "program-set", text)
     for level, text in check_test_tags(name, rs_raw):
         emit(level, "test-tags", text)
+    for level, text in check_decl_tags(name):
+        emit(level, "decl-tags", text)
 
     # bool-global: only an error when the BPF side BRANCHES on it (reads);
     # write-only status flags (data.skip = true) store 1 identically in

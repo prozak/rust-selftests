@@ -280,6 +280,22 @@ def check_test_tags(name, rs_raw):
 LOAD_BEARING_TAGS = ("contains:", "exception_callback:")
 
 
+def plain_var_name(name):
+    """A private Rust static keeps its v0-mangled symbol name in BTF
+    (`_RNvCs..._16linked_list_peek5ghead` for C's `__hidden` `ghead`);
+    the kernel finds graph roots by the tag on the variable, never by its
+    name, so compare by the trailing identifier."""
+    if not name.startswith("_R"):
+        return name
+    for m in re.finditer(r"\d+", name):
+        n = int(m.group())
+        if m.end() + n == len(name):
+            ident = name[m.end():]
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", ident):
+                return ident
+    return name
+
+
 def decl_tags(obj_path):
     """The non-test_loader decl tags of a compiled object, as a set of
     (target kind, target name, component, payload). The component is the
@@ -298,6 +314,8 @@ def decl_tags(obj_path):
             continue
         tkind, tname, _t, _v, members = types[target]
         what = kinds.get(tkind, f"kind{tkind}")
+        if tkind == 14:
+            tname = plain_var_name(tname)
         if comp < 0:
             comp = None
         elif tkind in (4, 5):

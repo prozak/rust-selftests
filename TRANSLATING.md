@@ -224,7 +224,11 @@ unsupported type is an error; the pass never imports C instructions.
 Integer descriptors preserve width and signedness. Struct/union
 descriptors preserve the kernel type's name and size, with no copied
 fields; translated field accesses still need their own `#[btf]` CO-RE
-types. An address-only Rust `c_void` extern can therefore represent a
+types. Kfunc prototypes get the same empty descriptors; for the graph
+types the kernel resolves by name (`bpf_list_node`, `bpf_rb_root`, ...)
+`scripts/btf_graph_types.py` folds them into the translation's own
+definition, or a node type declared after the first kfunc call would lose
+its kernel metadata and the map holding its head would fail to load. An address-only Rust `c_void` extern can therefore represent a
 typed kernel symbol, as in `test_ksyms_btf_null_check`. `test_ksyms`
 also demonstrates the C oracle's weak, typeless symbol resolving to zero.
 
@@ -401,7 +405,10 @@ btf_type_tags! {
 ```
 
 A C `static` global in a `private(NAME)` section is a Rust `static mut`
-with `#[link_section = ".bss.NAME"]` and no `#[no_mangle]`. With the tags
+with `#[link_section = ".bss.NAME"]` and no `#[no_mangle]`, declared in
+the C order: `scripts/private_sections.py` lays the section out in source
+order with C's `aligned(8)`, so a lock keeps the offset the verifier's
+messages name. With the tags
 in place, `bpf_kptr_xchg` into the field loads as it does for the C
 object, so translate the kptr round trip as written; do not replace it
 with a release of the local pointer. `cpumask_success.rs` has every form.
@@ -428,7 +435,6 @@ struct map_value {
 
 #[btf_tag(decl_tag = "contains:node_data:node")]
 #[link_section = ".data.A"]
-#[no_mangle]
 static mut groot: bpf_rb_root = bpf_rb_root { __opaque: [0; 2] };
 
 #[btf_tag(decl_tag = "exception_callback:exception_cb")]
@@ -439,6 +445,15 @@ extern "C" fn throwing_extension(_ctx: *const __sk_buff) -> i32 { ... }
 
 translint's `decl-tags` class compares these with the C object's: a
 missing `contains:` or `exception_callback:` is an error.
+
+A tagged `private(A)` root or head stays a private static (no
+`#[no_mangle]`, as above): the tag targets the debug-info name, which a
+private static keeps. C's `__hidden` makes the variable BTF_VAR_STATIC, so
+libbpf does not mmap `.data.A`; a `#[no_mangle]` static is a global
+variable instead, and once the kernel accepts the graph-root record the
+mmap of a map holding a `bpf_list_head`/`bpf_rb_root` fails with
+-ENOTSUPP at load (`test_spin_lock.rs` explains the `__hidden` rule).
+`bpf_rbtree_add` returns `int` in the kernel; declare it `-> i32`.
 
 When the C consumer requires a plain `char` array (for example a string
 assertion compiled with `-Werror=pointer-sign`), declare byte storage with

@@ -5,25 +5,17 @@
 // Direct translation of tools/testing/selftests/bpf/progs/exceptions_ext.c
 // bpf-rs-core idiom.
 //
-// The C source tags throwing_exception_cb_extension and throwing_extension
-// with __exception_cb(exception_cb), a btf_decl_tag("exception_callback:...")
-// on the program's main subprog. scripts/btf_test_tags.py
-// does not emit `exception_callback:` yet (#44), so the decl tag itself is
-// dropped.
-//
-// Without the tag, `bpf_throw(cookie)` for a program with no registered
-// exception callback is defined (kernel/bpf/verifier.c, the KF_bpf_throw
-// check) to make `cookie` become the program's own return value directly --
-// it does NOT run `exception_cb`. The real (clang-built) object instead
-// unwinds straight to `exception_cb`, whose `cookie + 64` result becomes the
-// program's return value. To reproduce that observable behavior without the
-// tag, these two programs call `exception_cb` directly and return its result
-// in place of `bpf_throw(...); return 0;` -- same effective return value
-// (verified against prog_tests/exceptions.c's RUN_SUCCESS(..., 131) and
-// RUN_SUCCESS(..., 128) expectations), just without the kfunc-based unwind.
+// throwing_exception_cb_extension and throwing_extension carry C's
+// __exception_cb(exception_cb), the decl tag "exception_callback:exception_cb"
+// on the program's FUNC, through rust-bpf's #[btf_tag]. bpf_throw() in them
+// therefore unwinds to exception_cb, whose `cookie + 64` becomes the
+// extension's return value (prog_tests/exceptions.c checks it through the
+// programs the extensions replace into: RUN_SUCCESS(..., 131) and
+// RUN_SUCCESS(..., 128)).
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::ctx::__sk_buff;
+use btf_macros::btf_tag;
 
 extern "C" {
     fn bpf_throw(cookie: u64);
@@ -53,17 +45,20 @@ extern "C" fn extension(_ctx: *const __sk_buff) -> i32 {
     0
 }
 
+#[btf_tag(decl_tag = "exception_callback:exception_cb")]
 #[link_section = "?freplace"]
 #[no_mangle]
-extern "C" fn throwing_exception_cb_extension(cookie: u64) -> i32 {
-    let _ = cookie;
-    exception_cb(32)
+extern "C" fn throwing_exception_cb_extension(_cookie: u64) -> i32 {
+    unsafe { bpf_throw(32) };
+    0
 }
 
+#[btf_tag(decl_tag = "exception_callback:exception_cb")]
 #[link_section = "?freplace"]
 #[no_mangle]
 extern "C" fn throwing_extension(_ctx: *const __sk_buff) -> i32 {
-    exception_cb(64)
+    unsafe { bpf_throw(64) };
+    0
 }
 
 #[link_section = "?fexit"]

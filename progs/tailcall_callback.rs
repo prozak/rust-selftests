@@ -76,6 +76,11 @@ extern "C" fn callback_loop(_index: u64, cb_ctx: *mut *const __sk_buff) -> i64 {
     (ret != 0) as i64
 }
 #[inline(never)]
+extern "C" fn callback_tail(_index: u64, cb_ctx: *mut *const __sk_buff) -> i64 {
+    bpf_tail_call(unsafe { *cb_ctx } as *const core::ffi::c_void, &jmp_table, 0);
+    0
+}
+#[inline(never)]
 extern "C" fn callback_empty(_index: u64, _data: *mut c_void) -> i64 { 0 }
 
 #[no_mangle]
@@ -95,10 +100,19 @@ extern "C" fn tailcall_callback_2(skb: *const __sk_buff) -> i32 {
     0
 }
 
+// callback with a direct tail call is rejected without a verifier bug
+#[no_mangle]
+#[link_section = "tc"]
+extern "C" fn tailcall_callback_3(mut skb: *const __sk_buff) -> i32 {
+    bpf_loop(1, callback_tail, &mut skb, 0);
+    0
+}
+
 bpf_rs_core::test_tags! {
     classifier_0: __auxiliary;
     tailcall_callback_1: __failure, __msg("cannot tail call within callback");
     tailcall_callback_2: __success, __retval(0);
+    tailcall_callback_3: __failure, __msg("cannot tail call within callback");
 }
 #[no_mangle]
 #[link_section = "license"]

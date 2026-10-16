@@ -27,7 +27,8 @@
 #   KERNEL_SRC        bpf-next checkout (with built selftests)
 #   SELFTESTS_OUTPUT  the selftests build output directory (contains *.bpf.o,
 #                     test_progs, generated skeletons)
-#   RUSTBPF           4ast/rust-bpf checkout with built bld_deps/ and tools
+#   RUSTBPF           4ast/rust-bpf checkout with built bld_deps/ and tools,
+#                     with pull request #6 (btf_tags.py) merged
 #   LLVM_PREFIX       LLVM >= 22 install (llc/opt/llvm-link/llvm-readelf...)
 #   UML_HARNESS       uml-veristat checkout (uml-veristat/uml-test-progs;
 #                     FLAVOR=uml only)
@@ -196,8 +197,11 @@ $(BLDDIR)/%-opt.bc: $(BLDDIR)/%-reloc.bc $(BLDDIR)/%.keep
 		-passes='forceattrs,internalize,globaldce,default<O2>' $$src -o $@; \
 	rm -f $@.ksyms.ll $@.types.ll
 
-# --- invoke->call, unreachable->ret, .ksyms ---
-$(BLDDIR)/%-ksyms.bc: $(BLDDIR)/%-opt.bc
+# --- invoke->call, unreachable->ret, .ksyms, #[btf_tag] annotations ---
+# btf_tags.py (rust-bpf PR #6) runs last, as in rust-bpf's own Makefile: it
+# turns the `.btf_tags` manifest that #[btf_tag] leaves in the IR into
+# debug-info annotations, from which llc emits BTF decl and type tags.
+$(BLDDIR)/%-ksyms.bc: $(BLDDIR)/%-opt.bc $(RUSTBPF)/btf_tags.py
 	$(LLVM_DIS) $< -o $@.ll
 	KSYM_BTF_FILES="$(KSYM_BTF_FILES)" BPFTOOL="$(BPFTOOL_BIN)" \
 		python3 $(RUSTBPF)/add_ksyms.py $@.ll $@.ll
@@ -206,8 +210,14 @@ $(BLDDIR)/%-ksyms.bc: $(BLDDIR)/%-opt.bc
 	$(LLVM_DIS) $@.tmp2.bc -o $@.ll
 	KSYM_BTF_FILES="$(KSYM_BTF_FILES)" BPFTOOL="$(BPFTOOL_BIN)" \
 		python3 $(RUSTBPF)/add_ksyms.py $@.ll $@.ll
+	python3 $(RUSTBPF)/btf_tags.py $@.ll $@.ll
 	$(LLVM_AS) $@.ll -o $@
 	@rm -f $@.ll $@.tmp.bc $@.tmp2.bc
+
+# An explicit rule, so a rust-bpf checkout without the pull request says
+# what is wrong instead of make's "No rule to make target".
+$(RUSTBPF)/btf_tags.py:
+	$(error $@ is missing: rust-selftests needs rust-bpf with pull request #6 (the btf_tag attribute) merged, see README)
 
 # --- Final BPF object ---
 ORDER_SRCS := $(shell grep -l '^// BPF_PROGRAM_ORDER:' progs/*.rs)

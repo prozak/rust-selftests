@@ -410,6 +410,36 @@ with a release of the local pointer. `cpumask_success.rs` has every form.
 pointers, including void pointees. This preserves the aggregate-return
 types exercised by `aggregate_ret_func.rs`.
 
+Other C decl tags come from rust-bpf's `#[btf_tag(decl_tag = "...")]`
+(4ast/rust-bpf#6), on a static, a struct field, or a function. The ones the
+kernel acts on are `__contains(type, field)` on a `bpf_rb_root` /
+`bpf_list_head` and `__exception_cb(cb)` on a program:
+
+```rust
+use btf_macros::btf_tag;
+
+#[btf_tag]
+#[repr(C)]
+struct map_value {
+    #[btf_tag(decl_tag = "contains:node_data:node")]
+    head: bpf_list_head,
+    lock: bpf_spin_lock,
+}
+
+#[btf_tag(decl_tag = "contains:node_data:node")]
+#[link_section = ".data.A"]
+#[no_mangle]
+static mut groot: bpf_rb_root = bpf_rb_root { __opaque: [0; 2] };
+
+#[btf_tag(decl_tag = "exception_callback:exception_cb")]
+#[link_section = "?freplace"]
+#[no_mangle]
+extern "C" fn throwing_extension(_ctx: *const __sk_buff) -> i32 { ... }
+```
+
+translint's `decl-tags` class compares these with the C object's: a
+missing `contains:` or `exception_callback:` is an error.
+
 When the C consumer requires a plain `char` array (for example a string
 assertion compiled with `-Werror=pointer-sign`), declare byte storage with
 `u8` and add `// BTF_C_CHAR: u8` on its own line. The BTF normalizer then

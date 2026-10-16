@@ -176,6 +176,8 @@ bc, libelf, libssl, cmake for pahole), `qemu-system-x86_64`,
 ```sh
 git clone --recurse-submodules https://github.com/prozak/rust-selftests
 git clone https://github.com/4ast/rust-bpf            # next to it
+git -C rust-bpf fetch origin pull/6/head              # #[btf_tag], not merged yet
+git -C rust-bpf checkout FETCH_HEAD
 cd rust-selftests
 
 scripts/fetch-llvm.sh             # LLVM 22.1.8 release -> .build/llvm       (1.9 GB download, 12 GB unpacked)
@@ -193,7 +195,8 @@ make -C ../rust-bpf \
   RUST_SRC=$(rustc +stable --print sysroot)/lib/rustlib/src/rust/library
 ```
 
-Tested with rust-bpf at `c130551`.
+Tested with rust-bpf at `1dc4bb7` plus pull request #6 (`3e35246`), which
+adds the `#[btf_tag]` decl tags the translations use.
 
 Then:
 

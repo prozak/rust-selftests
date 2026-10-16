@@ -15,7 +15,7 @@ on `PATH`, else `.build/vng-venv/bin/vng`).
 ## Running what changed in QEMU
 
 ```sh
-make gate                        # scripts/gate.py --workers 4
+make gate                        # scripts/gate.py --workers 8
 scripts/gate.py fentry_test      # one translation, hash-gated like the rest
 scripts/gate.py --all fentry_test   # that one even if unchanged
 ```
@@ -36,7 +36,7 @@ a PASS that became NO-ORACLE. Logs are `qemu/gate/logs/<name>.log` and
 The environment hash covers the kernel image, the test modules' BTF, the
 swap/boot scripts, `known-bad-tests`, `gate-serial` and `QEMU_CPUS` (the
 gate uses 4, as the nightly does). When it changes every row is stale and
-the gate stops with exit 2 instead of starting an hour-long full run:
+the gate stops with exit 2 instead of starting a 40-minute full run:
 `scripts/gate.py --all` does that run, or `make ci-nightly` followed by
 `scripts/gate.py --reseed nightly/<run>/runtime-after.tsv`, which copies
 the nightly's verdicts only when its recorded hashes equal the current
@@ -124,6 +124,22 @@ selftests output directory. The parallel driver is the gate:
 through N guests at once, each over a private overlay of that directory,
 and the `scripts/gate-serial` objects alone afterwards; see "Running what
 changed in QEMU" above.
+
+### How many workers
+
+Measured 2026-10-16 on a 32-CPU, 23 GB host with 4-CPU, 4 GB guests
+(`scripts/gate.py --all <every name>`; the 4-worker full run is the
+2026-10-16 nightly's gate stage). Verdicts were identical in every run.
+
+| workers | 63-object subset | full corpus (597) | host RAM peak | load peak |
+|---|---|---|---|---|
+| 4 | 331 s | 3493 s | 3.7 GB | 9 |
+| 8 | 208 s | 2371 s | 7.0 GB | 17 |
+
+The 35 `gate-serial` objects run one at a time at the end (about 12
+minutes) whatever the worker count, so the parallel part gained 1.6x and
+the whole gate 1.47x. Eight is the default (`GATE_WORKERS`,
+`NIGHTLY_GATE_WORKERS`); the guest count is capped at eight.
 
 ## Running a single test
 

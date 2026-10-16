@@ -15,15 +15,16 @@ module hashes.
 ```sh
 make ci-nightly
 make ci-nightly NIGHTLY_OUT=nightly/my-run NIGHTLY_JOBS=8 NIGHTLY_BUILD_JOBS=4 \
-    NIGHTLY_GATE_WORKERS=4
+    NIGHTLY_GATE_WORKERS=8
 ```
 
 The output directory must not already exist. Defaults are a UTC timestamp
-under ignored `nightly/`, eight proof workers, four build workers and four
+under ignored `nightly/`, eight proof workers, four build workers and eight
 QEMU gate workers. All three worker settings accept 1–8. The default guest
-size for this driver is four CPUs, overridable with `QEMU_CPUS`. With four
-gate workers the runtime gate takes about an hour; with one, serially in
-the shared selftests output, about three and a half.
+size for this driver is four CPUs, overridable with `QEMU_CPUS`. With eight
+gate workers the runtime gate takes about 40 minutes, with four about an
+hour; with one, serially in the shared selftests output, about three and a
+half.
 
 Do not run other builds, swaps, guards, or QEMU drivers against this
 checkout/shared selftests output during nightly. An advisory lock prevents

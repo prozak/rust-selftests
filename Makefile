@@ -344,7 +344,7 @@ semantics:
 # committed qemu/gate/baseline.tsv (scripts/gate.py; seconds when nothing
 # did). GATE_WORKERS guests run at once, each over a private overlay of the
 # selftests output; it restores the C objects first and last.
-GATE_WORKERS ?= 4
+GATE_WORKERS ?= 8
 gate:
 	$(PYZ3) scripts/gate.py --workers $(GATE_WORKERS)
 
@@ -363,7 +363,7 @@ ci-local: restore-all ci-fast check-kernel-commit $(BLDDIR)/vmlinux.btf
 # sequences recursive make calls even when the caller supplies -j.
 NIGHTLY_JOBS ?= 8
 NIGHTLY_BUILD_JOBS ?= 4
-NIGHTLY_GATE_WORKERS ?= 4
+NIGHTLY_GATE_WORKERS ?= 8
 NIGHTLY_OUT ?=
 ci-nightly:
 	$(PYZ3) scripts/ci_nightly.py --jobs $(NIGHTLY_JOBS) --build-jobs $(NIGHTLY_BUILD_JOBS) \

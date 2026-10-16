@@ -100,7 +100,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("names", nargs="*",
                     help="subset to gate (default: everything in progs/)")
-    ap.add_argument("--workers", type=int, choices=range(1, 9), default=4,
+    ap.add_argument("--workers", type=int, choices=range(1, 9), default=8,
                     help="QEMU guests at once, each over a private overlay; "
                          "1 runs serially in the shared selftests output")
     ap.add_argument("--build-jobs", type=int, choices=range(1, 9), default=4)
@@ -189,7 +189,7 @@ def main(argv=None):
             print(f"ENVIRONMENT CHANGED: {len(stale_env)} baseline rows are stale (the "
                   f"kernel image, module BTF, swap/boot scripts, known-bad-tests, "
                   f"gate-serial or QEMU_CPUS differ).")
-            print(f"A full re-gate is required (about an hour with {args.workers} workers): "
+            print(f"A full re-gate is required (about 40 minutes with {args.workers} workers): "
                   f"rerun with --all, or run make ci-nightly and --reseed its runtime-after.tsv.")
             return 2
 

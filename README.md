@@ -210,7 +210,7 @@ make gate                                 # every translation whose inputs chang
 `make test-<name>` leaves the Rust object installed; `make restore-all`
 undoes every swap. `make gate` re-runs the translations whose Rust object,
 C object or gate environment differ from the committed
-[`qemu/gate/baseline.tsv`](qemu/gate/baseline.tsv), four guests at a time
+[`qemu/gate/baseline.tsv`](qemu/gate/baseline.tsv), eight guests at a time
 over private overlays of the selftests output, and restores the C objects
 itself; with nothing changed it finishes in seconds. `make ci-local` runs
 it after the proof guard. The whole corpus afresh, with the proof sweep,

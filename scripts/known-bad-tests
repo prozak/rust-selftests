@@ -7,3 +7,9 @@
 # E2BIG / jump-sequence-too-complex at verification in the pinned kernel,
 # both UML and QEMU flavors (checked with the unmodified C object).
 verif_scale_pyperf600
+
+# fs_kfuncs's set_remove_xattr subtest sets a security.bpf.* xattr from BPF
+# and reads it back; the guest's root is the host filesystem over virtiofs,
+# which has no security xattrs, so getxattr returns -1 for the pristine C
+# object as well (test_fsverity, test_get_xattr, test_set_remove_xattr).
+fs_kfuncs

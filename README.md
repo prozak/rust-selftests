@@ -11,8 +11,8 @@ no aya, no bpf-linker, no libbpf-rs. The object is then dropped in place of
 the one clang built from the C file, and the kernel's unmodified tests decide
 whether it is good.
 
-597 of the 1,008 programs in the kernel tree are translated. In the last
-full run (2026-10-16), 589 of them pass the kernel's tests with the Rust
+610 of the 1,008 programs in the kernel tree are translated. In the last
+full run (2026-10-16), 602 of them pass the kernel's tests with the Rust
 object in place; [Status](#status) has the rest.
 
 ## What "passes" means
@@ -110,29 +110,30 @@ its own.
 
 ## Status
 
-From `make ci-nightly` on 2026-10-16 (the sources of commit `fae2fd8`), on
+From `make ci-nightly` on 2026-10-16 (the sources of commit `e84698e`), on
 bpf-next `3ccdb0781382` with no patches. The per-object tables are
 [`qemu/gate/baseline.tsv`](qemu/gate/baseline.tsv) and
 [`equiv/results/baseline.tsv`](equiv/results/baseline.tsv).
 
-**Runtime gate** (597 objects, four 4-CPU KVM guests at a time, 58 minutes):
+**Runtime gate** (610 objects, eight 4-CPU KVM guests at a time, 31 minutes):
 
 | | objects |
 |---|---:|
-| PASS | 589 |
+| PASS | 602 |
 | FAIL | 0 |
 | NO-ORACLE | 8 |
 
 Nothing was re-run. 52 of the passing rows include skipped subtests. Every
-verdict matches the previous full run (2026-10-12, one guest at a time,
-3 hours 27 minutes); `normal_map_btf` is the one new object.
+verdict matches the previous full run (earlier on 2026-10-16, four guests,
+58 minutes); the 13 new objects are the `__contains` family of #53
+(`rbtree`, `linked_list`, `refcounted_kptr` and their negatives).
 
-**Proof sweep** (same 597 objects, 180 s each):
+**Proof sweep** (same 610 objects, 180 s each):
 
 | | objects |
 |---|---:|
 | EQUIV — every program proved equivalent to its C original | 430 |
-| BAIL — the checker met something it does not model | 104 |
+| BAIL — the checker met something it does not model (the 13 new objects all bail on the graph kfuncs) | 117 |
 | TIMEOUT | 36 |
 | UNKNOWN | 13 |
 | NOPROGS — the object has no programs | 13 |
@@ -149,8 +150,10 @@ bit; rustc marks the return as already zero-extended, so the Rust object
 tests the whole register. That is a defect in how the object is built, not
 in the checker. Its runtime test passes: most of the kfuncs involved
 return clean values on the test machine, and the two that were seen not to
-are not called directly (the source says where). Until the build masks
-these returns, `make ci-local` fails on this object.
+are not called directly (the source says where). The kernel's
+`bpf_list_empty()` does not return a clean value, so `refcounted_kptr.rs`
+masks its three list predicates by hand (its header explains). Until the
+build masks these returns, `make ci-local` fails on this object.
 
 Three of the EQUIV rows (`getsockname_unix_prog`, `getpeername_unix_prog`,
 `recvmsg_unix_prog`) prove only with a waiver: their C calls
@@ -215,8 +218,8 @@ over private overlays of the selftests output, and restores the C objects
 itself; with nothing changed it finishes in seconds. `make ci-local` runs
 it after the proof guard. The whole corpus afresh, with the proof sweep,
 is `make ci-nightly` (see [docs/ci-nightly.md](docs/ci-nightly.md)); its
-gate took 58 minutes in the 2026-10-16 run (3 hours 27 minutes with one
-guest).
+gate took 31 minutes in the 2026-10-16 run with eight guests (58 minutes
+with four, 3 hours 27 minutes with one).
 It needs `pip install -r requirements.txt`, into `.venv/` if you want
 `make` to find it by itself.
 

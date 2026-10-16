@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 import fcntl
 import hashlib
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -87,7 +88,9 @@ def runtime_result(name, rc, text):
                     if line.startswith("Summary:")), "")
     if rc == 0 and summary:
         return "PASS", summary
-    if rc != 124 and f"no prog_tests consume {name}" in text:
+    if rc != 124 and (f"no prog_tests consume {name}" in text
+                      or re.search(r"^\[swap\] affected tests:\s*$", text, re.M)):
+        # no consumer at all, or every consumer is in known-bad-tests
         return "NO-ORACLE", summary
     return "FAIL", summary or f"exit {rc}; no test summary"
 

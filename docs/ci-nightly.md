@@ -135,8 +135,17 @@ weekly kernel-gap reporting continues in its existing workflow.
 
 ## Runs
 
-- 2026-10-16, the current baselines: the same kernel, with four overlay
-  gate workers (now the default). 589 PASS / 0 FAIL / 8 NO-ORACLE for 597
+- 2026-10-16 (later), the current baselines (`nightly/20261016-kvm-par8`,
+  commit e84698e): the same kernel, eight overlay gate workers, `test_progs`
+  run from the guest's tmpfs so the `bpf_iter_*` objects gate in parallel,
+  rust-bpf master (PR #6 merged) as the build dependency. 602 PASS / 0 FAIL /
+  8 NO-ORACLE for 610 objects and the same single INEQUIV; every verdict of
+  the 597 shared objects matches the run below, and the 13 new objects (the
+  `__contains` family of #53) bail in the proof. The gate took 31.5 minutes
+  (1890 s), the proof sweep 20 minutes, the whole nightly 54 minutes. Proof:
+  430 EQUIV / 117 BAIL / 36 TIMEOUT / 13 UNKNOWN / 13 NOPROGS.
+- 2026-10-16: the same kernel, with four overlay
+  gate workers. 589 PASS / 0 FAIL / 8 NO-ORACLE for 597
   objects (`normal_map_btf` is new) and the same single INEQUIV. The gate
   took 58 minutes against 3 hours 27 minutes serially; the host peaked at
   6.7 GB used during the proof sweep and 3.3 GB with the four guests up.

@@ -99,7 +99,8 @@ RUSTC_COMMON := --target $(TARGET) -C opt-level=$(OPT_LEVEL) -C panic=unwind -C 
 
 PROGS := $(patsubst progs/%.rs,%,$(wildcard progs/*.rs))
 
-export KERNEL_SRC SELFTESTS_SRC SELFTESTS_OUTPUT LLVM_PREFIX
+# RUSTBPF too: the drivers (ci_nightly.py, gate.py) run make again.
+export KERNEL_SRC SELFTESTS_SRC SELFTESTS_OUTPUT LLVM_PREFIX RUSTBPF
 
 all: $(addprefix $(BLDDIR)/,$(addsuffix .bpf.o,$(PROGS))) $(BLDDIR)/vmlinux.btf
 
@@ -339,14 +340,24 @@ ci-fast:
 semantics:
 	$(PYZ3) equiv/gendoc.py
 
+# gate: the QEMU verifier/runtime gate over what changed since the
+# committed qemu/gate/baseline.tsv (scripts/gate.py; seconds when nothing
+# did). GATE_WORKERS guests run at once, each over a private overlay of the
+# selftests output; it restores the C objects first and last.
+GATE_WORKERS ?= 4
+gate:
+	$(PYZ3) scripts/gate.py --workers $(GATE_WORKERS)
+
 # ci-local: everything that needs the pinned kernel tree and built objects.
 # Order matters — undo any swapped-in objects BEFORE proving, or the
-# comparison is Rust-vs-Rust.
+# comparison is Rust-vs-Rust; the gate swaps objects, so it comes after
+# the proof and restores them itself.
 ci-local: restore-all ci-fast check-kernel-commit $(BLDDIR)/vmlinux.btf
 	python3 scripts/translint.py
 	$(PYZ3) equiv/guard.py
+	$(PYZ3) scripts/gate.py --workers $(GATE_WORKERS)
 
-.PHONY: ci-fast ci-local semantics
+.PHONY: ci-fast ci-local gate semantics
 
 # Fresh whole-corpus validation on the pinned QEMU stack. The Python driver
 # sequences recursive make calls even when the caller supplies -j.
@@ -358,7 +369,8 @@ ci-nightly:
 	$(PYZ3) scripts/ci_nightly.py --jobs $(NIGHTLY_JOBS) --build-jobs $(NIGHTLY_BUILD_JOBS) \
 		--gate-workers $(NIGHTLY_GATE_WORKERS) $(if $(NIGHTLY_OUT),--out "$(NIGHTLY_OUT)")
 
-# The parallel gate's private output trees ($(BUILD_DIR)/gate, ~0.7 GB each).
+# The gate workers' private state under $(BUILD_DIR)/gate: overlay upper
+# dirs (tens of MB each) or, in copy mode, whole output trees (~0.7 GB each).
 clean-gate-workers:
 	scripts/gate-workers.sh --clean
 

@@ -8,3 +8,4 @@ nightly/
 /.venv
 qemu/logs/
 qemu/gate/lane*.md
+qemu/gate/results.md

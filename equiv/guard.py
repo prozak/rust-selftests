@@ -64,16 +64,22 @@ def tool_hash():
     if os.path.exists(kcfg):
         h.update(md5(kcfg).encode())
     # check.py resolves CO-RE and kfunc signatures against these modules.
-    # Hash only their BTF inputs, not unrelated ELF timestamps/debug data.
+    module_btf_digest(h, DEFAULT_C_DIR)
+    return h.hexdigest()
+
+
+def module_btf_digest(h, c_dir):
+    """Feed the test modules' BTF into hasher h (shared with the QEMU gate's
+    environment hash). Only their BTF inputs, not unrelated ELF
+    timestamps/debug data."""
     from bpfelf import BpfElf
-    for module in sorted(glob.glob(os.path.join(DEFAULT_C_DIR, '*.ko'))):
+    for module in sorted(glob.glob(os.path.join(c_dir, '*.ko'))):
         h.update(os.path.basename(module).encode() + b'\0')
         elf = BpfElf(module)
         for name in ('.BTF', '.BTF.base'):
             section = elf.section_by_name(name)
             h.update(name.encode() + b'\0')
             h.update(hashlib.sha256(section.data if section else b'').digest())
-    return h.hexdigest()
 
 
 def load_baseline():

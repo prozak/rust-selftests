@@ -34,7 +34,8 @@ def stack(tmp_path, monkeypatch):
     monkeypatch.setattr(nightly.guard, "tool_hash", lambda: "tool")
     monkeypatch.setattr(nightly, "git", lambda *args:
                         baseline if "HEAD:equiv/results/baseline.tsv" in args else
-                        b"| a | PASS | 1s | Summary: 1/0 PASSED |\n" if "HEAD:qemu/gate/results.md" in args else b"head\n")
+                        b"# gate baseline\na\tr\tc\te\tPASS\tSummary: 1/0 PASSED\n"
+                        if "HEAD:qemu/gate/baseline.tsv" in args else b"head\n")
     for key in ["FLAVOR", "KERNEL_SRC", "SELFTESTS_SRC", "SELFTESTS_OUTPUT", "VMLINUX_BTF", "QEMU_KERNEL", "TEST_RUNNER"]:
         monkeypatch.delenv(key, raising=False)
     calls = []
@@ -107,6 +108,13 @@ def test_fresh_sweep_and_codegen_use_run_baseline(stack):
     assert report["runtime"]["a"]["verdict"] == "PASS"
     assert report["runtime"]["a"]["c_verdict"] == "NOT-RUN"
     assert not report["proof_changes"]
+    # The run's verdicts in the gate baseline's format, keyed by this
+    # run's object and environment hashes, for gate.py --reseed.
+    after = nightly.qemu_gate.parse_baseline((stack[0] / "report/runtime-after.tsv").read_text())
+    assert after["a"]["verdict"] == "PASS" and after["a"]["summary"].startswith("Summary:")
+    assert after["a"]["r"] == nightly.guard.md5(stack[0] / "bld/a.bpf.o")
+    assert after["a"]["e"] == nightly.qemu_gate.env_hash(stack[0], nightly.KERNEL, stack[1],
+                                                           dict(QEMU_KERNEL=str(nightly.KERNEL / "arch/x86/boot/bzImage"), QEMU_CPUS="4"))
 
 
 def test_shared_output_lock_blocks_another_checkout(stack):

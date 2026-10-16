@@ -112,7 +112,7 @@ its own.
 
 From `make ci-nightly` on 2026-10-16 (the sources of commit `fae2fd8`), on
 bpf-next `3ccdb0781382` with no patches. The per-object tables are
-[`qemu/gate/results.md`](qemu/gate/results.md) and
+[`qemu/gate/baseline.tsv`](qemu/gate/baseline.tsv) and
 [`equiv/results/baseline.tsv`](equiv/results/baseline.tsv).
 
 **Runtime gate** (597 objects, four 4-CPU KVM guests at a time, 58 minutes):
@@ -204,14 +204,19 @@ Then:
 make -j8                                  # all objects -> bld/      (about 1 min)
 make test-test_map_lookup_percpu_elem     # one translation, in QEMU (about 20 s)
 make restore-all                          # put the C objects back
+make gate                                 # every translation whose inputs changed, in QEMU
 ```
 
 `make test-<name>` leaves the Rust object installed; `make restore-all`
-undoes every swap. The whole corpus, with the proof sweep, is
-`make ci-nightly` (see [docs/ci-nightly.md](docs/ci-nightly.md)). Its
-runtime gate runs four guests at a time, each over a private overlay of the
-selftests output, and took 58 minutes in the 2026-10-16 run (3 hours 27
-minutes with one guest).
+undoes every swap. `make gate` re-runs the translations whose Rust object,
+C object or gate environment differ from the committed
+[`qemu/gate/baseline.tsv`](qemu/gate/baseline.tsv), four guests at a time
+over private overlays of the selftests output, and restores the C objects
+itself; with nothing changed it finishes in seconds. `make ci-local` runs
+it after the proof guard. The whole corpus afresh, with the proof sweep,
+is `make ci-nightly` (see [docs/ci-nightly.md](docs/ci-nightly.md)); its
+gate took 58 minutes in the 2026-10-16 run (3 hours 27 minutes with one
+guest).
 It needs `pip install -r requirements.txt`, into `.venv/` if you want
 `make` to find it by itself.
 
@@ -229,7 +234,7 @@ directory.
 | `kernel-commit`, `pahole-commit` | the pinned bpf-next and pahole revisions |
 | `kernel/config-x86_64` | the guest kernel's configuration |
 | `patches/kernel/` | patches applied to the pinned kernel before building: none are needed |
-| `qemu/gate/results.md` | the recorded runtime verdict of every translation |
+| `qemu/gate/baseline.tsv` | the recorded runtime verdict of every translation |
 | `equiv/results/baseline.tsv` | the recorded proof verdict of every translation |
 | `docs/` | the nightly and kernel-gap guides, the maintainer guide; dated reports under `docs/history/` |
 

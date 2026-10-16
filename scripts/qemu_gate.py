@@ -1,0 +1,320 @@
+"""The QEMU verifier/runtime gate, shared by its two drivers.
+
+ci_nightly.py runs every translation afresh and never writes a baseline;
+gate.py re-runs only the translations whose inputs changed, against the
+committed qemu/gate/baseline.tsv. Both swap an object into the selftests
+output through scripts/swap-and-test.sh (alone, in the shared tree) or
+scripts/gate-overlay.sh (N at once, each in a private overlay), judge the
+guest's test_progs summary, and put the C object back.
+
+The driver passes its own `run` into Gate so that a test's substitute
+reaches every guest launch; the process bookkeeping here (CHILDREN,
+CANCELLED, stop_children, interrupted) is what those `run`s share.
+"""
+from concurrent.futures import ThreadPoolExecutor
+import fcntl
+import hashlib
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import threading
+
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "equiv"))
+import guard  # noqa: E402
+
+CHILDREN = set()
+CHILD_LOCK = threading.RLock()
+CANCELLED = threading.Event()
+BASELINE_HEADER = "# name\trust_md5\tc_md5\tenv_md5\tverdict\tsummary\n"
+# Everything besides the two objects that decides a gate verdict: the
+# kernel and its modules, the scripts that swap, build and boot, the test
+# exclusions and the guest size. The selftests output tree itself is not
+# hashed (test_progs is relinked on every swap); the kernel pin and the
+# per-object C hash stand for it, as in the nightly.
+ENV_FILES = ["scripts/swap-and-test.sh", "scripts/qemu-test-progs",
+             "scripts/gate-overlay.sh", "scripts/gate-record-filter",
+             "scripts/known-bad-tests", "scripts/gate-serial"]
+
+
+def stop_children():
+    with CHILD_LOCK:
+        for child in CHILDREN:
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def interrupted(signum, frame):
+    CANCELLED.set()
+    stop_children()
+    raise KeyboardInterrupt
+
+
+def run(argv, log, env, timeout=None, cwd=REPO):
+    """Log without pipe buffering; kill the whole subprocess tree on timeout."""
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("wb") as output:
+        output.write(("$ " + repr([str(a) for a in argv]) + "\n").encode())
+        output.flush()
+        with CHILD_LOCK:
+            if CANCELLED.is_set():
+                return 130
+            child = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                     stdout=output, stderr=subprocess.STDOUT,
+                                     start_new_session=True)
+            CHILDREN.add(child)
+        try:
+            return child.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # The process group may have exited at the deadline.
+            child.wait()
+            output.write(f"\ngate: timed out after {timeout}s\n".encode())
+            return 124
+        finally:
+            with CHILD_LOCK:
+                CHILDREN.discard(child)
+
+
+def runtime_result(name, rc, text):
+    summary = next((line for line in reversed(text.splitlines())
+                    if line.startswith("Summary:")), "")
+    if rc == 0 and summary:
+        return "PASS", summary
+    if rc != 124 and f"no prog_tests consume {name}" in text:
+        return "NO-ORACLE", summary
+    return "FAIL", summary or f"exit {rc}; no test summary"
+
+
+def pristine(tree):
+    """Every backed-up C object must be the installed one."""
+    bad = [p.name for p in Path(tree).glob("*.bpf.o.corig")
+           if not p.with_suffix("").exists()
+           or guard.md5(p) != guard.md5(p.with_suffix(""))]
+    if bad:
+        raise RuntimeError("C objects not restored: " + ", ".join(bad))
+
+
+def read_serial(path):
+    """The objects scripts/gate-serial keeps out of the parallel workers."""
+    path = Path(path)
+    if not path.exists():
+        return set()
+    return {line.strip() for line in path.read_text().splitlines()
+            if line.strip() and not line.startswith("#")}
+
+
+def under_kvm(log, allow_tcg, base):
+    # vng falls back to TCG silently; an emulated guest is several times
+    # slower and produces failures of its own (#52), so its verdicts are
+    # not evidence. A run that never booted is judged on its own log.
+    text = log.read_text(errors="replace")
+    if (not allow_tcg and "Linux version" in text
+            and "Hypervisor detected: KVM" not in text):
+        raise RuntimeError(f"guest ran without KVM (TCG); see {log.relative_to(base)}")
+
+
+def make_env(repo, kernel, c_dir, error):
+    """The stage environment: the QEMU flavor with every kernel-derived path
+    under KERNEL_SRC. `error` reports a conflicting caller environment."""
+    import paths
+    env = os.environ.copy()
+    expected = {"FLAVOR": "qemu", "BUILD_DIR": str(Path(paths.BUILD_DIR).resolve()),
+                "KERNEL_SRC": str(kernel),
+                "SELFTESTS_SRC": str(kernel / "tools/testing/selftests/bpf"),
+                "SELFTESTS_OUTPUT": str(c_dir), "VMLINUX_BTF": str(kernel / "vmlinux"),
+                "QEMU_KERNEL": str(kernel / "arch/x86/boot/bzImage"),
+                "TEST_RUNNER": str(repo / "scripts/qemu-test-progs")}
+    for key, value in expected.items():
+        given = env.get(key, value)
+        if (given if key == "FLAVOR" else os.path.realpath(given)) != value:
+            error(f"requires {key}={value}")
+    env.update(expected)
+    for key in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "SWAP_ONLY"):
+        env.pop(key, None)
+    env.setdefault("LLVM_PREFIX", paths.LLVM_PREFIX)
+    env.setdefault("QEMU_CPUS", "4")
+    return env
+
+
+def take_locks(lock_paths, error):
+    """Hold every lock (non-blocking) for as long as the returned files live:
+    one gate per checkout and per shared selftests output."""
+    locks = []
+    for path in lock_paths:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            lock = path.open("a")
+            locks.append(lock)
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            error(f"another gate or nightly run holds {path}")
+        except OSError as exc:
+            error(f"cannot lock {path}: {exc}")
+    return locks
+
+
+def overlay_envs(env, gate_root, n):
+    return [dict(env, GATE_DIR=str(Path(gate_root) / f"w{k}")) for k in range(1, n + 1)]
+
+
+def parse_baseline(text):
+    rows = {}
+    for line in text.splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        name, r, c, e, verdict, summary = line.split("\t", 5)
+        if name in rows:
+            raise ValueError(f"duplicate baseline row: {name}")
+        rows[name] = dict(r=r, c=c, e=e, verdict=verdict, summary=summary)
+    return rows
+
+
+def load_baseline(path):
+    path = Path(path)
+    return parse_baseline(path.read_text()) if path.exists() else {}
+
+
+def save_baseline(path, rows):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("w") as f:
+        f.write(BASELINE_HEADER)
+        for name in sorted(rows):
+            row = rows[name]
+            summary = row["summary"].replace("\t", " ").replace("\n", " ")
+            f.write(f"{name}\t{row['r']}\t{row['c']}\t{row['e']}\t{row['verdict']}\t{summary}\n")
+    temporary.replace(path)
+
+
+def baseline_row(rust_md5, c_md5, env_md5, result):
+    """A baseline row from a gate result (Gate.gate_one's dict)."""
+    summary = result["summary"]
+    if result["verdict"] == "NO-ORACLE" and not summary:
+        summary = "no consuming prog_tests"
+    if result["verdict"] == "FAIL":
+        oracle = {"PASS": "C-PASS", "NO-ORACLE": "C-NOCONSUMER"}.get(result["c_verdict"], "C-FAIL")
+        summary = f"{summary}; {oracle}"
+    return dict(r=rust_md5, c=c_md5, e=env_md5, verdict=result["verdict"], summary=summary)
+
+
+def env_hash(repo, kernel, c_dir, env):
+    """One hash over every gate input that is not one of the two objects."""
+    repo, kernel, c_dir = Path(repo), Path(kernel), Path(c_dir)
+    h = hashlib.md5()
+    h.update((repo / "kernel-commit").read_bytes())
+    for patch in sorted((repo / "patches/kernel").glob("*.patch")):
+        h.update(patch.name.encode() + b"\0" + patch.read_bytes())
+    for binary in (Path(env["QEMU_KERNEL"]), repo / "bld/vmlinux.btf"):
+        h.update(binary.name.encode() + b"\0")
+        h.update(guard.md5(binary).encode() if binary.exists() else b"missing")
+    guard.module_btf_digest(h, str(c_dir))
+    for name in ENV_FILES:
+        path = repo / name
+        h.update(name.encode() + b"\0")
+        h.update(path.read_bytes() if path.exists() else b"")
+    h.update(f"QEMU_CPUS={env.get('QEMU_CPUS', '')}".encode())
+    return h.hexdigest()
+
+
+class Gate:
+    """Run objects through the gate on a set of worker environments.
+
+    A worker environment with GATE_DIR runs through gate-overlay.sh; the
+    shared environment (the one given to the constructor) runs through
+    swap-and-test.sh in the shared tree. on_row(name, result) is called
+    for every finished object, under the gate's lock.
+    """
+
+    def __init__(self, *, run, env, log_dir, timeout, base, on_row):
+        self.run = run
+        self.shared_env = env
+        self.log_dir = Path(log_dir)
+        self.timeout = timeout
+        self.base = Path(base)
+        self.on_row = on_row
+        self.allow_tcg = bool(env.get("QEMU_ALLOW_TCG"))
+        self.lock = threading.Lock()
+        self.workers = []
+        self.active_by_worker = {}
+
+    def gate_overlay(self, name, wenv):
+        def one(which, log):
+            rc = self.run(["scripts/gate-overlay.sh", wenv["GATE_DIR"], name, which],
+                          log, wenv, self.timeout)
+            under_kvm(log, self.allow_tcg, self.base)
+            return rc, *runtime_result(name, rc, log.read_text(errors="replace"))
+
+        rc, verdict, note = one("rust", self.log_dir / f"{name}.log")
+        row = dict(verdict=verdict, exit=rc, summary=note,
+                   c_exit=0, c_verdict="NOT-RUN", c_summary="")
+        if verdict == "FAIL":
+            c_rc, c_verdict, c_note = one("c", self.log_dir / f"{name}.c.log")
+            row.update(c_exit=c_rc, c_verdict=c_verdict, c_summary=c_note)
+        return row
+
+    def gate_one(self, name, wenv):
+        if "GATE_DIR" in wenv:
+            return self.gate_overlay(name, wenv)
+        log = self.log_dir / f"{name}.log"
+        rc = self.run(["scripts/swap-and-test.sh", name, "rust"], log, wenv, self.timeout)
+        under_kvm(log, self.allow_tcg, self.base)
+        verdict, note = runtime_result(name, rc, log.read_text(errors="replace"))
+        c_env = wenv if verdict == "FAIL" else dict(wenv, SWAP_ONLY="1")
+        c_log = self.log_dir / f"{name}.c.log"
+        c_rc = self.run(["scripts/swap-and-test.sh", name, "c"], c_log, c_env, self.timeout)
+        under_kvm(c_log, self.allow_tcg, self.base)
+        c_verdict, c_note = runtime_result(name, c_rc, c_log.read_text(errors="replace"))
+        # No consumer is an explicit limitation, not an infrastructure failure.
+        if c_rc and c_verdict != "NO-ORACLE":
+            if verdict != "FAIL" or c_verdict != "FAIL" or not c_note.startswith("Summary:"):
+                raise RuntimeError(f"C restoration/rebuild failed for {name}; "
+                                   f"see {c_log.relative_to(self.base)}")
+        pristine(wenv["SELFTESTS_OUTPUT"])
+        return dict(verdict=verdict, exit=rc, summary=note,
+                    c_exit=c_rc, c_verdict=c_verdict if verdict == "FAIL" else "NOT-RUN",
+                    c_summary=c_note if verdict == "FAIL" else "")
+
+    def worker_loop(self, k, queue):
+        while not CANCELLED.is_set():
+            with self.lock:
+                if not queue:
+                    return
+                name = queue.pop(0)
+                self.active_by_worker[k] = name
+            result = self.gate_one(name, self.workers[k])
+            with self.lock:
+                self.on_row(name, result)
+                self.active_by_worker.pop(k, None)
+
+    def run_all(self, names, workers, serial):
+        """Every name once: the non-serial ones over `workers`, then the
+        serial ones alone in the shared tree. One worker means the shared
+        tree for everything."""
+        self.workers = list(workers)
+        if len(self.workers) == 1:
+            self.worker_loop(0, list(names))
+            return
+        with ThreadPoolExecutor(max_workers=len(self.workers)) as pool:
+            queue = [n for n in names if n not in serial]
+            for future in [pool.submit(self.worker_loop, k, queue)
+                           for k in range(len(self.workers))]:
+                future.result()
+        # The classic way, alone in the shared tree: for stress tests
+        # another VM's load would perturb, and for consumers an overlay
+        # cannot satisfy (see scripts/gate-serial).
+        self.workers.append(self.shared_env)
+        self.worker_loop(len(self.workers) - 1, [n for n in names if n in serial])
+
+    def active_in_shared_tree(self):
+        """Objects a worker had swapped into the shared tree when it stopped;
+        overlay workers never touch it."""
+        return [name for k, name in list(self.active_by_worker.items())
+                if self.workers[k] is self.shared_env]

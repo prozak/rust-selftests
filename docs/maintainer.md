@@ -12,7 +12,38 @@ same overrides: `KERNEL_SRC`, `SELFTESTS_OUTPUT`, `LLVM_PREFIX`,
 `QEMU_CPUS` (8), `QEMU_MEM` (4G), `QEMU_TIMEOUT` (600 s), `VNG` (`vng`
 on `PATH`, else `.build/vng-venv/bin/vng`).
 
-## Running all the Rust tests in QEMU
+## Running what changed in QEMU
+
+```sh
+make gate                        # scripts/gate.py --workers 4
+scripts/gate.py fentry_test      # one translation, hash-gated like the rest
+scripts/gate.py --all fentry_test   # that one even if unchanged
+```
+
+`scripts/gate.py` is the incremental gate: it restores the C objects,
+checks the kernel pin, runs `make all`, and compares every translation's
+Rust object, C object and gate environment hash with the committed
+[`qemu/gate/baseline.tsv`](../qemu/gate/baseline.tsv). Unchanged rows are
+skipped; the rest run through their consuming `prog_tests` in QEMU,
+`GATE_WORKERS` guests at a time, each over a private overlay of the
+selftests output (`scripts/gate-overlay.sh`), the `scripts/gate-serial`
+objects afterwards, alone in the shared output. Rows that ran are
+rewritten in place (commit them with the translation). Exit 1 means an
+alarm: a FAIL (a recorded one keeps alarming until the objects change) or
+a PASS that became NO-ORACLE. Logs are `qemu/gate/logs/<name>.log` and
+`<name>.c.log` (the C re-run after a FAIL).
+
+The environment hash covers the kernel image, the test modules' BTF, the
+swap/boot scripts, `known-bad-tests`, `gate-serial` and `QEMU_CPUS` (the
+gate uses 4, as the nightly does). When it changes every row is stale and
+the gate stops with exit 2 instead of starting an hour-long full run:
+`scripts/gate.py --all` does that run, or `make ci-nightly` followed by
+`scripts/gate.py --reseed nightly/<run>/runtime-after.tsv`, which copies
+the nightly's verdicts only when its recorded hashes equal the current
+ones. The gate holds the nightly's locks, so the two never overlap, and
+`make clean-gate-workers` refuses while one runs.
+
+## Running all the Rust tests in QEMU, serially
 
 ```sh
 scripts/qemu-verify.sh                      # every progs/*.rs
@@ -184,14 +215,14 @@ exactly the patches in `patches/kernel/`, applied as commits.
 
 | file | what |
 |---|---|
-| `qemu/gate/results.md` | the recorded runtime verdict of every translation; `make ci-nightly` compares its run against this table and never rewrites it |
+| `qemu/gate/baseline.tsv` | the recorded runtime verdict, keyed by object and environment hashes; `scripts/gate.py` re-runs only what changed; `make ci-nightly` compares its run against it and never rewrites it |
 | `equiv/results/baseline.tsv` | the recorded proof verdict, keyed by object and tool hashes; `equiv/guard.py` re-proves only what changed |
 | `nightly/<run>/` | one nightly's report, logs and hashes (not tracked) |
 | `qemu/results*.md`, `sweep/`, `docs/history/` | earlier partial runs and dated reports |
 
-`scripts/qemu-gate.sh` re-runs the corpus over parallel lane outputs and
-rewrites `qemu/gate/results.md`; back the table up first when running a
-subset.
+`scripts/qemu-gate.sh` is the older parallel driver over the lane outputs;
+it writes `qemu/gate/results.md`, which is no longer tracked. Use
+`scripts/gate.py --all` for a full parallel run instead.
 
 ## The UML flavor
 

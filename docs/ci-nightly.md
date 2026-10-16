@@ -47,6 +47,8 @@ The driver sequences every stage even if the outer make uses `-j`:
    but never its hash-cache fast path or baseline-writing path.
 5. Compare verdicts with `HEAD:equiv/results/baseline.tsv`. Save all changes,
    including added/removed rows; flag previously proved objects losing proof.
+   Runtime verdicts are likewise compared with `HEAD:qemu/gate/baseline.tsv`
+   (saved as `runtime-before.tsv`).
 6. Run every translation's QEMU consumers through `swap-and-test.sh`,
    `NIGHTLY_GATE_WORKERS` objects at a time. Each run happens in a private
    overlayfs layer over the shared selftests output
@@ -65,7 +67,11 @@ The driver sequences every stage even if the outer make uses `-j`:
    clean-gate-workers` removes the copies.
    A failed Rust run is retried with C to distinguish C-PASS, C-FAIL, and
    missing-consumer results. Successful Rust runs restore C and rebuild
-   derived skeletons/test binaries without a second guest boot.
+   derived skeletons/test binaries without a second guest boot. The
+   verdicts are also written as `runtime-after.tsv`, in the gate
+   baseline's format with this run's object and environment hashes
+   (the machinery is `scripts/qemu_gate.py`, shared with the incremental
+   `scripts/gate.py`).
 7. Restore C again, verify object hashes still match the proof inputs,
    and generate codegen results using this run's fresh proof baseline.
 8. Restore C on exit, including failures and SIGINT/SIGTERM. An interrupted
@@ -90,7 +96,8 @@ pipeline. The kernel source and UML stack are not modified.
 
 Each run retains `REPORT.md`, `summary.json`, individual stage logs,
 per-object `proof/` and `runtime/` logs, `baseline-before.tsv`,
-`baseline-after.tsv`, `proof-diff.json`, and `codegen.md`/`codegen.tsv`.
+`baseline-after.tsv`, `proof-diff.json`, `runtime-before.tsv`,
+`runtime-after.tsv`, and `codegen.md`/`codegen.tsv`.
 It also records the committed runtime table for comparison, source status
 and diff, a source archive including new/uncommitted scripts, existing
 known-bad-test exclusions, tool versions, and object/kernel/module hashes.
@@ -114,7 +121,11 @@ waived automatically. Invalid CLI usage is exit **2** from the Python
 runner (GNU make reports recipe failures with its own nonzero status).
 
 Review and deliberately reconcile baselines after diagnosing changes;
-nightly itself never accepts them. This implements the local whole-stack
+nightly itself never accepts them. Once reviewed, `scripts/gate.py
+--reseed nightly/<run>/runtime-after.tsv` copies the runtime verdicts into
+`qemu/gate/baseline.tsv`, refusing any row whose recorded hashes no longer
+describe the current objects or environment; the proof side is
+`equiv/guard.py --reseed`. This implements the local whole-stack
 portion of issue #23. Scheduling and runner provisioning remain separate;
 weekly kernel-gap reporting continues in its existing workflow.
 

@@ -1,0 +1,49 @@
+# Objects the parallel QEMU gate (ci_nightly.py --gate-workers N) runs
+# afterwards, alone and in the shared selftests output (swap-and-test.sh,
+# as with one worker). One name per line; '#' comments.
+
+# prog_tests/fentry_attach.c:test_fentry_attach_stress attaches/detaches
+# fentry programs to fentry_target while another thread runs it; under load
+# the kernel hit an int3 Oops in the target (nightly/20261015-kvm).
+fentry_recursive
+fentry_recursive_target
+
+# prog_tests/bpf_iter.c's task_vma subtest compares the bpf_d_path and
+# dev:ino of test_progs's own mapping with /proc/self/maps. A file mapped
+# through an overlay has the real layer file as vm_file, so under the
+# overlay gate the iterator prints "/test_progs" on the layer's device and
+# the subtest fails, for the C object too. Every bpf_iter_* object is
+# consumed by that test.
+bpf_iter_bpf_array_map
+bpf_iter_bpf_hash_map
+bpf_iter_bpf_link
+bpf_iter_bpf_map
+bpf_iter_bpf_percpu_array_map
+bpf_iter_bpf_percpu_hash_map
+bpf_iter_bpf_rhash_map
+bpf_iter_bpf_sk_storage_helpers
+bpf_iter_bpf_sk_storage_map
+bpf_iter_ipv6_route
+bpf_iter_ksym
+bpf_iter_map_elem
+bpf_iter_netlink
+bpf_iter_setsockopt
+bpf_iter_setsockopt_unix
+bpf_iter_sockmap
+bpf_iter_task_btf
+bpf_iter_task_file
+bpf_iter_task_stack
+bpf_iter_task_vmas
+bpf_iter_tasks
+bpf_iter_tcp4
+bpf_iter_tcp6
+bpf_iter_test_kern1
+bpf_iter_test_kern2
+bpf_iter_test_kern3
+bpf_iter_test_kern4
+bpf_iter_test_kern5
+bpf_iter_test_kern6
+bpf_iter_udp4
+bpf_iter_udp6
+bpf_iter_unix
+bpf_iter_vma_offset

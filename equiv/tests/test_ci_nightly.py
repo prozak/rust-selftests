@@ -289,6 +289,74 @@ def test_guard_keeps_a_divergence_reported_before_the_wall_limit():
     assert nightly.guard.classify_timeout(None, 180)[0] == "TIMEOUT"
 
 
+@pytest.mark.parametrize("serial", [False, True])
+def test_copy_mode_runs_each_object_in_a_worker_tree(stack, monkeypatch, tmp_path, serial):
+    repo, c_dir, calls, _ = stack
+    build = tmp_path / "build"
+    monkeypatch.setattr(nightly.paths, "BUILD_DIR", str(build))
+    monkeypatch.delenv("BUILD_DIR", raising=False)
+    if serial:
+        (repo / "scripts/gate-serial").write_text("# stress\na\n")
+    envs = []
+    original_run = nightly.run
+
+    def record(argv, log, env, timeout=None):
+        if "scripts/swap-and-test.sh" in [str(a) for a in argv]:
+            envs.append((argv[-1], env["SELFTESTS_OUTPUT"]))
+        if str(argv[0]) == "scripts/gate-workers.sh":
+            calls.append([str(a) for a in argv])
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text("")
+            return 0
+        return original_run(argv, log, env, timeout)
+
+    monkeypatch.setattr(nightly, "run", record)
+    rc = nightly.main(["--out", str(repo / "report"), "--gate-workers", "3",
+                       "--gate-mode", "copy"])
+    report = json.loads((repo / "report/summary.json").read_text())
+    assert rc == 0 and report["runtime"]["a"]["verdict"] == "PASS"
+    assert ["scripts/gate-workers.sh", "3"] in calls
+    trees = {build / "gate" / f"w{k}" / c_dir.name for k in (1, 2, 3)}
+    assert [w for w, _ in envs] == ["rust", "c"]
+    if serial:  # the serial lane runs alone, in the shared tree
+        assert {tree for _, tree in envs} == {str(c_dir)}
+    else:
+        assert all(Path(tree) in trees for _, tree in envs)
+
+
+@pytest.mark.parametrize("rust_rc", [0, 1])
+def test_overlay_mode_never_touches_the_shared_tree(stack, monkeypatch, tmp_path, rust_rc):
+    repo, c_dir, calls, _ = stack
+    build = tmp_path / "build"
+    monkeypatch.setattr(nightly.paths, "BUILD_DIR", str(build))
+    monkeypatch.delenv("BUILD_DIR", raising=False)
+    runs = []
+    original_run = nightly.run
+
+    def overlay(argv, log, env, timeout=None):
+        argv = [str(a) for a in argv]
+        assert "scripts/swap-and-test.sh" not in argv
+        if argv[0] == "scripts/gate-overlay.sh":
+            runs.append(argv[1:])
+            assert env["SELFTESTS_OUTPUT"] == str(c_dir)
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text("Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED\n")
+            return rust_rc if argv[-1] == "rust" else 0
+        return original_run(argv, log, env, timeout)
+
+    monkeypatch.setattr(nightly, "run", overlay)
+    rc = nightly.main(["--out", str(repo / "report"), "--gate-workers", "2"])
+    row = json.loads((repo / "report/summary.json").read_text())["runtime"]["a"]
+    workers = {str(build / "gate/w1"), str(build / "gate/w2")}
+    assert runs[0][1:] == ["a", "rust"] and runs[0][0] in workers
+    if rust_rc:  # a failing Rust run gets the C oracle, in a fresh layer
+        assert rc == 1 and row["verdict"] == "FAIL" and row["c_verdict"] == "PASS"
+        assert [r[1:] for r in runs] == [["a", "rust"], ["a", "c"]]
+    else:        # a passing one needs no restore at all
+        assert rc == 0 and row["verdict"] == "PASS" and row["c_verdict"] == "NOT-RUN"
+        assert len(runs) == 1
+
+
 @pytest.mark.parametrize("allow_tcg", [False, True])
 def test_a_guest_without_kvm_is_an_environment_error(stack, monkeypatch, allow_tcg):
     repo, _, _, _ = stack
@@ -311,3 +379,24 @@ def test_a_guest_without_kvm_is_an_environment_error(stack, monkeypatch, allow_t
     else:
         assert rc == 1 and report["status"] == "ERROR"
         assert "without KVM" in report["error"] and "a" not in report["runtime"]
+
+
+def test_the_serial_lane_runs_in_the_shared_tree_under_overlay_mode(stack, monkeypatch, tmp_path):
+    repo, c_dir, _, _ = stack
+    monkeypatch.setattr(nightly.paths, "BUILD_DIR", str(tmp_path / "build"))
+    monkeypatch.delenv("BUILD_DIR", raising=False)
+    (repo / "scripts/gate-serial").write_text("a\n")
+    seen = []
+    original_run = nightly.run
+
+    def record(argv, log, env, timeout=None):
+        argv = [str(a) for a in argv]
+        assert argv[0] != "scripts/gate-overlay.sh"
+        if "scripts/swap-and-test.sh" in argv:
+            seen.append((argv[-1], env["SELFTESTS_OUTPUT"], "GATE_DIR" in env))
+        return original_run(argv, log, env, timeout)
+
+    monkeypatch.setattr(nightly, "run", record)
+    rc = nightly.main(["--out", str(repo / "report"), "--gate-workers", "2"])
+    assert rc == 0
+    assert seen == [("rust", str(c_dir), False), ("c", str(c_dir), False)]

@@ -104,8 +104,8 @@ def runtime_result(name, rc, text):
     return "FAIL", summary or f"exit {rc}; no test summary"
 
 
-def pristine():
-    bad = [p.name for p in C_DIR.glob("*.bpf.o.corig")
+def pristine(tree=None):
+    bad = [p.name for p in (tree or C_DIR).glob("*.bpf.o.corig")
            if not p.with_suffix("").exists()
            or guard.md5(p) != guard.md5(p.with_suffix(""))]
     if bad:
@@ -166,6 +166,16 @@ def main(argv=None):
     ap.add_argument("--build-jobs", type=int, choices=range(1, 9), default=4)
     ap.add_argument("--proof-timeout", type=int, default=180)
     ap.add_argument("--runtime-timeout", type=int, default=1200)
+    ap.add_argument("--gate-workers", type=int, choices=range(1, 9), default=1,
+                    help="QEMU gate VMs at once; 1 runs serially in the "
+                         "shared selftests output")
+    ap.add_argument("--gate-mode", choices=("overlay", "copy"), default="overlay",
+                    help="with --gate-workers > 1: each worker writes into a "
+                         "private overlay over the shared output "
+                         "(scripts/gate-overlay.sh, ~40 MB per object), or into "
+                         "its own trimmed copy of it (scripts/gate-workers.sh, "
+                         "~0.7 GB per worker; for hosts without unprivileged "
+                         "user namespaces)")
     args = ap.parse_args(argv)
     if min(args.proof_timeout, args.runtime_timeout) <= 0:
         ap.error("timeouts must be positive")
@@ -211,6 +221,8 @@ def main(argv=None):
                   configuration=dict(jobs=args.jobs, build_jobs=args.build_jobs,
                                      proof_timeout=args.proof_timeout, solver_ms=30000,
                                      runtime_timeout=args.runtime_timeout,
+                                     gate_workers=args.gate_workers,
+                                     gate_mode=args.gate_mode,
                                      qemu_cpus=env["QEMU_CPUS"]))
     print(f"nightly: {out} ({len(names)} objects)", flush=True)
     before_text = git("show", "HEAD:equiv/results/baseline.tsv").decode()
@@ -234,7 +246,8 @@ def main(argv=None):
     old_gate = {parts[1].strip(): parts[2].strip() for line in old_runtime.splitlines()
                 if len(parts := line.split("|")) >= 5 and parts[2].strip() in {"PASS", "FAIL", "NO-ORACLE"}}
     make = ["make", "--no-print-directory"]
-    active = None
+    workers = []           # per-worker stage environments
+    active_by_worker = {}  # worker index -> object currently swapped in
     failed = False
 
     def stage(name, command, timeout=None, stage_env=None):
@@ -303,6 +316,32 @@ def main(argv=None):
                 f.write(f"{name}\t{row['c']}\t{row['r']}\t{row['t']}\t{row['verdict']}\t{detail}\n")
         (out / "proof-diff.json").write_text(json.dumps(report["proof_changes"], indent=2) + "\n")
 
+        # Each object: swap the Rust object in and run its consumers, then
+        # get back to the C object, running the tests again (the oracle) only
+        # when the Rust run failed. Serially that means swapping the C object
+        # back into the shared output and rebuilding. With --gate-workers N,
+        # N objects run at once: in overlay mode each run writes into a fresh
+        # private layer and the shared output is never touched, so going back
+        # to C costs nothing; in copy mode each worker owns a trimmed copy.
+        # Objects named in scripts/gate-serial run afterwards, alone and in
+        # the shared tree.
+        gate_root = Path(paths.BUILD_DIR).resolve() / "gate"
+        if args.gate_workers > 1 and args.gate_mode == "overlay":
+            for k in range(1, args.gate_workers + 1):
+                workers.append(dict(env, GATE_DIR=str(gate_root / f"w{k}")))
+        elif args.gate_workers > 1:
+            require("gate-workers", ["scripts/gate-workers.sh", str(args.gate_workers)])
+            for k in range(1, args.gate_workers + 1):
+                tree = gate_root / f"w{k}" / C_DIR.name
+                workers.append(dict(env, SELFTESTS_OUTPUT=str(tree)))
+        else:
+            workers.append(env)
+        serial_file = REPO / "scripts/gate-serial"
+        serial = {line.strip() for line in (serial_file.read_text().splitlines()
+                                            if serial_file.exists() else [])
+                  if line.strip() and not line.startswith("#")}
+        report_lock = threading.Lock()
+
         def under_kvm(log):
             # vng falls back to TCG silently; an emulated guest is several
             # times slower and produces failures of its own (#52), so its
@@ -315,32 +354,79 @@ def main(argv=None):
 
         wenv_allows_tcg = bool(env.get("QEMU_ALLOW_TCG"))
 
-        print("nightly: serial QEMU verifier/runtime gate", flush=True)
-        start = time.monotonic()
-        runtime_failed = False
-        for name in names:
-            active = name
+        def gate_overlay(name, wenv):
+            def one(which, log):
+                rc = run(["scripts/gate-overlay.sh", wenv["GATE_DIR"], name, which],
+                         log, wenv, args.runtime_timeout)
+                under_kvm(log)
+                return rc, *runtime_result(name, rc, log.read_text(errors="replace"))
+
+            rc, verdict, note = one("rust", out / "runtime" / f"{name}.log")
+            row = dict(verdict=verdict, exit=rc, summary=note,
+                       c_exit=0, c_verdict="NOT-RUN", c_summary="")
+            if verdict == "FAIL":
+                c_rc, c_verdict, c_note = one("c", out / "runtime" / f"{name}.c.log")
+                row.update(c_exit=c_rc, c_verdict=c_verdict, c_summary=c_note)
+            return row
+
+        def gate_one(name, wenv):
+            if "GATE_DIR" in wenv:
+                return gate_overlay(name, wenv)
             log = out / "runtime" / f"{name}.log"
-            rc = run(["scripts/swap-and-test.sh", name, "rust"], log, env, args.runtime_timeout)
+            rc = run(["scripts/swap-and-test.sh", name, "rust"], log, wenv, args.runtime_timeout)
             under_kvm(log)
             verdict, note = runtime_result(name, rc, log.read_text(errors="replace"))
-            c_env = env if verdict == "FAIL" else dict(env, SWAP_ONLY="1")
+            c_env = wenv if verdict == "FAIL" else dict(wenv, SWAP_ONLY="1")
             c_log = out / "runtime" / f"{name}.c.log"
             c_rc = run(["scripts/swap-and-test.sh", name, "c"], c_log, c_env, args.runtime_timeout)
             under_kvm(c_log)
             c_verdict, c_note = runtime_result(name, c_rc, c_log.read_text(errors="replace"))
-            report["runtime"][name] = dict(verdict=verdict, exit=rc, summary=note,
-                                           c_exit=c_rc, c_verdict=c_verdict if verdict == "FAIL" else "NOT-RUN",
-                                           c_summary=c_note if verdict == "FAIL" else "")
-            runtime_failed |= verdict == "FAIL" or (old_gate.get(name) == "PASS" and verdict != "PASS")
-            print(f"runtime [{len(report['runtime'])}/{len(names)}] {name}: {verdict}; restore exit {c_rc}", flush=True)
-            save_report(out, report)
             # No consumer is an explicit limitation, not an infrastructure failure.
             if c_rc and c_verdict != "NO-ORACLE":
                 if verdict != "FAIL" or c_verdict != "FAIL" or not c_note.startswith("Summary:"):
                     raise RuntimeError(f"C restoration/rebuild failed for {name}; see runtime/{name}.c.log")
-            pristine()
-            active = None
+            pristine(Path(wenv["SELFTESTS_OUTPUT"]))
+            return dict(verdict=verdict, exit=rc, summary=note,
+                        c_exit=c_rc, c_verdict=c_verdict if verdict == "FAIL" else "NOT-RUN",
+                        c_summary=c_note if verdict == "FAIL" else "")
+
+        def record(name, row):
+            nonlocal runtime_failed
+            with report_lock:
+                report["runtime"][name] = row
+                runtime_failed |= row["verdict"] == "FAIL" or (
+                    old_gate.get(name) == "PASS" and row["verdict"] != "PASS")
+                print(f"runtime [{len(report['runtime'])}/{len(names)}] {name}: "
+                      f"{row['verdict']}; restore exit {row['c_exit']}", flush=True)
+                save_report(out, report)
+
+        def worker_loop(k, queue):
+            while not CANCELLED.is_set():
+                with report_lock:
+                    if not queue:
+                        return
+                    name = queue.pop(0)
+                    active_by_worker[k] = name
+                record(name, gate_one(name, workers[k]))
+                with report_lock:
+                    active_by_worker.pop(k, None)
+
+        print(f"nightly: QEMU verifier/runtime gate, {len(workers)} worker(s)", flush=True)
+        start = time.monotonic()
+        runtime_failed = False
+        if len(workers) == 1:
+            worker_loop(0, list(names))
+        else:
+            with ThreadPoolExecutor(max_workers=len(workers)) as pool:
+                queue = [n for n in names if n not in serial]
+                for future in [pool.submit(worker_loop, k, queue)
+                               for k in range(len(workers))]:
+                    future.result()
+            # The classic way, alone in the shared tree: for stress tests
+            # another VM's load would perturb, and for consumers an
+            # overlay cannot satisfy (see scripts/gate-serial).
+            workers.append(env)
+            worker_loop(len(workers) - 1, [n for n in names if n in serial])
         failed |= runtime_failed
         report["stages"].append(dict(name="qemu-verifier-runtime", exit=int(runtime_failed), seconds=round(time.monotonic() - start, 1)))
         report["runtime_changes"] = [dict(name=n, before=old_gate.get(n), after=r["verdict"])
@@ -382,9 +468,12 @@ def main(argv=None):
 
         try:
             # Restore derived skeletons/test_progs for an interrupted swap.
-            if active is not None:
-                cleanup_stage("restore-active", ["scripts/swap-and-test.sh", active, "c"],
-                              args.runtime_timeout, dict(env, SWAP_ONLY="1"))
+            # Worker trees are private copies, refreshed by gate-workers.sh
+            # on the next run; only the shared tree's object needs restoring.
+            for k, name in list(active_by_worker.items()):
+                if workers[k] is env:
+                    cleanup_stage("restore-active", ["scripts/swap-and-test.sh", name, "c"],
+                                  args.runtime_timeout, dict(env, SWAP_ONLY="1"))
             cleanup_stage("restore-final", make + ["restore-all"])
             try:
                 pristine()

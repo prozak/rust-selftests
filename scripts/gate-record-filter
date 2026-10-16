@@ -1,0 +1,10 @@
+#!/bin/bash
+# gate-record-filter -t <tests>
+#
+# TEST_RUNNER for the build half of gate-overlay.sh: instead of booting a
+# guest (impossible inside the user namespace), write the -t filter that
+# swap-and-test.sh computed to $GATE_FILTER_OUT.
+set -euo pipefail
+: "${GATE_FILTER_OUT:?}"
+[ "${1:-}" = -t ] && [ -n "${2:-}" ] || { echo "usage: $0 -t <tests>" >&2; exit 2; }
+printf '%s\n' "$2" > "${GATE_FILTER_OUT}"

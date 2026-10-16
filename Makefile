@@ -344,11 +344,17 @@ ci-local: restore-all ci-fast check-kernel-commit $(BLDDIR)/vmlinux.btf
 # sequences recursive make calls even when the caller supplies -j.
 NIGHTLY_JOBS ?= 8
 NIGHTLY_BUILD_JOBS ?= 4
+NIGHTLY_GATE_WORKERS ?= 1
 NIGHTLY_OUT ?=
 ci-nightly:
-	$(PYZ3) scripts/ci_nightly.py --jobs $(NIGHTLY_JOBS) --build-jobs $(NIGHTLY_BUILD_JOBS) $(if $(NIGHTLY_OUT),--out "$(NIGHTLY_OUT)")
+	$(PYZ3) scripts/ci_nightly.py --jobs $(NIGHTLY_JOBS) --build-jobs $(NIGHTLY_BUILD_JOBS) \
+		--gate-workers $(NIGHTLY_GATE_WORKERS) $(if $(NIGHTLY_OUT),--out "$(NIGHTLY_OUT)")
 
-.PHONY: ci-nightly
+# The parallel gate's private output trees ($(BUILD_DIR)/gate, ~0.7 GB each).
+clean-gate-workers:
+	scripts/gate-workers.sh --clean
+
+.PHONY: ci-nightly clean-gate-workers
 
 # --- codegen study: what rustc emits vs clang, over proved-equivalent pairs
 codegen:

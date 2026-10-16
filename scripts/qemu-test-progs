@@ -16,6 +16,10 @@
 #                     $BUILD_DIR/vng-venv/bin/vng)
 #   QEMU_CPUS/QEMU_MEM  guest size (default 8 / 4G)
 #   QEMU_TIMEOUT      seconds before the guest is killed (default 600)
+#   GATE_UPPER        a gate worker's overlay upper dir (scripts/
+#                     gate-overlay.sh): the guest runs in
+#                     overlay(GATE_UPPER over SELFTESTS_OUTPUT) mounted on
+#                     SELFTESTS_OUTPUT's own path, with its writes on tmpfs
 #   TEST_PROGS_EXTRA  extra test_progs arguments (e.g. -v to print the
 #                     libbpf and verifier log of passing tests too)
 #   QEMU_ALLOW_TCG    set to run without a usable /dev/kvm (slow)
@@ -63,11 +67,25 @@ exec 3<&-
 # the boot arguments. test_progs takes the list from a file instead when the
 # argument starts with '@' (test_progs.c:parse_test_list_file), and $OUT is
 # the shared, writable guest cwd.
+# Under GATE_UPPER the file goes into the worker's layer: the shared tree is
+# read-only to the gate.
 TEST_ARG="-t '${FILTER}'"
 if [ "${#FILTER}" -gt 512 ]; then
-    tr ',' '\n' <<< "${FILTER}" > "${OUT}/.test-filter"
+    tr ',' '\n' <<< "${FILTER}" > "${GATE_UPPER:-${OUT}}/.test-filter"
     TEST_ARG="-t @.test-filter"
-    echo "[qemu] filter is ${#FILTER} chars — passed via ${OUT}/.test-filter" >&2
+    echo "[qemu] filter is ${#FILTER} chars — passed via .test-filter" >&2
+fi
+
+# GATE_UPPER: rebuild the worker's view in the guest before running. 9p
+# hides overlay whiteouts (the host lists them as char devices, lookups
+# fail), so files the host deleted are deleted again in the guest's layer.
+PRELUDE=""
+if [ -n "${GATE_UPPER:-}" ]; then
+    PRELUDE="mkdir -p /run/gate && mount -t tmpfs tmpfs /run/gate && \
+mkdir /run/gate/u /run/gate/w && \
+mount -t overlay overlay -o 'lowerdir=${GATE_UPPER}:${OUT},upperdir=/run/gate/u,workdir=/run/gate/w' '${OUT}' && \
+(cd '${GATE_UPPER}' && find . -type c) | while read -r f; do rm -f '${OUT}'/\"\$f\"; done && \
+cd '${OUT}' && "
 fi
 
 # vng: boot the kernel, share host fs, run the command in $OUT, propagate
@@ -78,4 +96,4 @@ exec timeout "${QEMU_TIMEOUT:-600}" "${VNG}" \
     --rw \
     --cwd "${OUT}" \
     --verbose \
-    -- "mount -t bpf bpffs /sys/fs/bpf 2>/dev/null; ./$(basename "${TEST_PROGS}") ${TEST_PROGS_EXTRA:-} ${TEST_ARG}"
+    -- "${PRELUDE}mount -t bpf bpffs /sys/fs/bpf 2>/dev/null; ./$(basename "${TEST_PROGS}") ${TEST_PROGS_EXTRA:-} ${TEST_ARG}"

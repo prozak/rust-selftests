@@ -223,7 +223,7 @@ It needs `pip install -r requirements.txt`, into `.venv/` if you want
 All paths default to `.build/` inside the checkout and can be moved with
 `BUILD_DIR`, or one by one (`KERNEL_SRC`, `SELFTESTS_OUTPUT`, `LLVM_PREFIX`,
 `RUSTBPF`, `VNG`). [docs/maintainer.md](docs/maintainer.md) covers running
-subsets, parallel lanes, reading results and recovering a drifted output
+subsets, the parallel gate, reading results and recovering a drifted output
 directory.
 
 ## Layout

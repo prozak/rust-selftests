@@ -119,29 +119,11 @@ not the translation (see "When the output dir drifts" below).
 ### Running the corpus in parallel
 
 `qemu-verify.sh` is serial by construction — it mutates one shared
-selftests output directory. To use more cores, give each worker its own
-worktree and its own copy of that directory:
-
-```sh
-scripts/setup-lanes.sh 4      # ../rust-selftests-lane{1..4} + per-lane outputs
-```
-
-Then drive `make` directly in each lane (the Makefile takes all paths from
-the environment):
-
-```sh
-cd ../rust-selftests-lane1
-QEMU_CPUS=4 \
-  BUILD_DIR=$PWD/../rust-selftests/.build \
-  SELFTESTS_OUTPUT=$PWD/../rust-selftests/.build/selftests-output-qemu-lane1 \
-  make test-<name> && make restore-<name>
-```
-
-The kernel worktree and its BTF are shared read-only; only the selftests
-output is per-lane. `setup-lanes.sh` is idempotent. (The lane machinery was
-built for the translation sweep — `scripts/lane-sweep.sh`, which drives
-`translate.sh` and honours a `sweep/STOP` file for a graceful stop; that
-script translates rather than verifies.)
+selftests output directory. The parallel driver is the gate:
+`scripts/gate.py --all` (`--workers N`, 8 at most) runs every translation
+through N guests at once, each over a private overlay of that directory,
+and the `scripts/gate-serial` objects alone afterwards; see "Running what
+changed in QEMU" above.
 
 ## Running a single test
 
@@ -219,10 +201,6 @@ exactly the patches in `patches/kernel/`, applied as commits.
 | `equiv/results/baseline.tsv` | the recorded proof verdict, keyed by object and tool hashes; `equiv/guard.py` re-proves only what changed |
 | `nightly/<run>/` | one nightly's report, logs and hashes (not tracked) |
 | `qemu/results*.md`, `sweep/`, `docs/history/` | earlier partial runs and dated reports |
-
-`scripts/qemu-gate.sh` is the older parallel driver over the lane outputs;
-it writes `qemu/gate/results.md`, which is no longer tracked. Use
-`scripts/gate.py --all` for a full parallel run instead.
 
 ## The UML flavor
 

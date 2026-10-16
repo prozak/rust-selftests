@@ -9,3 +9,4 @@ nightly/
 qemu/logs/
 qemu/gate/lane*.md
 qemu/gate/results.md
+sweep/lane-drafts-*.tar.gz

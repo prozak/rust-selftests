@@ -41,13 +41,17 @@ export PATH="$(dirname "${VNG}"):${PATH}"
 [ -f "${QEMU_KERNEL}" ] || { echo "kernel not found: ${QEMU_KERNEL}" >&2; exit 1; }
 # Without KVM, QEMU silently falls back to software emulation: the guest is
 # several times slower and timing-sensitive tests fail for C and Rust alike.
-if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+# Permissions are not enough: with hardware virtualization missing (no
+# svm/vmx exposed to a nested VM) the node exists, is group kvm, and opening
+# it fails with ENODEV -- and vng then boots under TCG without saying so.
+if ! { exec 3<>/dev/kvm; } 2>/dev/null; then
     [ -n "${QEMU_ALLOW_TCG:-}" ] || {
-        echo "/dev/kvm is not usable by $(id -un) ($(ls -l /dev/kvm 2>&1));" \
+        echo "/dev/kvm cannot be opened by $(id -un) ($(ls -l /dev/kvm 2>&1));" \
              "fix its permissions or set QEMU_ALLOW_TCG=1 to run emulated" >&2
         exit 1
     }
 fi
+exec 3<&-
 [ -x "${TEST_PROGS}" ] || { echo "test_progs not found: ${TEST_PROGS}" >&2; exit 1; }
 
 # vng passes the guest command on the KERNEL COMMAND LINE, which x86 caps at

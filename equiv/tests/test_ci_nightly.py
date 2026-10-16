@@ -287,3 +287,27 @@ def test_guard_keeps_a_divergence_reported_before_the_wall_limit():
     assert nightly.guard.classify_timeout(partial.encode(), 180)[0] == "INEQUIV"
     assert nightly.guard.classify_timeout("  EQUIV    sec:a\n", 180) == ("TIMEOUT", "killed after 180s")
     assert nightly.guard.classify_timeout(None, 180)[0] == "TIMEOUT"
+
+
+@pytest.mark.parametrize("allow_tcg", [False, True])
+def test_a_guest_without_kvm_is_an_environment_error(stack, monkeypatch, allow_tcg):
+    repo, _, _, _ = stack
+    if allow_tcg:
+        monkeypatch.setenv("QEMU_ALLOW_TCG", "1")
+    original_run = nightly.run
+
+    def tcg_guest(argv, log, env, timeout=None):
+        rc = original_run(argv, log, env, timeout)
+        if "scripts/swap-and-test.sh" in [str(a) for a in argv]:
+            log.write_text("[    0.000000] Linux version 7.2.0\n"
+                           "smpboot: CPU0: AMD QEMU TCG CPU\n" + log.read_text())
+        return rc
+
+    monkeypatch.setattr(nightly, "run", tcg_guest)
+    rc = nightly.main(["--out", str(repo / "report")])
+    report = json.loads((repo / "report/summary.json").read_text())
+    if allow_tcg:
+        assert rc == 0 and report["runtime"]["a"]["verdict"] == "PASS"
+    else:
+        assert rc == 1 and report["status"] == "ERROR"
+        assert "without KVM" in report["error"] and "a" not in report["runtime"]

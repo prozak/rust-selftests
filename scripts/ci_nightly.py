@@ -303,6 +303,18 @@ def main(argv=None):
                 f.write(f"{name}\t{row['c']}\t{row['r']}\t{row['t']}\t{row['verdict']}\t{detail}\n")
         (out / "proof-diff.json").write_text(json.dumps(report["proof_changes"], indent=2) + "\n")
 
+        def under_kvm(log):
+            # vng falls back to TCG silently; an emulated guest is several
+            # times slower and produces failures of its own (#52), so its
+            # verdicts are not evidence. A run that never booted is judged
+            # on its own log.
+            text = log.read_text(errors="replace")
+            if (not wenv_allows_tcg and "Linux version" in text
+                    and "Hypervisor detected: KVM" not in text):
+                raise RuntimeError(f"guest ran without KVM (TCG); see {log.relative_to(out)}")
+
+        wenv_allows_tcg = bool(env.get("QEMU_ALLOW_TCG"))
+
         print("nightly: serial QEMU verifier/runtime gate", flush=True)
         start = time.monotonic()
         runtime_failed = False
@@ -310,10 +322,12 @@ def main(argv=None):
             active = name
             log = out / "runtime" / f"{name}.log"
             rc = run(["scripts/swap-and-test.sh", name, "rust"], log, env, args.runtime_timeout)
+            under_kvm(log)
             verdict, note = runtime_result(name, rc, log.read_text(errors="replace"))
             c_env = env if verdict == "FAIL" else dict(env, SWAP_ONLY="1")
             c_log = out / "runtime" / f"{name}.c.log"
             c_rc = run(["scripts/swap-and-test.sh", name, "c"], c_log, c_env, args.runtime_timeout)
+            under_kvm(c_log)
             c_verdict, c_note = runtime_result(name, c_rc, c_log.read_text(errors="replace"))
             report["runtime"][name] = dict(verdict=verdict, exit=rc, summary=note,
                                            c_exit=c_rc, c_verdict=c_verdict if verdict == "FAIL" else "NOT-RUN",

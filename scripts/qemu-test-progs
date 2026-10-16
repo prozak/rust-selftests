@@ -16,6 +16,8 @@
 #                     $BUILD_DIR/vng-venv/bin/vng)
 #   QEMU_CPUS/QEMU_MEM  guest size (default 8 / 4G)
 #   QEMU_TIMEOUT      seconds before the guest is killed (default 600)
+#   TEST_PROGS_EXTRA  extra test_progs arguments (e.g. -v to print the
+#                     libbpf and verifier log of passing tests too)
 #   QEMU_ALLOW_TCG    set to run without a usable /dev/kvm (slow)
 
 set -uo pipefail
@@ -76,4 +78,4 @@ exec timeout "${QEMU_TIMEOUT:-600}" "${VNG}" \
     --rw \
     --cwd "${OUT}" \
     --verbose \
-    -- "mount -t bpf bpffs /sys/fs/bpf 2>/dev/null; ./$(basename "${TEST_PROGS}") ${TEST_ARG}"
+    -- "mount -t bpf bpffs /sys/fs/bpf 2>/dev/null; ./$(basename "${TEST_PROGS}") ${TEST_PROGS_EXTRA:-} ${TEST_ARG}"

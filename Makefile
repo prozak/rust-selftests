@@ -91,7 +91,11 @@ RUST_SRC ?= $(shell $(RUSTC) --print sysroot)/lib/rustlib/src/rust/library
 
 RUSTFLAGS_ENV := RUSTC_BOOTSTRAP=1
 OPT_LEVEL ?= 3
-RUSTC_COMMON := --target $(TARGET) -C opt-level=$(OPT_LEVEL) -C panic=unwind -C debuginfo=2 -Z unstable-options -Z threads=64
+# --remap-path-prefix: the objects embed the source paths (BTF line info,
+# .debug_str), and the baselines are keyed by object hash; without it the
+# same sources hash differently in every checkout (a worktree, say).
+RUSTC_COMMON := --target $(TARGET) -C opt-level=$(OPT_LEVEL) -C panic=unwind -C debuginfo=2 \
+	-Z unstable-options -Z threads=64 --remap-path-prefix=$(CURDIR)=/rust-selftests
 
 PROGS := $(patsubst progs/%.rs,%,$(wildcard progs/*.rs))
 

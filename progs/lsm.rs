@@ -192,13 +192,17 @@ fn void_hook_body(ctx: *const u64) {
         arg_start1 as *const c_void,
     );
 
+    // bprm->mm is a nullable kernel pointer to the verifier now; the C
+    // checks it before the second read.
     let mm2 = unsafe { *(&*bprm).mm().as_ptr() };
-    let arg_start2 = unsafe { *(&*mm2).arg_start().as_ptr() };
-    bpf_copy_from_user(
-        args_buf.as_mut_ptr() as *mut c_void,
-        64,
-        arg_start2 as *const c_void,
-    );
+    if !mm2.is_null() {
+        let arg_start2 = unsafe { *(&*mm2).arg_start().as_ptr() };
+        bpf_copy_from_user(
+            args_buf.as_mut_ptr() as *mut c_void,
+            64,
+            arg_start2 as *const c_void,
+        );
+    }
 
     let key: u32 = 0;
 

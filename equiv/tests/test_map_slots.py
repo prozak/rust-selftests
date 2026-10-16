@@ -27,7 +27,8 @@ def synth_maps_object(path, maps, last="values"):
     or None for a map with no slot member.
 
     Fixed ids: [1] INT int, [2] FUNC_PROTO, [3] PTR->[2], [4] STRUCT inner,
-    [5] PTR->[4]. ARRAY types follow, one per distinct (kind, nelems), then
+    [5] PTR->[4], [6] PTR->[1] (a void slot), [7] int[3], [8] PTR->[7] (a
+    prog array's `type`). ARRAY types follow, one per distinct (kind, nelems), then
     for each map a STRUCT and a VAR, then the DATASEC."""
     strings, offs = b"\0", {}
 
@@ -50,7 +51,11 @@ def synth_maps_object(path, maps, last="values"):
     add(struct.pack("<III", s("inner"), (STRUCT << 24) | 1, 8)
         + struct.pack("<III", s("type"), 1, 0))                          # [4]
     add(struct.pack("<III", 0, PTR << 24, 4))                            # [5]
-    elem = {"prog": 3, "map": 5}
+    add(struct.pack("<III", 0, PTR << 24, 1))                            # [6] PTR -> int (a void slot)
+    add(struct.pack("<III", 0, ARRAY << 24, 0)
+        + struct.pack("<III", 1, 1, 3))                                  # [7] int[3]: BPF_MAP_TYPE_PROG_ARRAY
+    add(struct.pack("<III", 0, PTR << 24, 7))                            # [8] PTR -> int[3]
+    elem = {"prog": 3, "map": 5, "void_prog": 6}
     arrays = {}
     for _name, kind, nelems in maps:
         if kind and (kind, nelems) not in arrays:
@@ -59,7 +64,7 @@ def synth_maps_object(path, maps, last="values"):
                 + struct.pack("<III", elem[kind], 1, nelems))
     var_ids = []
     for name, kind, nelems in maps:
-        members = struct.pack("<III", s("type"), 1, 0)
+        members = struct.pack("<III", s("type"), 8 if kind == "void_prog" else 1, 0)
         if kind:
             members += struct.pack("<III", s(last), arrays[(kind, nelems)], 64)
         st = add(struct.pack("<III", s(name + "_def"),
@@ -162,3 +167,17 @@ def test_patching_twice_changes_nothing_more(tmp_path):
     once = open(obj, "rb").read()
     assert S.patch(obj) == []
     assert open(obj, "rb").read() == once
+
+
+def test_prog_array_void_slots_get_a_function_pointer_element(tmp_path):
+    # A translation with an empty slot declares `[*const c_void; N]`: the
+    # zero-length array must point at PTR -> FUNC_PROTO, which libbpf
+    # requires of a prog-array value spec (the fixture has no .maps
+    # relocations, so the pass falls back to the object's first FUNC_PROTO).
+    obj = str(tmp_path / "void_slots.bpf.o")
+    ids, _arrays = synth_maps_object(obj, [("jmp", "void_prog", 2)])
+    assert S.patch(obj) == [("jmp", 2)]
+    types = BpfElf(obj).btf_types()
+    _arr, elem, nelems = values_array(types, ids["jmp"])
+    assert nelems == 0
+    assert types[elem][0] == PTR and types[types[elem][2]][0] == FUNC_PROTO

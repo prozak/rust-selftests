@@ -23,6 +23,15 @@ edit is a 4-byte in-place field write. The member is repointed rather than the
 array patched in place because rustc shares one ARRAY type across every map
 with the same slot type.
 
+A prog-array slot has one more problem: libbpf wants the element to be a
+pointer to a FUNC_PROTO, and a Rust fn pointer cannot be null, while
+`Option<fn>` in a map definition crashes llc's BTF emitter. A translation
+with an empty slot therefore declares `[*const c_void; N]` and casts the
+programs' addresses in; here the zero-length array's element becomes a
+pointer to the FUNC_PROTO of the program the first slot relocation names
+(any FUNC_PROTO in the object when there is none), so libbpf sees what
+clang's `int (*values[])(void *)` gives it.
+
 Usage: btf_map_slots.py <obj.bpf.o>
 """
 
@@ -31,9 +40,14 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "equiv"))
 from btf_test_tags import FIXED_EXTRA, PER_VLEN, elf_find_section
 
+BTF_KIND_PTR = 2
 BTF_KIND_ARRAY = 3
+BTF_KIND_FUNC = 12
+BTF_KIND_FUNC_PROTO = 13
+BPF_MAP_TYPE_PROG_ARRAY = 3
 BTF_KIND_STRUCT = 4
 BTF_KIND_VAR = 14
 BTF_KIND_DATASEC = 15
@@ -52,6 +66,16 @@ def walk(data, hdr_len, type_off, type_len):
             extra = vlen * PER_VLEN[kind]
         pos += 12 + extra
         tid += 1
+
+
+def _count_types(blob):
+    """Number of BTF types in a blob of appended PTR/ARRAY records."""
+    n, pos = 0, 0
+    while pos < len(blob):
+        kind = (struct.unpack_from("<I", blob, pos + 4)[0] >> 24) & 0x1F
+        pos += 12 + (12 if kind == BTF_KIND_ARRAY else 0)
+        n += 1
+    return n
 
 
 def patch(path):
@@ -89,8 +113,39 @@ def patch(path):
             var_tid, = struct.unpack_from("<I", data, pos + 12 + i * 12)
             maps.append(var_tid)
 
+    def slot_target_proto(var_name):
+        """FUNC_PROTO id for a prog array's slots: the proto of the program
+        the first .maps relocation into this map names, else any."""
+        try:
+            from bpfelf import BpfElf
+            elf = BpfElf(path)
+            sec = elf.section_by_name(".maps")
+            sym = next(s for s in elf.symbols if s.name == var_name)
+            for off, rel in sorted(elf.relocs.get(sec.idx, {}).items()):
+                if sym.value <= off < sym.value + sym.size:
+                    for tid, (pos, kind, _v) in types.items():
+                        if kind == BTF_KIND_FUNC and get_str(struct.unpack_from("<I", data, pos)[0]) == rel.sym.name:
+                            return struct.unpack_from("<I", data, pos + 8)[0]
+        except (StopIteration, AttributeError, KeyError, ValueError, OSError):
+            pass
+        return next((tid for tid, (_p, kind, _v) in sorted(types.items()) if kind == BTF_KIND_FUNC_PROTO), None)
+
+    def map_type_of(st_pos, nmemb):
+        """BPF_MAP_TYPE_* from the `type` member (PTR -> ARRAY[nelems])."""
+        for i in range(nmemb):
+            mname_off, mtype = struct.unpack_from("<II", data, st_pos + 12 + i * 12)
+            if get_str(mname_off) != "type":
+                continue
+            t = resolve(mtype)
+            if t in types and types[t][1] == BTF_KIND_PTR:
+                t = resolve(struct.unpack_from("<I", data, types[t][0] + 8)[0])
+            if t in types and types[t][1] == BTF_KIND_ARRAY:
+                return struct.unpack_from("<III", data, types[t][0] + 12)[2]
+        return None
+
     new_types, patched = bytearray(), []
     zero_of = {}
+    fn_ptr_of = {}
     for var_tid in maps:
         if var_tid not in types or types[var_tid][1] != BTF_KIND_VAR:
             continue
@@ -112,11 +167,27 @@ def patch(path):
         elem, index, nelems = struct.unpack_from("<III", data, types[arr][0] + 12)
         if nelems == 0:
             continue
-        if arr not in zero_of:
-            zero_of[arr] = next_tid + len(new_types) // 24
+        # a prog array declared with `*const c_void` slots: point the element
+        # at a FUNC_PROTO instead
+        pelem = resolve(elem)
+        pointee = (resolve(struct.unpack_from("<I", data, types[pelem][0] + 8)[0])
+                   if pelem in types and types[pelem][1] == BTF_KIND_PTR else None)
+        key = arr
+        if (pointee is not None
+                and types.get(pointee, (0, 0, 0))[1] not in (BTF_KIND_FUNC_PROTO, BTF_KIND_STRUCT)
+                and map_type_of(st_pos, nmemb) == BPF_MAP_TYPE_PROG_ARRAY):
+            proto = slot_target_proto(var_name)
+            if proto is not None:
+                if proto not in fn_ptr_of:
+                    fn_ptr_of[proto] = next_tid + _count_types(new_types)
+                    new_types.extend(struct.pack("<III", 0, BTF_KIND_PTR << 24, proto))
+                elem = fn_ptr_of[proto]
+                key = ("fnptr", arr, proto)
+        if key not in zero_of:
+            zero_of[key] = next_tid + _count_types(new_types)
             new_types.extend(struct.pack("<III", 0, BTF_KIND_ARRAY << 24, 0))
             new_types.extend(struct.pack("<III", elem, index, 0))
-        struct.pack_into("<I", data, mpos + 4, zero_of[arr])
+        struct.pack_into("<I", data, mpos + 4, zero_of[key])
         patched.append((var_name, nelems))
 
     if not patched:

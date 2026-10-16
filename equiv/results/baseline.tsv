@@ -539,7 +539,7 @@ test_tc_bpf	0e7026de7276e40a114e513f5b00abd0	96f0ae190d1098023ceef1f551aefe80	2b
 test_tc_change_tail	dbf677cd029a6a119730a208f7d169a4	b92d7ef3c4843ad45ea750c49238e957	2b4312aef850669e1132d1e7feb526a3	EQUIV	test_tc_change_tail: 1/1 program(s) proved equivalent
 test_tc_dtime	5a62404c76b94e7107bacd5cf7f46cd2	c12e8f3c5c5b3a83ca3cf84b3eb46ccc	2b4312aef850669e1132d1e7feb526a3	EQUIV	test_tc_dtime: 6/6 program(s) proved equivalent
 test_tc_edt	b8e5f90781de919b24449282055737d1	04a2355eeb46a165097a2b9be2743bcd	2b4312aef850669e1132d1e7feb526a3	EQUIV	test_tc_edt: 1/1 program(s) proved equivalent
-test_tc_link	2d87e1460ff38e12050604ab2ef99554	a2f77bfd3433857ad7a4a97d784dbe9a	2b4312aef850669e1132d1e7feb526a3	INEQUIV	INEQUIV  tc/egress:tc8  [observable 'g:seen_tc8' differs; observable 'g:mark' differs; observable 'g:prio' differs; observable 'g:headroom' differs; observable 'g:tailroom' differs]
+test_tc_link	2d87e1460ff38e12050604ab2ef99554	87d7841e4aa43df01f0bc576729da7ac	2b4312aef850669e1132d1e7feb526a3	EQUIV	test_tc_link: 8/8 program(s) proved equivalent
 test_tc_neigh	328fb1a430910b80f4b1e3c6b9fb4343	bbfaeb1800e29a368ecbe0f2f499d593	2b4312aef850669e1132d1e7feb526a3	EQUIV	test_tc_neigh: 3/3 program(s) proved equivalent
 test_tc_neigh_fib	716bc21df5369774f27fe5a7032b019c	4adc335eeecd8a60d4a4e97526952754	2b4312aef850669e1132d1e7feb526a3	EQUIV	test_tc_neigh_fib: 3/3 program(s) proved equivalent
 test_tc_peer	91294bad7b38d5b0f0e35cb5f4f47d23	b7edf7b33c9e7d97f7d1ab9c0661ce39	2b4312aef850669e1132d1e7feb526a3	EQUIV	test_tc_peer: 7/7 program(s) proved equivalent

@@ -36,6 +36,23 @@ struct ethhdr {
     h_proto: u16,
 }
 
+// struct iphdr (linux/ip.h), fixed part only; tc8 reads just `protocol`.
+#[repr(C, packed)]
+struct iphdr {
+    ihl_version: u8,
+    tos: u8,
+    tot_len: u16,
+    id: u16,
+    frag_off: u16,
+    ttl: u8,
+    protocol: u8,
+    check: u16,
+    saddr: u32,
+    daddr: u32,
+}
+
+const IPPROTO_ICMP: u8 = 1;
+
 // Minimal local CO-RE views of the kernel's real `struct sk_buff` /
 // `struct net_device`, matching the C source's own local re-declaration
 // (only the fields tc8 needs; matched against target BTF by name).
@@ -202,6 +219,24 @@ extern "C" fn tc8(skb: *const __sk_buff) -> i32 {
         core::mem::size_of::<*mut net_device>() as u32,
         unsafe { &*sk }.dev().as_ptr() as *const c_void,
     );
+    let mut iph: iphdr = unsafe { core::mem::zeroed() };
+
+    // Only ICMP over IPv4 counts, as in the C.
+    if vload!((*skb).protocol) != htons(ETH_P_IP) as u32 {
+        return TCX_PASS;
+    }
+    if bpf_skb_load_bytes(
+        skb as *const c_void,
+        core::mem::size_of::<ethhdr>() as u32,
+        &mut iph as *mut iphdr as *mut c_void,
+        core::mem::size_of::<iphdr>() as u32,
+    ) != 0
+    {
+        return TCX_PASS;
+    }
+    if iph.protocol != IPPROTO_ICMP {
+        return TCX_PASS;
+    }
 
     unsafe { seen_tc8 = true };
     unsafe {

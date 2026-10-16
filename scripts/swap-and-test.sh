@@ -87,22 +87,29 @@ TESTS=()
 if [ "${#SKELS[@]}" -gt 0 ]; then
     sfmake "${SKELS[@]}" > /dev/null
 
-    # Find every test object whose dep file pulls in one of those skeletons,
-    # rebuild each explicitly (PERMISSIVE mode silently drops deleted test
-    # objects from the link, so each must be named as a goal), then relink.
+    # Find every test object whose dep file pulls in one of those skeletons.
     for d in $(grep -l -E "(^| |/)${NAME}\.l?skel\.h" "${OUT}"/*.test.d); do
-        base="$(basename "${d}" .test.d)"
-        TESTS+=("${base}")
-        rm -f "${OUT}/${base}.test.o"
-        sfmake "${OUT}//${base}.test.o" > /dev/null
-        [ -f "${OUT}/${base}.test.o" ] || { echo "failed to rebuild ${base}.test.o" >&2; exit 1; }
+        TESTS+=("$(basename "${d}" .test.d)")
     done
     # The selftests build auto-generates skeletons for every prog; some tests
     # ignore them and load the .bpf.o from disk instead, so an unconsumed
     # skeleton is normal — fall through to runtime discovery.
     if [ "${#TESTS[@]}" -gt 0 ]; then
+        # Since bpf-next 645f5fcf the test objects are compiled by a
+        # sub-make (Makefile.runner) that the main Makefile's test_progs rule
+        # always runs; the .test.d files it includes make it recompile the
+        # objects that include a regenerated skeleton, and the relink follows.
+        # A *.test.o is no longer a goal the main Makefile knows. PERMISSIVE
+        # mode drops an object whose compile failed from the link without
+        # failing make, so demand one newer than the skeleton for each test.
         rm -f "${OUT}/test_progs"
         sfmake "${OUT}//test_progs" > /dev/null
+        for base in "${TESTS[@]}"; do
+            for h in "${SKELS[@]}"; do
+                [ "${OUT}/${base}.test.o" -nt "${OUT}/$(basename "${h}")" ] || \
+                    { echo "failed to rebuild ${base}.test.o" >&2; exit 1; }
+            done
+        done
         [ -x "${OUT}/test_progs" ] || { echo "test_progs relink failed" >&2; exit 1; }
         echo "[swap] test_progs relinked"
     fi

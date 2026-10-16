@@ -18,6 +18,7 @@ def fixture_btf():
     data += struct.pack('<III', 11, 8 << 24, 1)
     data += struct.pack('<III', 17, (6 << 24) | 1, 4)
     data += struct.pack('<Ii', 22, 1)
+    data += struct.pack('<III', 0, 4 << 24, 8)  # [5] an anonymous struct
     return Btf(struct.pack('<HBBIIIII', 0xeb9f, 1, 0, 24, 0, len(data),
                            len(data), len(strings)) + data + strings)
 
@@ -60,26 +61,51 @@ def test_rejects_address_taken_polyfill():
 
 def test_requires_c_target_relocation_with_same_kind_and_name(monkeypatch):
     monkeypatch.setattr(type_id, 'core_relo_records', lambda _: {'prog': [(0, 2, '0', 7), (1, 3, '0', 6)]})
-    assert type_id.contract(None, fixture_btf(), {'tid': (4, 'thing', False)}) == {'tid': 2}
+    assert type_id.contract(None, fixture_btf(), {'tid': (4, 'thing', False, False)}) == {'tid': 2}
     for kind, name in [(5, 'thing'), (8, 'alias'), (4, 'missing')]:
         with pytest.raises(ValueError, match='C TYPE_ID_TARGET'):
-            type_id.contract(None, fixture_btf(), {'tid': (kind, name, False)})
+            type_id.contract(None, fixture_btf(), {'tid': (kind, name, False, False)})
 
 
 def test_local_ids_need_a_c_local_relocation(monkeypatch):
     # [2] thing carries only a TARGET relocation: not enough for a local ID
     monkeypatch.setattr(type_id, 'core_relo_records', lambda _: {'prog': [(0, 2, '0', 7)]})
     with pytest.raises(ValueError, match='C TYPE_ID_LOCAL'):
-        type_id.contract(None, fixture_btf(), {'tid': (4, 'thing', True)})
+        type_id.contract(None, fixture_btf(), {'tid': (4, 'thing', True, False)})
     monkeypatch.setattr(type_id, 'core_relo_records', lambda _: {'prog': [(0, 2, '0', 6)]})
-    assert type_id.contract(None, fixture_btf(), {'tid': (4, 'thing', True)}) == {'tid': (4, 'thing')}
+    assert type_id.contract(None, fixture_btf(), {'tid': (4, 'thing', True, False)}) == {'tid': (4, 'thing')}
+
+
+def test_an_anonymous_c_type_needs_a_local_relocation_of_its_kind(monkeypatch):
+    # [5] is anonymous: the Rust stand-in may have any name, but a C local
+    # relocation for SOME anonymous struct must exist
+    monkeypatch.setattr(type_id, 'core_relo_records', lambda _: {'prog': [(0, 5, '0', 6)]})
+    assert type_id.contract(None, fixture_btf(), {'tid': (4, 'stand_in', True, True)}) == {'tid': (4, 'stand_in')}
+    with pytest.raises(ValueError, match='anonymous type of kind 5'):
+        type_id.contract(None, fixture_btf(), {'tid': (5, 'stand_in', True, True)})
+    monkeypatch.setattr(type_id, 'core_relo_records', lambda _: {'prog': [(0, 2, '0', 6)]})
+    with pytest.raises(ValueError, match='anonymous type of kind 4'):
+        type_id.contract(None, fixture_btf(), {'tid': (4, 'stand_in', True, True)})
+
+
+def test_a_local_int_id_needs_the_c_int_relocation(monkeypatch):
+    monkeypatch.setattr(type_id, 'core_relo_records', lambda _: {'prog': [(0, 1, '0', 6)]})
+    assert type_id.contract(None, fixture_btf(), {'tid': (1, 'int', True, False)}) == {'tid': (1, 'int')}
 
 
 def test_declarations_parse_the_local_form():
     assert type_id.declarations('// BTF_TYPE_ID: new_id local struct node_data') == {
-        'new_id': (4, 'node_data', True)}
-    with pytest.raises(ValueError, match='struct or union'):
+        'new_id': (4, 'node_data', True, False)}
+    assert type_id.declarations('// BTF_TYPE_ID: int_id local int int') == {'int_id': (1, 'int', True, False)}
+    assert type_id.declarations('// BTF_TYPE_ID: u_id local union stand_in (anonymous)') == {
+        'u_id': (5, 'stand_in', True, True)}
+    assert type_id.declarations('// BTF_TYPE_ID: t_id struct task_struct') == {'t_id': (4, 'task_struct', False, False)}
+    with pytest.raises(ValueError, match='struct, union or int'):
         type_id.declarations('// BTF_TYPE_ID: new_id local typedef u32')
+    with pytest.raises(ValueError, match='anonymous'):
+        type_id.declarations('// BTF_TYPE_ID: new_id struct node_data (anonymous)')
+    with pytest.raises(ValueError, match='unknown C integer type'):
+        type_id.declarations('// BTF_TYPE_ID: new_id local int size_t')
 
 
 RUST_COMPOSITE = ('!7 = distinct !DICompositeType(tag: DW_TAG_structure_type, name: "thing", '
@@ -91,6 +117,14 @@ def test_a_local_id_points_at_rustcs_own_composite():
     assert 'call i64 @llvm.bpf.btf.type.id(i32 1, i64 0), !dbg !3, !llvm.preserve.access.index !7' in result
     # no synthesized stand-in: the layout must be Rust's own
     assert result.count('DW_TAG_structure_type, name: "thing"') == 1
+
+
+def test_a_local_int_id_points_at_rustcs_base_type():
+    ir = fixture_ir(['tid']) + '!7 = !DIBasicType(name: "i32", size: 32, encoding: DW_ATE_signed)\n'
+    result = type_id.lower(ir, {'tid': (1, 'int')}, fixture_btf())
+    assert 'call i64 @llvm.bpf.btf.type.id(i32 1, i64 0), !dbg !3, !llvm.preserve.access.index !7' in result
+    with pytest.raises(ValueError, match='base type i32'):
+        type_id.lower(fixture_ir(['tid']), {'tid': (1, 'int')}, fixture_btf())
 
 
 @pytest.mark.parametrize('extra', ['', RUST_COMPOSITE + RUST_COMPOSITE.replace('!7 =', '!9 =')])

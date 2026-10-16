@@ -12,29 +12,48 @@ id of the object's OWN type (bpf_obj_new(typeof(*n)) in C). The pristine C
 object must carry a TYPE_ID_LOCAL relocation for it. The relocation points at
 rustc's own debug-info composite for NAME, so llc emits that struct with all
 of its members into .BTF -- the kernel reads the layout from there.
+
+`local int NAME` is the local id of a C integer type (bpf_core_type_id_local(int)),
+pointing at rustc's debug-info base type that scripts/btf_rename.py renames to
+NAME (int -> i32). `local struct NAME (anonymous)` / `local union NAME (anonymous)`
+names the Rust type NAME standing in for a C type that has no name
+(bpf_obj_new(struct { int data; })); the C object must carry a TYPE_ID_LOCAL
+relocation for an anonymous type of that kind, but as several may share the
+kind nothing further is checked. The verifier's messages for the negative
+tests these serve never print the type's name.
 """
 from pathlib import Path
 import re
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'equiv'))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bpfelf import BpfElf
 from bpfcore import Btf, core_relo_records
+from btf_rename import RENAME
 
 KINDS = {'int': 1, 'struct': 4, 'union': 5, 'enum': 6, 'typedef': 8}
+# C integer type name -> rustc's debug-info name (btf_rename.py's inverse)
+RUST_INT = {c: rust for rust, c in RENAME.items()}
 
 
 def declarations(source):
+    """function -> (BTF kind, name, local, anonymous in C)."""
     result = {}
     for line in source.splitlines():
         if not line.startswith('// BTF_TYPE_ID:'):
             continue
-        m = re.fullmatch(r'// BTF_TYPE_ID: ([A-Za-z_]\w*) (local )?(int|struct|union|enum|typedef) ([A-Za-z_][\w ]*)', line)
+        m = re.fullmatch(r'// BTF_TYPE_ID: ([A-Za-z_]\w*) (local )?(int|struct|union|enum|typedef) '
+                         r'([A-Za-z_][\w ]*?)( \(anonymous\))?', line)
         if not m or m[1] in result:
             raise ValueError(f'invalid or duplicate type-ID declaration: {line}')
-        if m[2] and m[3] not in ('struct', 'union'):
-            raise ValueError(f'a local type ID must name a struct or union: {line}')
-        result[m[1]] = (KINDS[m[3]], m[4], bool(m[2]))
+        if m[2] and m[3] not in ('struct', 'union', 'int'):
+            raise ValueError(f'a local type ID must name a struct, union or int: {line}')
+        if m[5] and not (m[2] and m[3] in ('struct', 'union')):
+            raise ValueError(f'only a local struct or union can be anonymous in C: {line}')
+        if m[2] and m[3] == 'int' and m[4] not in RUST_INT:
+            raise ValueError(f'unknown C integer type {m[4]!r} (one of {sorted(RUST_INT)}): {line}')
+        result[m[1]] = (KINDS[m[3]], m[4], bool(m[2]), bool(m[5]))
     return result
 
 
@@ -43,9 +62,14 @@ def contract(elf, btf, names):
     relos = [(tid, kind) for records in core_relo_records(elf).values()
              for _, tid, _, kind in records]
     result = {}
-    for function, (kind, name, local) in names.items():
+    for function, (kind, name, local, anon) in names.items():
         want = 6 if local else 7
         ids = {tid for tid, k in relos if k == want}
+        if anon:
+            if not any(btf.types[tid].kind == kind and not btf.types[tid].name for tid in ids):
+                raise ValueError(f'{function}: expected a C TYPE_ID_LOCAL anonymous type of kind {kind}')
+            result[function] = (kind, name)
+            continue
         matches = [tid for tid in ids if btf.types[tid].kind == kind and btf.types[tid].name == name]
         if len(matches) != 1:
             raise ValueError(f'{function}: expected one C TYPE_ID_{"LOCAL" if local else "TARGET"} '
@@ -103,6 +127,12 @@ def lower(ir, types, btf):
         return emitted[tid]
 
     def local(kind, name):
+        if kind == 1:
+            rust = RUST_INT[name]
+            found = re.findall(r'^(!\d+) = !DIBasicType\(name: ' + re.escape(quoted(rust)) + r',', ir, re.M)
+            if len(found) != 1:
+                raise ValueError(f'expected one Rust debug-info base type {rust} (C {name}), found {len(found)}')
+            return found[0]
         tag = 'structure' if kind == 4 else 'union'
         found = re.findall(r'^(!\d+) = (?:distinct )?!DICompositeType\(tag: DW_TAG_' + tag
                            + r'_type, name: ' + re.escape(quoted(name)) + r',', ir, re.M)

@@ -350,11 +350,25 @@ def check_decl_tags(name):
             return f"func {tname} parameter {comp}"
         return f"{what} {tname}.{comp}"
 
-    for t in sorted(want - got, key=str):
+    missing, extra = want - got, got - want
+    # An anonymous C struct/union (bpf_obj_new(struct { ... }) in a
+    # negative test) has a NAMED Rust stand-in (scripts/type_id.py's
+    # `(anonymous)`): a tag on the anonymous C type is matched by the same
+    # tag on the same member of a Rust type the C object does not have.
+    c_names = {t[1] for t in want}
+    for t in sorted(missing, key=str):
+        if t[0] not in ("struct", "union") or t[1]:
+            continue
+        for u in sorted(extra, key=str):
+            if (u[0], u[2], u[3]) == (t[0], t[2], t[3]) and u[1] not in c_names:
+                missing.discard(t)
+                extra.discard(u)
+                break
+    for t in sorted(missing, key=str):
         level = "ERROR" if t[3].startswith(LOAD_BEARING_TAGS) else "WARN"
         yield (level, f"C object tags {where(t)} with {t[3]!r}, the "
                       f"translation does not")
-    for t in sorted(got - want, key=str):
+    for t in sorted(extra, key=str):
         yield ("ERROR", f"translation tags {where(t)} with {t[3]!r}, the "
                         f"C object does not")
 

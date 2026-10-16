@@ -308,6 +308,7 @@ struct_ops_assoc_reuse	9c417ad4fdd0abcab5cd846567c6a549	b8006a3d5bf2822c9e5b2465
 struct_ops_autocreate	28f947e8f026419f4b630fb2f4c74cc3	3a855c12d8c15f3a0dfbf11ce8889531	b2731b9674bf1ad984fc9fb9d7caacce	PASS	Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED
 struct_ops_autocreate2	c539e916f48f5b69c29666cfd827badf	daf121e8f3e700d44996cbbbff9c4bc0	b2731b9674bf1ad984fc9fb9d7caacce	PASS	Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED
 struct_ops_detach	3f974aaac217843a791734e392b0bcb2	456499ca9ddd3fbb9c2292364418e5ab	b2731b9674bf1ad984fc9fb9d7caacce	PASS	Summary: 1/7 PASSED, 0 SKIPPED, 0/0 FAILED
+struct_ops_forgotten_cb	3e1ef99953d96663b906d8e6dc2c76e9	529881dc34c4f516988b0baa773b04c2	b2731b9674bf1ad984fc9fb9d7caacce	PASS	Summary: 1/7 PASSED, 0 SKIPPED, 0/0 FAILED
 struct_ops_id_ops_mapping1	d8a79f27c86f38b2d21e060a4c73dc50	3c7607a3a274f393d2d9678f5c1ce67d	b2731b9674bf1ad984fc9fb9d7caacce	PASS	Summary: 1/1 PASSED, 0 SKIPPED, 0/0 FAILED
 struct_ops_id_ops_mapping2	1aa7dcb237ea969a7751aec08b860f30	9fb02a5c5f5abbeda69dd32f82280996	b2731b9674bf1ad984fc9fb9d7caacce	PASS	Summary: 1/1 PASSED, 0 SKIPPED, 0/0 FAILED
 struct_ops_kptr_return	ead379045e6f5557efbabda37b235483	715b810d0437cc7fa972a97af34fcfa1	b2731b9674bf1ad984fc9fb9d7caacce	PASS	Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED

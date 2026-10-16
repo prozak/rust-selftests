@@ -235,7 +235,7 @@ $(RUSTBPF)/btf_tags.py:
 ORDER_SRCS := $(shell grep -l '^// BPF_PROGRAM_ORDER:' progs/*.rs)
 $(patsubst progs/%.rs,$(BLDDIR)/%.bpf.o,$(ORDER_SRCS)): scripts/program_order.py
 $(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc scripts/naked_abi.py scripts/btf_graph_types.py scripts/private_sections.py \
-		scripts/maps_section.py scripts/btf_rename.py scripts/btf_map_slots.py scripts/btf_test_tags.py scripts/btf_type_tags.py
+		scripts/maps_section.py scripts/btf_rename.py scripts/btf_map_slots.py scripts/btf_fn_ptrs.py scripts/btf_test_tags.py scripts/btf_type_tags.py
 	$(LLVM_DIS) $< -o $@.abi.ll
 	python3 scripts/naked_abi.py $@.abi.ll progs/$*.rs
 	python3 scripts/btf_graph_types.py $@.abi.ll
@@ -250,6 +250,7 @@ $(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc scripts/naked_abi.py scripts/btf_graph_t
 	@rm -f $@.tmp $@.abi.ll
 	python3 scripts/btf_rename.py $@ progs/$*.rs
 	python3 scripts/btf_map_slots.py $@
+	@if grep -q '^// BTF_FN_PTR:' progs/$*.rs; then python3 scripts/btf_fn_ptrs.py $@ progs/$*.rs; fi
 	python3 scripts/btf_test_tags.py $@ progs/$*.rs
 	python3 scripts/btf_type_tags.py $@ progs/$*.rs
 

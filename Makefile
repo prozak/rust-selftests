@@ -215,9 +215,11 @@ $(BLDDIR)/%-ksyms.bc: $(BLDDIR)/%-opt.bc $(RUSTBPF)/btf_tags.py
 	@rm -f $@.ll $@.tmp.bc $@.tmp2.bc
 
 # An explicit rule, so a rust-bpf checkout without the pull request says
-# what is wrong instead of make's "No rule to make target".
+# what is wrong instead of make's "No rule to make target". The test is in
+# the recipe, not $(error): under `make -B` every recipe runs, the file's
+# presence notwithstanding.
 $(RUSTBPF)/btf_tags.py:
-	$(error $@ is missing: rust-selftests needs rust-bpf with pull request #6 (the btf_tag attribute) merged, see README)
+	@[ -f $@ ] || { echo "$@ is missing: rust-selftests needs rust-bpf with pull request #6 (the btf_tag attribute) merged, see README" >&2; exit 1; }
 
 # --- Final BPF object ---
 ORDER_SRCS := $(shell grep -l '^// BPF_PROGRAM_ORDER:' progs/*.rs)

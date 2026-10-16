@@ -405,10 +405,18 @@ btf_type_tags! {
 ```
 
 A C `static` global in a `private(NAME)` section is a Rust `static mut`
-with `#[link_section = ".bss.NAME"]` and no `#[no_mangle]`, declared in
-the C order: `scripts/private_sections.py` lays the section out in source
-order with C's `aligned(8)`, so a lock keeps the offset the verifier's
-messages name. With the tags
+with `#[link_section = ".bss.NAME"]` and no `#[no_mangle]`.
+`scripts/private_sections.py` lays the section out as the C object has it
+(same names at the same offsets), so a lock keeps the offset the verifier's
+messages name ("bpf_spin_lock at off=32 must be held"). That layout is not
+C's declaration order: clang emits the variables in the order the code
+first refers to them (refcounted_kptr.c declares lock, root, head and gets
+head 0, root 16, lock 32), so declaring them in the C object's order
+(`llvm-readelf -s <name>.bpf.o`) keeps the source honest even though the
+pass does not need it. translint's `private-layout` class compares the two
+objects; it fails when a static is missing (rustc drops an unreferenced
+private static, see linked_list.rs's glock2), has another size or is more
+aligned than C's. With the tags
 in place, `bpf_kptr_xchg` into the field loads as it does for the C
 object, so translate the kptr round trip as written; do not replace it
 with a release of the local pointer. `cpumask_success.rs` has every form.

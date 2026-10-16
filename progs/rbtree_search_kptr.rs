@@ -79,22 +79,22 @@ struct tree_node_ref {
 }
 
 #[allow(non_upper_case_globals)]
+#[link_section = ".data.A"]
+static mut lock: bpf_spin_lock = bpf_spin_lock { val: 0 };
+
+#[allow(non_upper_case_globals)]
 #[btf_tag(decl_tag = "contains:tree_node:node")]
 #[link_section = ".data.A"]
 static mut root: bpf_rb_root = bpf_rb_root { __opaque: [0; 2] };
 
 #[allow(non_upper_case_globals)]
-#[link_section = ".data.A"]
-static mut lock: bpf_spin_lock = bpf_spin_lock { val: 0 };
+#[link_section = ".data.B"]
+static mut lock_r: bpf_spin_lock = bpf_spin_lock { val: 0 };
 
 #[allow(non_upper_case_globals)]
 #[btf_tag(decl_tag = "contains:tree_node_ref:node")]
 #[link_section = ".data.B"]
 static mut root_r: bpf_rb_root = bpf_rb_root { __opaque: [0; 2] };
-
-#[allow(non_upper_case_globals)]
-#[link_section = ".data.B"]
-static mut lock_r: bpf_spin_lock = bpf_spin_lock { val: 0 };
 
 extern "C" {
     fn node_data_id() -> u64;

@@ -6,8 +6,10 @@
 // Direct translation of tools/testing/selftests/bpf/progs/rbtree.c
 // (bpf-rs-core idiom).
 //
-// glock, groot, groot_array, groot_array_one (private(A)) and groot_nested
-// (private(B)) are C `__hidden` statics in SEC(".data.A"/".data.B"), so
+// groot, glock, groot_array, groot_array_one (private(A), declared in the
+// order the C object lays them out: clang's first-use order, which
+// scripts/private_sections.py reproduces) and groot_nested (private(B))
+// are C `__hidden` statics in SEC(".data.A"/".data.B"), so
 // BTF_VAR_STATIC and the maps are not mmapped by libbpf. A private Rust
 // static (no #[no_mangle]) gets the same linkage (see test_spin_lock.rs);
 // rust-bpf's #[btf_tag] still finds it by its debug-info name and puts C's
@@ -71,13 +73,13 @@ static mut removed_key: i64 = -1;
 static mut first_data: [i64; 2] = [-1, -1];
 
 #[allow(non_upper_case_globals)]
-#[link_section = ".data.A"]
-static mut glock: bpf_spin_lock = bpf_spin_lock { val: 0 };
-
-#[allow(non_upper_case_globals)]
 #[btf_tag(decl_tag = "contains:node_data:node")]
 #[link_section = ".data.A"]
 static mut groot: bpf_rb_root = bpf_rb_root { __opaque: [0; 2] };
+
+#[allow(non_upper_case_globals)]
+#[link_section = ".data.A"]
+static mut glock: bpf_spin_lock = bpf_spin_lock { val: 0 };
 
 #[allow(non_upper_case_globals)]
 #[btf_tag(decl_tag = "contains:node_data:node")]

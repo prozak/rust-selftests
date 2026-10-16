@@ -25,6 +25,15 @@ Classes checked (suppress per file with `// translint: allow(<class>)`):
                  `exception_callback:` change what the kernel accepts, so a
                  missing one is an ERROR; `arg:*` and free-form tags are a
                  WARN. Rust emits them with rust-bpf's #[btf_tag].
+  private-layout [ERROR] a C `private(X)` section (`.data.X` / `.bss.X`,
+                 __hidden statics) must hold the same variables at the same
+                 offsets in the Rust object. The verifier names a lock by
+                 its offset ("bpf_spin_lock at off=32 must be held") and
+                 the proof compares the offsets the programs use.
+                 scripts/private_sections.py copies the C object's layout
+                 (clang's first-use order, not the declaration order), so
+                 a difference means a static is missing, has another size
+                 or alignment, or the C object changed.
   printk-count   [ERROR] C and Rust must have the same number of trace-log
                  call sites (bpf_printk / log_err / bpf_trace_printk):
                  dropped logging was 62 real INEQUIV sites.
@@ -350,6 +359,60 @@ def check_decl_tags(name):
                         f"C object does not")
 
 
+PRIVATE_SECTION = re.compile(r"^\.(data|bss)\.[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def private_layout(obj_path):
+    """Section name -> [(plain variable name, offset, size)] by offset for
+    every `.data.X` / `.bss.X` section of a compiled object. None when the
+    object can't be read."""
+    if not os.path.exists(obj_path):
+        return None
+    try:
+        elf = BpfElf(obj_path)
+    except Exception:
+        return None
+    out = {}
+    for sec in elf.sections:
+        if PRIVATE_SECTION.match(sec.name):
+            out[sec.name] = []
+    for sym in elf.symbols:
+        if sym.type != 1 or sym.shndx >= len(elf.sections):
+            continue
+        sec = elf.sections[sym.shndx]
+        if sec.name not in out:
+            continue
+        # rustc may suffix a static's symbol (`...3ref.0`)
+        name = plain_var_name(re.sub(r"\.\d+$", "", sym.name))
+        out[sec.name].append((name, sym.value, sym.size))
+    return {k: sorted(v, key=lambda t: t[1]) for k, v in out.items()}
+
+
+def check_private_layout(name):
+    c_obj = os.path.join(C_OBJ_DIR, f"{name}.bpf.o")
+    if os.path.exists(c_obj + ".corig"):
+        c_obj = c_obj + ".corig"
+    want = private_layout(c_obj)
+    got = private_layout(os.path.join(REPO, "bld", f"{name}.bpf.o"))
+    if want is None or got is None:
+        return
+
+    def show(layout):
+        return ", ".join(f"{n}@{off}+{sz}" for n, off, sz in layout) or "(empty)"
+
+    for sec in sorted(set(want) | set(got)):
+        if sec not in got:
+            yield ("ERROR", f"C object has section {sec} ({show(want[sec])}), "
+                            f"the translation does not")
+        elif sec not in want:
+            yield ("ERROR", f"translation has section {sec} ({show(got[sec])}), "
+                            f"the C object does not")
+        elif want[sec] != got[sec]:
+            yield ("ERROR", f"{sec} layout differs: C {show(want[sec])}; "
+                            f"Rust {show(got[sec])} (a static missing, of "
+                            f"another size, or more aligned than C's)")
+
+
 def lint(name):
     rs_path = os.path.join(REPO, "progs", f"{name}.rs")
     c_path = os.path.join(C_PROGS, f"{name}.c")
@@ -373,6 +436,8 @@ def lint(name):
         emit(level, "test-tags", text)
     for level, text in check_decl_tags(name):
         emit(level, "decl-tags", text)
+    for level, text in check_private_layout(name):
+        emit(level, "private-layout", text)
 
     # bool-global: only an error when the BPF side BRANCHES on it (reads);
     # write-only status flags (data.skip = true) store 1 identically in

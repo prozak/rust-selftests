@@ -235,7 +235,7 @@ $(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc scripts/naked_abi.py scripts/btf_graph_t
 	$(LLVM_DIS) $< -o $@.abi.ll
 	python3 scripts/naked_abi.py $@.abi.ll progs/$*.rs
 	python3 scripts/btf_graph_types.py $@.abi.ll
-	python3 scripts/private_sections.py $@.abi.ll
+	python3 scripts/private_sections.py $@.abi.ll $(SELFTESTS_OUTPUT)/$*.bpf.o
 	@if grep -q '^// BPF_PROGRAM_ORDER:' progs/$*.rs; then python3 scripts/program_order.py $@.abi.ll progs/$*.rs; fi
 	python3 scripts/maps_section.py $@.abi.ll
 	$(LLC) -march=bpfel -mcpu=v4 -filetype=obj -o $@.tmp $@.abi.ll

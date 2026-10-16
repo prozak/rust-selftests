@@ -143,6 +143,7 @@ static mut ghead: bpf_list_head = bpf_list_head { __opaque: [0; 2] };
 // unreferenced private static (#[used] would make it a global variable,
 // and libbpf's mmap of a lock-only map fails with -ENOTSUPP), so the Rust
 // object has no .bss.B; no program or test touches it.
+// translint: allow(private-layout)
 #[allow(non_upper_case_globals, dead_code)]
 #[link_section = ".bss.B"]
 static mut glock2: bpf_spin_lock = bpf_spin_lock { val: 0 };

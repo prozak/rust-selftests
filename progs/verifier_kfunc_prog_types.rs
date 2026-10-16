@@ -4,6 +4,14 @@
 
 // Direct translation of tools/testing/selftests/bpf/progs/verifier_kfunc_prog_types.c
 // (bpf-next-x86), bpf-rs-core idiom.
+//
+// cpumask_common.h's `private(MASK) static struct bpf_cpumask __kptr
+// *global_mask` is unused here, so the C object carries a .bss.MASK map
+// holding only that kptr. rustc drops an unreferenced private static
+// (#[used] would make it a global variable, which libbpf mmaps, and a map
+// with a kptr refuses that), so the Rust object has no .bss.MASK; no
+// program or test touches it.
+// translint: allow(private-layout)
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::bpf_get_current_task_btf;

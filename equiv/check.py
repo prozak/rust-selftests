@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import z3
 import bpfcore
 import bpfhelpers
+import kconfig
 import paths
 from bpfelf import (BpfElf, SHF_ALLOC, SHF_EXECINSTR, SHT_NOBITS, STT_FUNC,
                     STT_OBJECT, normalize_name)
@@ -400,6 +401,9 @@ def main():
     ap.add_argument("--kernel-btf",
                     help="vmlinux BTF (raw .BTF dump or ELF) for CO-RE "
                          "application; 'none' disables and restores CORESKIP")
+    ap.add_argument("--kconfig",
+                    help="kernel tree whose .config fills __kconfig externs "
+                         "(default: the pinned kernel); 'none' bails on them")
     args = ap.parse_args()
 
     c_path = args.c_obj or os.path.join(DEFAULT_C_DIR, f"{args.prog}.bpf.o")
@@ -453,6 +457,13 @@ def main():
             for line in notes:
                 print(f"  CORE {os.path.basename(elf.path)} {line}")
         core_applied = True
+
+    # __kconfig externs: the values libbpf would load from the same kernel
+    kcfg = None if args.kconfig == "none" else \
+        kconfig.Kconfig.from_kernel_tree(args.kconfig or None)
+    if args.kconfig not in (None, "none") and kcfg is None:
+        sys.exit(f"no kernel tree with a .config at {args.kconfig}")
+    elf_c.kconfig = elf_r.kconfig = kcfg
 
     hsigs = helper_sigs(kbtf)
     # kfunc prototypes come from the kernel (and the selftest modules,

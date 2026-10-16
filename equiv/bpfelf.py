@@ -249,21 +249,45 @@ class BpfElf:
         return self._map_defs
 
     def kconfig_externs(self):
-        """Names of __kconfig extern variables (members of the .kconfig
-        DATASEC). These are build constants libbpf resolves at load time;
-        rustc can't emit them, so translations hardcode the target value —
-        a divergence the prover can't adjudicate without the target config."""
+        """__kconfig extern variables (members of the .kconfig DATASEC):
+        name -> (kcfg type, byte size, signed), classified the way libbpf's
+        find_kcfg_type() does. The kcfg type is "bool", "tristate", "char",
+        "int", "char_arr" or "unknown"; libbpf fills each from the target
+        kernel's config at load time (see kconfig.py)."""
         if hasattr(self, "_kconfig"):
             return self._kconfig
         types = self.btf_types()
-        self._kconfig = set()
+        self._kconfig = {}
         for kind, name, _st, _vlen, extra in types.values():
             if kind == 15 and name == ".kconfig":  # DATASEC
                 for var_id in extra:
                     var = types.get(var_id)
                     if var is not None and var[0] == 14:  # VAR
-                        self._kconfig.add(var[1])
+                        self._kconfig[var[1]] = self._kcfg_type(var[2])
         return self._kconfig
+
+    def _kcfg_type(self, tid):
+        """libbpf's find_kcfg_type(): (kcfg type, size, signed)."""
+        types = self.btf_types()
+        tid = self._unwrap_modifiers(tid)
+        kind, name, size, _vlen, extra = types.get(tid, (0, "", 0, 0, None))
+        if kind == 1:  # INT
+            if extra & 4:
+                return ("bool" if size == 1 else "unknown", size, False)
+            signed = bool(extra & 1)
+            if size == 1:
+                return ("char", 1, signed)
+            if size not in (2, 4, 8):
+                return ("unknown", size, signed)
+            return ("int", size, signed)
+        if kind in (6, 19) and name == "libbpf_tristate":  # ENUM / ENUM64
+            return ("tristate", size, False) if kind == 19 or size == 4 \
+                else ("unknown", size, False)
+        if kind == 3:  # ARRAY of char
+            elem, n = extra
+            if n and self._kcfg_type(elem)[0] == "char":
+                return ("char_arr", n, False)
+        return ("unknown", self.btf_type_size(tid) or 0, False)
 
     def func_ret_bits(self, func_name):
         """Return width in bits of a BTF FUNC's return type: 0 = void,

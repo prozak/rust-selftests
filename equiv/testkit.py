@@ -110,16 +110,23 @@ class FakeElf:
 
     def __init__(self, code, path="synthetic.bpf.o", globals_=None,
                  rodata=None, maps=None, relocs=None, ret_bits=None,
-                 kfuncs=()):
+                 kfuncs=(), kconfig_vars=None, kconfig=None):
         """relocs: {insn byte offset -> symbol name}. Symbols for maps,
         globals and .rodata are created automatically, so a caller just
         names the thing an ld_imm64 should resolve to.
 
         kfuncs: names to declare as UNDEFINED symbols, which is how a kfunc
         call appears in a real object (a call insn relocating against a
-        symbol with shndx 0)."""
+        symbol with shndx 0).
+
+        kconfig_vars: {name: ((kcfg type, size, signed), weak)} -- __kconfig
+        externs, declared as UNDEFINED objects (bound WEAK when `weak`), with
+        the classification BpfElf.kconfig_externs() would derive from BTF.
+        kconfig: the kconfig.Kconfig check.py would attach (None = bail)."""
         self.path = path
         self.core_applied, self.core_poison = True, {}
+        self._kconfig = {n: d for n, (d, _weak) in (kconfig_vars or {}).items()}
+        self.kconfig = kconfig
         self._map_defs = maps or {}
         self._ret_bits = ret_bits
         self.sections, self.symbols = [], []
@@ -153,6 +160,9 @@ class FakeElf:
         for kname in kfuncs:
             self.symbols.append(Symbol(len(self.symbols), kname, 0, 0,
                                        1, STT_FUNC, 0))   # shndx 0 = UND
+        for kname, (_decl, weak) in (kconfig_vars or {}).items():
+            self.symbols.append(Symbol(len(self.symbols), kname, 0, 0,
+                                       2 if weak else 1, STT_OBJECT, 0))
         if relocs:
             table = {}
             for off, symname in relocs.items():
@@ -185,7 +195,7 @@ class FakeElf:
         return set()
 
     def kconfig_externs(self):
-        return set()
+        return self._kconfig
 
     def func_ret_bits(self, _name):
         return self._ret_bits
@@ -193,14 +203,17 @@ class FakeElf:
 
 # -------------------------------------------------------------- comparison
 
-def compare(code_a, code_b, timeout_ms=20_000, hsigs=None, ksigs=None, **kw):
+def compare(code_a, code_b, timeout_ms=20_000, hsigs=None, ksigs=None,
+            b_kw=None, **kw):
     """Prove two synthetic programs equivalent. Returns (verdict, detail).
 
     hsigs / ksigs: generic helper and kfunc signatures, in the shape of
     check.helper_sigs() and check.kernel_kfunc_sigs(). Given explicitly
-    here so the tests need no kernel BTF."""
+    here so the tests need no kernel BTF.
+    b_kw: FakeElf arguments for the second object when they differ from
+    the first's (kw)."""
     elf_a = FakeElf(code_a, path="a.bpf.o", **kw)
-    elf_b = FakeElf(code_b, path="b.bpf.o", **kw)
+    elf_b = FakeElf(code_b, path="b.bpf.o", **(kw if b_kw is None else b_kw))
     shared, _ = _check.global_regions({"A": elf_a, "B": elf_b})
     for name, arr in (("ctx", "ctx"), ("kmem", "kmem"),
                       ("trace", "trace_init"), ("skbdata", "skbdata"),

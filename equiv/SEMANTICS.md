@@ -120,6 +120,23 @@ A pointer loaded out of the ctx is an ordinary bitvector, so dereferencing it re
 - path 0: `(none)`
   - returns `Concat(kmem[31 + Concat(ctx[7], ctx[6], ctx[5], ctx[4], ctx[3], ctx[2], ctx[1], ctx[0])], kmem[30 + Concat(ctx[7], ctx[6], ctx[5], ctx[4], ctx[3], ctx[2], ctx[1], ctx[0])], kmem[29 + Concat(ctx[7], ctx[6], ctx[5], ctx[4] …`
 
+### __kconfig extern
+
+An extern libbpf fills from the target kernel's config at load time (CONFIG_HZ here) is a read-only region holding exactly the bytes libbpf would write, taken from the pinned kernel's .config, so the load folds to a constant. A translation that hardcodes the right value proves equal; the C side cannot explore a config branch the target kernel never takes.
+
+```
+   0  lddw r1, ...
+   1    (lddw high half)
+   2  ldxw r0, [r1+0]
+   3  exit
+```
+
+*1 path(s):*
+
+- path 0: `(none)`
+  - returns `1000`
+  - writes: kcfg:A:CONFIG_HZ
+
 ## Paths
 
 ### Conditional branch

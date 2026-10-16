@@ -20,6 +20,7 @@ import z3
 
 import check as _check
 from bpfsym import Executor
+from kconfig import Kconfig
 from testkit import FakeElf, SEC_NAME, asm
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -87,6 +88,17 @@ ENTRIES = [
       "A pointer loaded out of the ctx is an ordinary bitvector, so "
       "dereferencing it reads the shared `kmem` array at that symbolic "
       "address. Stores through it write kmem, which is an observable."),
+    E("__kconfig extern", "Memory",
+      asm.prog(asm.ld_imm64(R1, 0), asm.ldx(4, R0, R1, 0), asm.exit_()),
+      "An extern libbpf fills from the target kernel's config at load time "
+      "(CONFIG_HZ here) is a read-only region holding exactly the bytes "
+      "libbpf would write, taken from the pinned kernel's .config, so the "
+      "load folds to a constant. A translation that hardcodes the right "
+      "value proves equal; the C side cannot explore a config branch the "
+      "target kernel never takes.",
+      kconfig_vars={"CONFIG_HZ": (("int", 4, True), False)},
+      kconfig=Kconfig({"CONFIG_HZ": "1000"}, version=0),
+      relocs={0: "CONFIG_HZ"}),
 
     # --------------------------------------------------------------- paths
     E("Conditional branch", "Paths",

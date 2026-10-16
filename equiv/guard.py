@@ -39,7 +39,7 @@ REPO = os.path.dirname(HERE)
 DEFAULT_C_DIR = paths.SELFTESTS_OUTPUT
 BASELINE = os.path.join(HERE, "results", "baseline.tsv")
 TOOL_FILES = ["bpfelf.py", "bpfsym.py", "bpfcore.py", "check.py",
-              "waivers.tsv"]
+              "kconfig.py", "waivers.tsv"]
 GOOD = ("EQUIV", "WAIVED-EQUIV")
 NONPROOF = ("BAIL", "TIMEOUT", "UNKNOWN", "NOPROGS")
 
@@ -59,6 +59,10 @@ def tool_hash():
     kbtf = os.path.join(REPO, "bld", "vmlinux.btf")
     if os.path.exists(kbtf):
         h.update(md5(kbtf).encode())
+    # __kconfig externs are filled from the pinned kernel's config
+    kcfg = os.path.join(paths.KERNEL_SRC, ".config")
+    if os.path.exists(kcfg):
+        h.update(md5(kcfg).encode())
     # check.py resolves CO-RE and kfunc signatures against these modules.
     # Hash only their BTF inputs, not unrelated ELF timestamps/debug data.
     from bpfelf import BpfElf

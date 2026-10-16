@@ -13,6 +13,8 @@ a pointer into a named memory region. Regions:
                array, so both programs see the same pre-run state. Writes are
                the observable output.
   ro:<obj>:<sec>  per-object read-only section with concrete initial bytes.
+  kcfg:<obj>:<name>  one __kconfig extern: read-only, holding the value
+               libbpf would fill in from the target kernel's config.
   stack:<tag>  per-run 512-byte frame, r10 = end.
   map:<name>   opaque map pointer (identity only; deref bails).
 
@@ -26,6 +28,7 @@ import z3
 
 from bpfelf import (SHF_ALLOC, SHF_EXECINSTR, SHT_NOBITS, STT_FUNC,
                     STT_SECTION, normalize_name)
+from kconfig import KconfigError
 
 STACK_SIZE = 512
 MAX_INSNS_PER_PATH = 50_000
@@ -298,6 +301,7 @@ class Executor:
         self.core_applied = getattr(elf, "core_applied", False)
         self.core_poison = getattr(elf, "core_poison", {})
         self.code = {sec.name: self._decode(sec)}  # secname -> insns
+        self._kcfg_bytes = {}  # kcfg:<obj>:<name> region -> loaded bytes
         self.dynamic_maps = {}  # inner-map handles from map-in-map lookups
         self.paths = []
         self.nclobber = 0
@@ -349,6 +353,11 @@ class Executor:
             mem[region] = z3.Array("stack_init", z3.BitVecSort(64), z3.BitVecSort(8))
         elif region.startswith("ro:"):
             mem[region] = self._concrete_array(region)
+        elif region.startswith("kcfg:"):
+            arr = z3.K(z3.BitVecSort(64), z3.BitVecVal(0, 8))
+            for i, b in enumerate(self._kcfg_bytes[region]):
+                arr = z3.Store(arr, bv64(i), z3.BitVecVal(b, 8))
+            mem[region] = arr
         elif region.startswith(("mapval:", "rbuf:")):
             # per-call-index memory handed back by the environment: shared
             # initial contents, per-run writes (observable for mapval)
@@ -410,7 +419,7 @@ class Executor:
             region, addr = "kmem", ptr
         else:
             region, addr = ptr.region, ptr.off
-        if region.startswith(("ro:", "map:")):
+        if region.startswith(("ro:", "map:", "kcfg:")):
             raise Bail(f"store into read-only region {region}")
         if is_ptr(val) and size < 8:
             # A NARROWED pointer store is not a spill: the program has
@@ -492,15 +501,25 @@ class Executor:
             return bv64(addend)
         sym = rel.sym
         if sym.shndx == 0:
-            # __kconfig externs (LINUX_HAS_SYSCALL_WRAPPER, LINUX_KERNEL_-
-            # VERSION, ...) are build constants libbpf resolves at load;
-            # rustc can't emit them, so translations hardcode the target
-            # value. A free oracle would let the C side explore config
-            # branches the target kernel never takes (spurious INEQUIV vs a
-            # correctly-hardcoded translation) — bail, as this is a known
-            # translation divergence the prover can't adjudicate.
-            if sym.name in self.elf.kconfig_externs():
-                raise Bail(f"__kconfig extern {sym.name} in ld_imm64")
+            # __kconfig externs (CONFIG_HZ, LINUX_KERNEL_VERSION, ...) are
+            # constants libbpf fills in at load from the target kernel's
+            # config, so the loaded value is fixed, not an input: a free
+            # oracle would let the C side explore config branches the target
+            # kernel never takes, against a translation that hardcodes the
+            # right value. check.py hands each object the pinned kernel's
+            # config (kconfig.py); without one, bail as before.
+            decl = self.elf.kconfig_externs().get(sym.name)
+            if decl is not None:
+                kcfg = getattr(self.elf, "kconfig", None)
+                if kcfg is None:
+                    raise Bail(f"__kconfig extern {sym.name} in ld_imm64")
+                try:
+                    val = kcfg.value(sym.name, decl, weak=sym.bind == 2)
+                except KconfigError as e:
+                    raise Bail(f"__kconfig extern: {e}")
+                region = f"kcfg:{self.tag}:{sym.name}"
+                self._kcfg_bytes[region] = val
+                return Ptr(region, bv64(addend))
             # otherwise it's a ksym address (a kernel function/variable, e.g.
             # get_func_ip comparisons `ip == &bpf_fentry_test1`). Assign each
             # (symbol, addend) a DISTINCT fixed constant rather than a free

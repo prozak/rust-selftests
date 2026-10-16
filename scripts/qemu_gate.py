@@ -307,9 +307,8 @@ class Gate:
             for future in [pool.submit(self.worker_loop, k, queue)
                            for k in range(len(self.workers))]:
                 future.result()
-        # The classic way, alone in the shared tree: for stress tests
-        # another VM's load would perturb, and for consumers an overlay
-        # cannot satisfy (see scripts/gate-serial).
+        # The classic way, alone in the shared tree: stress tests another
+        # VM's load would perturb (see scripts/gate-serial).
         self.workers.append(self.shared_env)
         self.worker_loop(len(self.workers) - 1, [n for n in names if n in serial])
 

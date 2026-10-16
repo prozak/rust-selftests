@@ -22,7 +22,7 @@ The output directory must not already exist. Defaults are a UTC timestamp
 under ignored `nightly/`, eight proof workers, four build workers and eight
 QEMU gate workers. All three worker settings accept 1–8. The default guest
 size for this driver is four CPUs, overridable with `QEMU_CPUS`. With eight
-gate workers the runtime gate takes about 40 minutes, with four about an
+gate workers the runtime gate takes about 30 minutes, with four about an
 hour; with one, serially in the shared selftests output, about three and a
 half.
 
@@ -56,13 +56,16 @@ The driver sequences every stage even if the outer make uses `-j`:
    (`scripts/gate-overlay.sh`): the swapped object, the regenerated
    skeleton, the consuming test object and the relinked `test_progs` land
    in the worker's upper directory (about 40 MB per object), the guest
-   mounts the same overlay before running `test_progs`, and the shared
-   output is never written, so going back to C costs nothing. The objects
-   listed in `scripts/gate-serial` run afterwards, one at a time, in the
-   shared output itself, as a single worker does: the `bpf_iter_*` objects,
-   whose `task_vma` subtest compares a mapped file's path and device with
-   `/proc/self/maps` and sees the overlay's lower file instead, and
-   `fentry_recursive` (#52). `--gate-mode copy` (`scripts/gate-workers.sh`)
+   mounts the same overlay before running `test_progs` (from a copy on
+   the guest's tmpfs: mapped through overlayfs, the binary's own
+   `vm_file` is the layer's file, and `bpf_iter`'s `task_vma` subtest,
+   which compares `bpf_d_path()` of that mapping with `/proc/<pid>/maps`,
+   fails for C and Rust alike), and the shared output is never written,
+   so going back to C costs nothing. The objects listed in
+   `scripts/gate-serial` run afterwards, one at a time, in the shared
+   output itself, as a single worker does: `fentry_recursive` and its
+   target, whose stress test another guest's load perturbs (#52).
+   `--gate-mode copy` (`scripts/gate-workers.sh`)
    gives each worker a trimmed copy of the output instead, about 0.7 GB
    each, for hosts without unprivileged user namespaces; `make
    clean-gate-workers` removes the copies.

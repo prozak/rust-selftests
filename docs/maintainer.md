@@ -36,7 +36,7 @@ a PASS that became NO-ORACLE. Logs are `qemu/gate/logs/<name>.log` and
 The environment hash covers the kernel image, the test modules' BTF, the
 swap/boot scripts, `known-bad-tests`, `gate-serial` and `QEMU_CPUS` (the
 gate uses 4, as the nightly does). When it changes every row is stale and
-the gate stops with exit 2 instead of starting a 40-minute full run:
+the gate stops with exit 2 instead of starting a 30-minute full run:
 `scripts/gate.py --all` does that run, or `make ci-nightly` followed by
 `scripts/gate.py --reseed nightly/<run>/runtime-after.tsv`, which copies
 the nightly's verdicts only when its recorded hashes equal the current
@@ -136,10 +136,15 @@ Measured 2026-10-16 on a 32-CPU, 23 GB host with 4-CPU, 4 GB guests
 | 4 | 331 s | 3493 s | 3.7 GB | 9 |
 | 8 | 208 s | 2371 s | 7.0 GB | 17 |
 
-The 35 `gate-serial` objects run one at a time at the end (about 12
-minutes) whatever the worker count, so the parallel part gained 1.6x and
-the whole gate 1.47x. Eight is the default (`GATE_WORKERS`,
-`NIGHTLY_GATE_WORKERS`); the guest count is capped at eight.
+The `gate-serial` objects run one at a time at the end whatever the worker
+count. When that lane held the 33 `bpf_iter_*` objects as well (about 12
+minutes), the parallel part gained 1.6x and the whole gate 1.47x; since
+the guest runs `test_progs` from its tmpfs (see `scripts/qemu-test-progs`)
+those objects gate in the overlay workers too, the lane is the two
+`fentry_recursive*` objects, and the full corpus (605 translations) took
+1756 s with eight workers on 2026-10-16. Eight is the default
+(`GATE_WORKERS`, `NIGHTLY_GATE_WORKERS`); the guest count is capped at
+eight.
 
 ## Running a single test
 

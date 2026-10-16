@@ -79,13 +79,25 @@ fi
 # GATE_UPPER: rebuild the worker's view in the guest before running. 9p
 # hides overlay whiteouts (the host lists them as char devices, lookups
 # fail), so files the host deleted are deleted again in the guest's layer.
+# test_progs itself then runs from a copy on the tmpfs, not from the
+# overlay: a file mapped through overlayfs has the real layer file as
+# vm_file, so bpf_d_path() on test_progs's own text mapping names the
+# layer's path while /proc/<pid>/maps shows the overlay path, and
+# prog_tests/bpf_iter.c's task_vma subtest, which compares the two,
+# fails for C and Rust alike. From tmpfs both say /run/gate/test_progs.
+# The cwd stays $OUT: tests open their .bpf.o files relative to it, and
+# the uprobe tests resolve themselves through /proc/self/exe either way.
 PRELUDE=""
+PROG="$(basename "${TEST_PROGS}")"
+RUN_PROGS="./${PROG}"
 if [ -n "${GATE_UPPER:-}" ]; then
     PRELUDE="mkdir -p /run/gate && mount -t tmpfs tmpfs /run/gate && \
 mkdir /run/gate/u /run/gate/w && \
 mount -t overlay overlay -o 'lowerdir=${GATE_UPPER}:${OUT},upperdir=/run/gate/u,workdir=/run/gate/w' '${OUT}' && \
 (cd '${GATE_UPPER}' && find . -type c) | while read -r f; do rm -f '${OUT}'/\"\$f\"; done && \
+cp -p '${OUT}/${PROG}' /run/gate/ && \
 cd '${OUT}' && "
+    RUN_PROGS="/run/gate/${PROG}"
 fi
 
 # vng: boot the kernel, share host fs, run the command in $OUT, propagate
@@ -96,4 +108,4 @@ exec timeout "${QEMU_TIMEOUT:-600}" "${VNG}" \
     --rw \
     --cwd "${OUT}" \
     --verbose \
-    -- "${PRELUDE}mount -t bpf bpffs /sys/fs/bpf 2>/dev/null; ./$(basename "${TEST_PROGS}") ${TEST_PROGS_EXTRA:-} ${TEST_ARG}"
+    -- "${PRELUDE}mount -t bpf bpffs /sys/fs/bpf 2>/dev/null; ${RUN_PROGS} ${TEST_PROGS_EXTRA:-} ${TEST_ARG}"

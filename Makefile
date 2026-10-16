@@ -114,8 +114,10 @@ $(BLDDIR)/vmlinux.btf: $(VMLINUX_BTF)
 	@mkdir -p $(BLDDIR)
 	$(LLVM_OBJCOPY) --dump-section=.BTF=$@.tmp $< /dev/null && mv $@.tmp $@
 
-# --- Keep-list: the global FUNC/OBJECT symbols of the C-built object are the
-# --- ABI the harness sees; keep exactly those through internalize/globaldce.
+# --- Keep-list: the global and weak FUNC/OBJECT symbols of the C-built object
+# --- are the ABI the harness sees (a `__weak` function is a global subprogram
+# --- to libbpf and the verifier); keep exactly those through internalize/
+# --- globaldce.
 # The prerequisite is the installed object, which always exists, but the
 # symbols are read from the pristine .corig backup when a swap has put the
 # Rust object in its place. It used to depend on the .corig alone: that file
@@ -132,7 +134,7 @@ $(KEEPS): $(BLDDIR)/%.keep: $(SELFTESTS_OUTPUT)/%.bpf.o
 	@mkdir -p $(BLDDIR)
 	@src=$<; [ -f $<.corig ] && src=$<.corig; \
 	$(LLVM_READELF) -s $$src | \
-		awk '$$4 ~ /FUNC|OBJECT/ && $$5 == "GLOBAL" && $$7 != "UND" {print $$8}' | \
+		awk '$$4 ~ /FUNC|OBJECT/ && $$5 ~ /GLOBAL|WEAK/ && $$7 != "UND" {print $$8}' | \
 		sort -u > $@.tmp; \
 	if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv $@.tmp $@; echo "[keep] $*: $$(tr '\n' ' ' < $@)"; fi
 
@@ -182,7 +184,8 @@ $(patsubst progs/%.rs,$(BLDDIR)/%-opt.bc,$(KSYM_VAR_SRCS)): scripts/ksym_vars.py
 TYPE_ID_SRCS := $(shell grep -l '^// BTF_TYPE_ID:' progs/*.rs)
 $(patsubst progs/%.rs,$(BLDDIR)/%-opt.bc,$(TYPE_ID_SRCS)): scripts/type_id.py
 # usdt.bpf.h's weak maps are ABI exports even though the handler does not
-# reference them. The ordinary C keep list deliberately selects GLOBAL only.
+# reference them (the keep list has them as WEAK OBJECTs too; this predates
+# the keep list's weak symbols and is kept as belt and braces).
 $(BLDDIR)/uprobe_multi_usdt-opt.bc: Makefile
 $(BLDDIR)/uprobe_multi_usdt-opt.bc: PUBLIC_API_EXTRA = --internalize-public-api-list=__bpf_usdt_specs,__bpf_usdt_ip_to_spec_id
 

@@ -375,7 +375,14 @@ unsafe fn select_bucket(htab: *mut htab, hash: u32) -> *mut ArenaListHead {
     core::ptr::addr_of_mut!((*b.add(idx)).head)
 }
 
-#[no_mangle]
+// C's htab_lookup_elem/htab_update_elem are `__weak` GLOBAL subprograms
+// whose first parameter is `struct htab __arena *`: the verifier checks a
+// global subprogram's call sites against its BTF signature, and only the
+// `arena` type tag on that pointer lets an arena pointer be passed ("R1
+// type=arena expected=fp" without it). rustc cannot put a type tag on a
+// parameter type (btf_type_tags! covers struct members and globals only),
+// so the two are private static subprograms here, which the verifier
+// checks at each call site instead; arena_htab.rs does the same.
 extern "C" fn htab_lookup_elem(htab: *mut htab, key: i32) -> i32 {
     unsafe {
         let htab = cast_kern(htab);
@@ -389,7 +396,6 @@ extern "C" fn htab_lookup_elem(htab: *mut htab, key: i32) -> i32 {
     }
 }
 
-#[no_mangle]
 extern "C" fn htab_update_elem(htab: *mut htab, key: i32, value: i32) -> i32 {
     unsafe {
         let htab = cast_kern(htab);

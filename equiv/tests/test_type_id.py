@@ -60,10 +60,43 @@ def test_rejects_address_taken_polyfill():
 
 def test_requires_c_target_relocation_with_same_kind_and_name(monkeypatch):
     monkeypatch.setattr(type_id, 'core_relo_records', lambda _: {'prog': [(0, 2, '0', 7), (1, 3, '0', 6)]})
-    assert type_id.contract(None, fixture_btf(), {'tid': (4, 'thing')}) == {'tid': 2}
+    assert type_id.contract(None, fixture_btf(), {'tid': (4, 'thing', False)}) == {'tid': 2}
     for kind, name in [(5, 'thing'), (8, 'alias'), (4, 'missing')]:
         with pytest.raises(ValueError, match='C TYPE_ID_TARGET'):
-            type_id.contract(None, fixture_btf(), {'tid': (kind, name)})
+            type_id.contract(None, fixture_btf(), {'tid': (kind, name, False)})
+
+
+def test_local_ids_need_a_c_local_relocation(monkeypatch):
+    # [2] thing carries only a TARGET relocation: not enough for a local ID
+    monkeypatch.setattr(type_id, 'core_relo_records', lambda _: {'prog': [(0, 2, '0', 7)]})
+    with pytest.raises(ValueError, match='C TYPE_ID_LOCAL'):
+        type_id.contract(None, fixture_btf(), {'tid': (4, 'thing', True)})
+    monkeypatch.setattr(type_id, 'core_relo_records', lambda _: {'prog': [(0, 2, '0', 6)]})
+    assert type_id.contract(None, fixture_btf(), {'tid': (4, 'thing', True)}) == {'tid': (4, 'thing')}
+
+
+def test_declarations_parse_the_local_form():
+    assert type_id.declarations('// BTF_TYPE_ID: new_id local struct node_data') == {
+        'new_id': (4, 'node_data', True)}
+    with pytest.raises(ValueError, match='struct or union'):
+        type_id.declarations('// BTF_TYPE_ID: new_id local typedef u32')
+
+
+RUST_COMPOSITE = ('!7 = distinct !DICompositeType(tag: DW_TAG_structure_type, name: "thing", '
+                  'scope: !1, file: !1, size: 64, align: 64, elements: !8)\n!8 = !{}\n')
+
+
+def test_a_local_id_points_at_rustcs_own_composite():
+    result = type_id.lower(fixture_ir(['tid']) + RUST_COMPOSITE, {'tid': (4, 'thing')}, fixture_btf())
+    assert 'call i64 @llvm.bpf.btf.type.id(i32 1, i64 0), !dbg !3, !llvm.preserve.access.index !7' in result
+    # no synthesized stand-in: the layout must be Rust's own
+    assert result.count('DW_TAG_structure_type, name: "thing"') == 1
+
+
+@pytest.mark.parametrize('extra', ['', RUST_COMPOSITE + RUST_COMPOSITE.replace('!7 =', '!9 =')])
+def test_a_local_id_needs_exactly_one_rust_composite(extra):
+    with pytest.raises(ValueError, match='expected one Rust debug-info structure thing'):
+        type_id.lower(fixture_ir(['tid']) + extra, {'tid': (4, 'thing')}, fixture_btf())
 
 
 @pytest.mark.parametrize('source', ['// BTF_TYPE_ID: invalid', '// BTF_TYPE_ID: id struct x\n// BTF_TYPE_ID: id struct x'])

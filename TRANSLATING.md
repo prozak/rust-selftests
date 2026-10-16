@@ -250,6 +250,22 @@ Only type identity is imported from C, never program instructions or a
 resolved kernel ID. Field accesses still use the Rust CO-RE paths below.
 See `mptcp_subflow.rs` for `bpf_rdonly_cast` plus field relocations.
 
+C's `bpf_obj_new(typeof(*n))` passes `bpf_core_type_id_local(T)`, the id of
+the object's OWN struct. Declare it with `local`:
+
+```rust
+// BTF_TYPE_ID: node_data_id local struct node_data
+extern "C" {
+    fn node_data_id() -> u64;
+}
+let n = unsafe { bpf_obj_new(node_data_id()) } as *mut node_data;
+```
+
+The C object must carry a TYPE_ID_LOCAL relocation for that struct. The
+lowered call points at rustc's own debug info for it, so llc emits the
+struct with its real members, which the kernel reads to size and lay out
+the allocation. Never hardcode the id. `normal_map_btf.rs` is the example.
+
 When the consumer depends on program load order (libbpf stops at the first
 rejection), add `// BPF_PROGRAM_ORDER: first_prog second_prog`.
 `scripts/program_order.py` reorders whole LLVM definitions immediately

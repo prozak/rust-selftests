@@ -47,8 +47,8 @@
 // omitted entirely: `bpf_config.enable_cgroup_v1_resolver` defaults to
 // (and, since the test never sets it, always stays) false/0, so the C
 // branch is never taken either -- omitting it changes no observable
-// behavior and avoids needing a `__kconfig` extern (unsupported here, see
-// TRANSLATING.md) plus several more kernel structs (cgroup_subsys_state,
+// behavior and avoids needing a `__kconfig` extern (not declarable from
+// Rust yet, #51) plus several more kernel structs (cgroup_subsys_state,
 // cgroup_subsys, kernfs_root) with no test coverage of the branch.
 //
 // profiler2.c's INLINE is empty (plain `static`, compiler decides) rather

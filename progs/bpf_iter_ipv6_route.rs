@@ -6,12 +6,13 @@
 // (bpf-rs-core idiom).
 //
 // C's `extern bool CONFIG_IPV6_SUBTREES __kconfig __weak;` is elided: the
-// pipeline cannot provide __kconfig externs (#8), and
+// pipeline cannot provide __kconfig externs (#51), and
 // prog_tests/bpf_iter.c's test_ipv6_route() only drives a dummy read that
 // discards the printed content ("not check contents, but ensure read() ends
 // without error"), so the CONFIG_IPV6_SUBTREES branch is hardcoded to the C
 // source's `else` arm (a kernel built with IPV6_SUBTREES disabled would take
-// the same path).
+// the same path). The pinned kernel has it enabled, so this diverges from the
+// C object there (#50).
 //
 // `rt->fib6_nh[0]` (a C99 flexible array member) and `nh->nh_info->fib6_nh`
 // are both plain `struct fib6_nh` accesses at the field-name level; the

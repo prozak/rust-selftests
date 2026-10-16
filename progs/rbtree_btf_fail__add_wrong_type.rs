@@ -13,17 +13,17 @@
 // `bpf_rbtree_add()`. The kernel's btf_find_graph_root() resolves the
 // "contains:" BTF decl tag and rejects load on the type/offset mismatch.
 //
-// The pipeline cannot emit a `contains:` decl tag yet (#44), so `groot`
-// reaches the kernel with no "contains:" tag whatsoever regardless of which type we
-// actually add — btf_find_graph_root() treats a missing tag the same as a
-// mismatched one (-ENOENT folded to -EINVAL), so the object's own BTF blob
-// is rejected during load, which is exactly the failure this test asserts
-// via `ASSERT_ERR_PTR(skel, "...__open_and_load unexpected success")`.
-// The test therefore passes for the wrong reason: the C object is rejected
-// for adding the wrong type, this one for a missing tag (#44). The
-// struct/program shape below is otherwise a straight translation.
+// `#[btf_tag]` (rust-bpf) puts the same `contains:node_data:node` decl tag
+// on `groot`, and bpf_obj_new() takes node_data2's local type id like C's
+// bpf_obj_new(typeof(*n)). As in the C object, nothing references
+// node_data, so it never reaches .BTF: btf_find_graph_root() cannot find the
+// struct the tag names and fails the .data.A map with -ENOENT. The kernel
+// rejects the object before the verifier would see the wrong-type add.
+
+// BTF_TYPE_ID: node_data2_id local struct node_data2
 
 use bpf_rs_core::bpf_object;
+use btf_macros::btf_tag;
 use bpf_rs_core::helpers::{bpf_spin_lock, bpf_spin_unlock};
 use core::ffi::c_void;
 
@@ -58,11 +58,13 @@ struct node_data2 {
 #[no_mangle]
 static mut glock: bpf_spin_lock = bpf_spin_lock { val: 0 };
 
+#[btf_tag(decl_tag = "contains:node_data:node")]
 #[link_section = ".data.A"]
 #[no_mangle]
 static mut groot: bpf_rb_root = bpf_rb_root { __opaque: [0; 2] };
 
 extern "C" {
+    fn node_data2_id() -> u64;
     fn bpf_obj_new(local_type_id: u64) -> *mut c_void;
     fn bpf_rbtree_add(
         root: *mut bpf_rb_root,
@@ -81,7 +83,7 @@ extern "C" fn less2(a: *mut bpf_rb_node, b: *const bpf_rb_node) -> bool {
 #[link_section = "tc"]
 #[no_mangle]
 extern "C" fn rbtree_api_add__add_wrong_type(_ctx: *const c_void) -> i64 {
-    let n = unsafe { bpf_obj_new(0) } as *mut node_data2;
+    let n = unsafe { bpf_obj_new(node_data2_id()) } as *mut node_data2;
     if n.is_null() {
         return 1;
     }

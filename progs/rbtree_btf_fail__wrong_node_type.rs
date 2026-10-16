@@ -13,17 +13,16 @@
 // decl tag and rejects load if the referenced field isn't a graph node of
 // the matching kind — the C comment says "BTF load should fail".
 //
-// The pipeline cannot emit a `contains:` decl tag yet (#44), so `groot`
-// reaches the kernel with no tag at all. btf_find_graph_root()
-// treats a missing tag the same as a mismatched one (btf_find_decl_tag_value()
-// returns -ENOENT, folded to -EINVAL) — so the object's own BTF blob is
-// rejected during load, which is exactly the failure this test asserts via
-// `ASSERT_ERR_PTR(skel, "...__open_and_load unexpected success")`.
-// The test therefore passes for the wrong reason: the C object is rejected
-// for a mismatched tag, this one for a missing tag (#44). The struct/program
-// shape below is otherwise a straight translation.
+// `#[btf_tag]` (rust-bpf) puts the same `contains:node_data:node` decl tag
+// on `groot`, and bpf_obj_new() takes node_data's local type id like C's
+// bpf_obj_new(typeof(*n)), which is what brings node_data into .BTF.
+// btf_parse_graph_root() then finds `node` typed bpf_list_node rather than
+// bpf_rb_node and fails the .data.A map with -EINVAL, as for the C object.
+
+// BTF_TYPE_ID: node_data_id local struct node_data
 
 use bpf_rs_core::bpf_object;
+use btf_macros::btf_tag;
 use bpf_rs_core::helpers::{bpf_spin_lock, bpf_spin_unlock};
 use core::ffi::c_void;
 
@@ -64,11 +63,13 @@ struct node_data {
 #[no_mangle]
 static mut glock: bpf_spin_lock = bpf_spin_lock { val: 0 };
 
+#[btf_tag(decl_tag = "contains:node_data:node")]
 #[link_section = ".data.A"]
 #[no_mangle]
 static mut groot: bpf_rb_root = bpf_rb_root { __opaque: [0; 2] };
 
 extern "C" {
+    fn node_data_id() -> u64;
     fn bpf_obj_new(local_type_id: u64) -> *mut c_void;
     fn bpf_rbtree_first(root: *mut bpf_rb_root) -> *mut bpf_rb_node;
 }
@@ -76,7 +77,7 @@ extern "C" {
 #[link_section = "tc"]
 #[no_mangle]
 extern "C" fn rbtree_api_add__wrong_node_type(_ctx: *const c_void) -> i64 {
-    let n = unsafe { bpf_obj_new(0) } as *mut node_data;
+    let n = unsafe { bpf_obj_new(node_data_id()) } as *mut node_data;
     if n.is_null() {
         return 1;
     }

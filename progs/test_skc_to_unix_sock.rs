@@ -35,7 +35,7 @@ use bpf_rs_core::progs::fentry_arg as arg;
 use btf_macros::btf;
 
 const SIZEOF_SHORT: i32 = 2; // sizeof(short) == sizeof(sa_family_t)
-const SIZEOF_SOCKADDR_UN: i32 = 110; // sizeof(struct sockaddr_un): 2 + 108
+const SIZEOF_SUN_PATH: i32 = 108; // sizeof(unix_sk->addr->name->sun_path)
 const UNIX_ADDR_NAME_OFFSET: usize = 8; // offsetof(struct unix_address, name)
 const SOCKADDR_UN_SUN_PATH_OFFSET: usize = 2; // offsetof(struct sockaddr_un, sun_path)
 const SUN_PATH_OFFSET_FROM_ADDR: usize = UNIX_ADDR_NAME_OFFSET + SOCKADDR_UN_SUN_PATH_OFFSET;
@@ -100,7 +100,7 @@ extern "C" fn unix_listen(ctx: *const u64) -> i32 {
 
     let mut i: i32 = 1;
     while i < len {
-        if i >= SIZEOF_SOCKADDR_UN {
+        if i >= SIZEOF_SUN_PATH {
             break;
         }
 

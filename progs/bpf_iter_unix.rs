@@ -31,7 +31,7 @@ use btf_macros::btf;
 const BPF_MAP_TYPE_SOCKMAP: usize = 15;
 
 const SIZEOF_SHORT: i32 = 2; // sizeof(short) == sizeof(sa_family_t)
-const SIZEOF_SOCKADDR_UN: i32 = 110; // sizeof(struct sockaddr_un): 2 + 108
+const SIZEOF_SUN_PATH: i32 = 108; // sizeof(unix_sk->addr->name->sun_path)
 const UNIX_ADDR_NAME_OFFSET: usize = 8; // offsetof(struct unix_address, name)
 const SOCKADDR_UN_SUN_PATH_OFFSET: usize = 2; // offsetof(struct sockaddr_un, sun_path)
 const SUN_PATH_OFFSET_FROM_ADDR: usize = UNIX_ADDR_NAME_OFFSET + SOCKADDR_UN_SUN_PATH_OFFSET;
@@ -122,8 +122,8 @@ extern "C" fn dump_unix(ctx: *const bpf_iter__unix) -> i32 {
     let seq_num = meta.seq_num;
 
     if seq_num == 0 {
-        static FMT_HDR: [u8; 68] =
-            *b"Num               RefCount Protocol Flags    Type St    Inode Path\n\0";
+        static FMT_HDR: [u8; 60] =
+            *b"Num       RefCount Protocol Flags    Type St    Inode Path\n\0";
         bpf_seq_printf(
             seq,
             FMT_HDR.as_ptr() as *const c_void,
@@ -164,8 +164,8 @@ extern "C" fn dump_unix(ctx: *const bpf_iter__unix) -> i32 {
         );
     }
 
-    static FMT_MAIN: [u8; 35] = *b"%pK: %08X %08X %08X %04X %02X %8lu\0";
-    let params_main: [u64; 7] = [unix_sk as u64, refcnt, 0, flags, sk_type, state, ino];
+    static FMT_MAIN: [u8; 36] = *b"%08u: %08X %08X %08X %04X %02X %8lu\0";
+    let params_main: [u64; 7] = [0, refcnt, 0, flags, sk_type, state, ino];
     bpf_seq_printf(
         seq,
         FMT_MAIN.as_ptr() as *const c_void,
@@ -206,7 +206,7 @@ extern "C" fn dump_unix(ctx: *const bpf_iter__unix) -> i32 {
 
             let mut i: i32 = 1;
             while i < len {
-                if i >= SIZEOF_SOCKADDR_UN {
+                if i >= SIZEOF_SUN_PATH {
                     break;
                 }
 

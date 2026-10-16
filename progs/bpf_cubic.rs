@@ -21,7 +21,7 @@
 //
 // `extern unsigned long CONFIG_HZ __kconfig;` is dropped: prog_tests never
 // reads skel->kconfig, and the pipeline cannot provide __kconfig externs
-// (#8). HZ is hardcoded to 1000, this session's
+// (#51). HZ is hardcoded to 1000, this session's
 // FLAVOR=qemu test kernel's CONFIG_HZ (bpf-next-x86 checkout's .config).
 //
 // `tcp_is_cwnd_limited()`'s `is_cwnd_limited:1` bitfield has no plain
@@ -323,26 +323,28 @@ fn cubic_root(a: u64) -> u32 {
     x
 }
 
+// Every C `tcp_jiffies32` is a fresh bpf_jiffies64() call, and jiffies can
+// tick between them, so each one below is read where the C reads it,
+// including the two behind `&&`.
 fn bictcp_update(ca: *mut BpfBictcp, cwnd: u32, acked: u32) {
-    let now = tcp_jiffies32();
-
     unsafe {
         (*ca).ack_cnt = (*ca).ack_cnt.wrapping_add(acked);
 
-        let diff32 = now.wrapping_sub((*ca).last_time);
-        let diff64 = ((diff32 as i32) as i64) as u64;
-        if (*ca).last_cwnd == cwnd && diff64 <= (HZ as u64) / 32 {
+        if (*ca).last_cwnd == cwnd
+            && (((tcp_jiffies32().wrapping_sub((*ca).last_time)) as i32) as i64) as u64
+                <= (HZ as u64) / 32
+        {
             return;
         }
 
-        let skip_cubic = (*ca).epoch_start != 0 && now == (*ca).last_time;
+        let skip_cubic = (*ca).epoch_start != 0 && tcp_jiffies32() == (*ca).last_time;
 
         if !skip_cubic {
             (*ca).last_cwnd = cwnd;
-            (*ca).last_time = now;
+            (*ca).last_time = tcp_jiffies32();
 
             if (*ca).epoch_start == 0 {
-                (*ca).epoch_start = now;
+                (*ca).epoch_start = tcp_jiffies32();
                 (*ca).ack_cnt = acked;
                 (*ca).tcp_cwnd = cwnd;
 
@@ -356,7 +358,7 @@ fn bictcp_update(ca: *mut BpfBictcp, cwnd: u32, acked: u32) {
                 }
             }
 
-            let t_diff32 = now.wrapping_sub((*ca).epoch_start);
+            let t_diff32 = tcp_jiffies32().wrapping_sub((*ca).epoch_start);
             let mut t: u64 = (((t_diff32 as i32) as i64) as u64).wrapping_mul(USEC_PER_JIFFY);
             t = t.wrapping_add((*ca).delay_min as u64);
             t <<= BICTCP_HZ;
@@ -651,10 +653,11 @@ extern "C" fn bpf_cubic_acked(ctx: *const u64) {
         return;
     }
 
-    let now = tcp_jiffies32();
+    // jiffies is read only when epoch_start is set, as C's `&&` does
     unsafe {
         if (*ca).epoch_start != 0
-            && ((((now.wrapping_sub((*ca).epoch_start)) as i32) as i64) as u64) < (HZ as u64)
+            && ((((tcp_jiffies32().wrapping_sub((*ca).epoch_start)) as i32) as i64) as u64)
+                < (HZ as u64)
         {
             return;
         }

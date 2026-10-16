@@ -4,7 +4,7 @@ The Linux kernel's BPF selftest programs, translated from C to Rust and run
 through the kernel's own test harness.
 
 Each `progs/<name>.rs` here is a translation of
-[`tools/testing/selftests/bpf/progs/<name>.c`](https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git/tree/tools/testing/selftests/bpf/progs?id=3ccdb07813829ba9487273e75d1cb238cfa774c1)
+[`tools/testing/selftests/bpf/progs/<name>.c`](https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git/tree/tools/testing/selftests/bpf/progs?id=645f5fcf7a5582f5d6ed2322f41cb34076c63b2c)
 in bpf-next. The Rust is compiled straight to a BPF object by rustc and
 LLVM, using the [4ast/rust-bpf](https://github.com/4ast/rust-bpf) pipeline:
 no aya, no bpf-linker, no libbpf-rs. The object is then dropped in place of
@@ -39,17 +39,17 @@ applied ([`patches/kernel/`](patches/kernel) is empty). A passing test can still
 subtests, and a test that exercises several objects runs the others from C.
 **NO-ORACLE** means no `prog_tests` test uses the object, so nothing ran.
 
-The kernel is pinned, not tracking: `3ccdb0781382` is bpf-next as of
-2026-09-04.
+The kernel is pinned, not tracking: `645f5fcf7a55` is bpf-next as of
+2026-10-16.
 
 ## Start here
 
 Read one translation next to its original. A short one with maps,
 read-only globals and a `bpf_loop` callback:
 
-- C: [`progs/test_map_lookup_percpu_elem.c`](https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git/tree/tools/testing/selftests/bpf/progs/test_map_lookup_percpu_elem.c?id=3ccdb07813829ba9487273e75d1cb238cfa774c1)
+- C: [`progs/test_map_lookup_percpu_elem.c`](https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git/tree/tools/testing/selftests/bpf/progs/test_map_lookup_percpu_elem.c?id=645f5fcf7a5582f5d6ed2322f41cb34076c63b2c)
 - Rust: [`progs/test_map_lookup_percpu_elem.rs`](progs/test_map_lookup_percpu_elem.rs)
-- the test that judges both: [`prog_tests/map_lookup_percpu_elem.c`](https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git/tree/tools/testing/selftests/bpf/prog_tests/map_lookup_percpu_elem.c?id=3ccdb07813829ba9487273e75d1cb238cfa774c1)
+- the test that judges both: [`prog_tests/map_lookup_percpu_elem.c`](https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git/tree/tools/testing/selftests/bpf/prog_tests/map_lookup_percpu_elem.c?id=645f5fcf7a5582f5d6ed2322f41cb34076c63b2c)
 
 A map definition in C,
 

@@ -551,8 +551,8 @@ fn nf_ct_test<const IS_XDP: bool>(ctx: *mut c_void) {
 
     bpf_tuple.saddr = bpf_get_prandom_u32();
     bpf_tuple.daddr = bpf_get_prandom_u32();
-    bpf_tuple.sport = bpf_get_prandom_u32() as u16;
-    bpf_tuple.dport = bpf_get_prandom_u32() as u16;
+    bpf_tuple.sport = (bpf_get_prandom_u32() % 65535 + 1) as u16;
+    bpf_tuple.dport = (bpf_get_prandom_u32() % 65535 + 1) as u16;
 
     ct = ct_alloc::<IS_XDP>(
         ctx,
@@ -695,8 +695,8 @@ fn nf_ct_opts_new_test<const IS_XDP: bool>(ctx: *mut c_void) {
 
     bpf_tuple.saddr = bpf_get_prandom_u32();
     bpf_tuple.daddr = bpf_get_prandom_u32();
-    bpf_tuple.sport = bpf_get_prandom_u32() as u16;
-    bpf_tuple.dport = bpf_get_prandom_u32() as u16;
+    bpf_tuple.sport = (bpf_get_prandom_u32() % 65535 + 1) as u16;
+    bpf_tuple.dport = (bpf_get_prandom_u32() % 65535 + 1) as u16;
 
     opts_def.ct_zone_id = 10;
     opts_def.ct_zone_dir = NF_CT_ZONE_DIR_ORIG;

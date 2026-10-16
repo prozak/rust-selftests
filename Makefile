@@ -134,7 +134,9 @@ $(KEEPS): $(BLDDIR)/%.keep: $(SELFTESTS_OUTPUT)/%.bpf.o
 # --- Support crate: header-only by construction (macros/generics/inline),
 # --- so its bodies monomorphize into each program's bitcode and the
 # --- link/postproc pipeline is unchanged.
-$(BLDDIR)/libbpf_rs_core.rlib: $(wildcard bpf-rs-core/src/*.rs)
+# The rlib records the hash of the btf crate it was built against; a
+# rust-bpf checkout with a different libbtf.rlib makes it unusable.
+$(BLDDIR)/libbpf_rs_core.rlib: $(wildcard bpf-rs-core/src/*.rs) $(DEPDIR)/libbtf.rlib
 	@mkdir -p $(BLDDIR)
 	$(RUSTFLAGS_ENV) $(RUSTC) --edition 2021 --crate-type rlib $(RUSTC_COMMON) \
 		--sysroot=/dev/null -L$(DEPDIR) \

@@ -75,14 +75,18 @@ def main():
     env = os.environ.copy()
     # Resolve the normal kernel feature flags instead of duplicating a list
     # that could drift when the kernel pin changes.
-    flags, resolve_flags = subprocess.check_output(
+    # BTF_INLINE as well: gen-btf.sh passes --inline to pahole and adds the
+    # .BTF.inline section only when it is set (CONFIG_DEBUG_INFO_BTF_INLINE).
+    flags, resolve_flags, btf_inline = subprocess.check_output(
         ['make', '-s', '--no-print-directory', '-f', '-', 'JOBS=4',
          f'KBUILD_EXTMOD={module_dir}', 'print'], cwd=kernel,
-        input=b'include include/config/auto.conf\ninclude scripts/Kbuild.include\ninclude scripts/Makefile.btf\nprint:\n\t@echo $(PAHOLE_FLAGS)\n\t@echo $(RESOLVE_BTFIDS_FLAGS)\n',
+        input=b'include include/config/auto.conf\ninclude scripts/Kbuild.include\ninclude scripts/Makefile.btf\nprint:\n\t@echo $(PAHOLE_FLAGS)\n\t@echo $(RESOLVE_BTFIDS_FLAGS)\n\t@echo $(BTF_INLINE)\n',
         env=env, text=False).decode().splitlines()
     env.update(PAHOLE=str(pahole), PAHOLE_FLAGS=flags, OBJCOPY='objcopy',
                RESOLVE_BTFIDS_FLAGS=resolve_flags,
                RESOLVE_BTFIDS=str(kernel / 'tools/bpf/resolve_btfids/resolve_btfids'))
+    if btf_inline:
+        env['BTF_INLINE'] = btf_inline
     subprocess.run(['bash', str(kernel / 'scripts/gen-btf.sh'), '--btf_base',
                     str(kernel / 'vmlinux'), str(rebuilt)], env=env, check=True)
     if not before or executable_hashes(rebuilt) != before:

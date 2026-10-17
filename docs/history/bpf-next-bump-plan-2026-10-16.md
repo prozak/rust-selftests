@@ -190,9 +190,12 @@ twelve verdict changes:
   sockops@624"): C source unchanged, both objects rebuilt against the new
   kernel BTF.
 - `test_urandom_usdt` TIMEOUT → ERROR: the prover died with
-  `RecursionError: maximum recursion depth exceeded` inside a z3 ctypes
-  call instead of hitting its 180 s limit. A prover robustness issue, not a
-  translation one; the row was a TIMEOUT before.
+  `RecursionError: maximum recursion depth exceeded` instead of hitting
+  its 180 s limit. Reproducible with `equiv/check.py test_urandom_usdt`
+  (3 min): `check.py:390 unresolved_registers` hands the final symbolic
+  state to z3's recursive `z3util.get_vars`, which overflows on this
+  object's expression. A prover robustness issue, not a translation one;
+  the row was a TIMEOUT before.
 
 ### Runtime (`scripts/gate.py --all --workers 8`, 28 min)
 
@@ -210,7 +213,55 @@ passes in every case (`C-PASS`): `arena_atomics`, `arena_kfunc`,
 `timer_mim_reject`, `tracing_struct_int128`. No row outside the drift set
 changed, and `known-bad-tests` needed no addition.
 
+One FAIL hid a second cause: `stream.rs` hand-encodes the byte offset of
+`user_vm_start` in the kernel's `struct bpf_arena` (488 at 3ccdb078, 496
+at 645f5fcf) because the C's CO-RE read of that field, done through a
+`#[btf]` view, crashes `opt` in `BPFAbstractMemberAccess::replaceWithGEP`
+(the unused field-info call of #49, here in `stream_arena_cmpxchg_fault`).
+The offset is bumped by hand; the CO-RE version waits for an LLVM with
+the fix. The same class as the hard-coded type ids of the 2026-09 bump.
+
 `scripts/translint.py`: 41 errors in 16 of the 32 drift objects (gained
 programs, changed `__msg` texts, new `private(...)` sections), nothing
 elsewhere. `make ci-local` stays red on translint, the guard's INEQUIV rows
 and the gate's FAIL rows until Phase 2 lands.
+
+## Phase 2 results (same day)
+
+All 32 modified translations follow their new C sources: 17 commits
+(d3bd6d1..15a0932), one per object or per identical mechanical change.
+`stack_arg`, `stack_arg_kfunc` (a riscv arch gate) and `rcu_read_lock`
+(a comment) needed nothing.
+
+| | after Phase 1 | after Phase 2 | before the bump (c7d8ae1) |
+|---|---|---|---|
+| gate PASS / FAIL / NO-ORACLE | 610 / 17 / 10 | 627 / 0 / 10 | 627 / 0 / 10 |
+| EQUIV | 440 | 449 | 449 |
+| BAIL | 123 | 119 | 123 |
+| TIMEOUT | 38 | 39 | 38 |
+| UNKNOWN | 18 | 16 | 13 |
+| NOPROGS | 13 | 13 | 13 |
+| INEQUIV | 4 | 1 (`cpumask_success`) | 1 |
+| translint errors | 41 | 0 | 0 |
+
+Findings along the way:
+
+- `stream.rs` hand-encodes the byte offset of `user_vm_start` in the
+  kernel's `struct bpf_arena` (488 → 496); the CO-RE version hits #49
+  (above). Refreshed by hand, documented in the source.
+- The prover compared pointers into read-only data by section name
+  (`.rodata.str` from clang, `.rodata.str1.1` from LLVM's string merging)
+  in the generic kfunc model, which made the two new `bpf_stream_vprintk`
+  programs INEQUIV on identical traces; fixed in 6f77f6f (`_private_kind`
+  returns "ro"), tool hash changed, corpus re-proved.
+- LLVM 22.1.8 (BPF backend): a relaxed 32-bit `atomicrmw and/or/xor`
+  whose result is used came out as the non-fetching `lock &=` plus a
+  store of the operand (arena_atomics `and32_result` 17 instead of 272 at
+  runtime). The C's `__sync_fetch_and_*` is seq_cst and gets the fetching
+  insn; the translation uses seq_cst for the fetched results. Worth an
+  upstream report with a reduced IR case.
+- `test_urandom_usdt`'s prover RecursionError is not deterministic: the
+  second full re-prove hit the 180 s timeout instead.
+- Rust inline asm with explicit `r0`/`r1` operands and `.byte`-encoded
+  `BPF_ATOMIC | BPF_FETCH` instructions reproduces the C's hand-written
+  fetch_r0 instruction for instruction (arena_atomics).

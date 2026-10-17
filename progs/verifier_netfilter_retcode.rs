@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: GPL-2.0
+#![no_std]
+#![no_main]
+#![feature(asm_experimental_arch)]
+#![allow(named_asm_labels)]
+
+// Translation of tools/testing/selftests/bpf/progs/verifier_netfilter_retcode.c, GENERATED
+// by scripts/naked_gen.py (bpf-rs-core idiom): every function in the C
+// source is `__naked` hand-written BPF asm, carried here verbatim as
+// `// BPF_NAKED:` raw asm (scripts/naked_abi.py) with bpf_misc.h's operands
+// resolved the way clang resolves them (helper ids and constants as
+// literals; maps, subprograms and kfuncs as `sym`), the `%=` labels
+// suffixed with the function's name, and the test_loader decl tags
+// mirrored verbatim from the C object. Regenerate with
+// `scripts/naked_gen.py verifier_netfilter_retcode` rather than editing by hand;
+// scripts/translint.py's naked-verbatim check compares the built object
+// with the C object instruction by instruction.
+
+// BPF_PROGRAM_ORDER: with_invalid_return_code_test1 with_valid_return_code_test2 with_valid_return_code_test3 with_invalid_return_code_test4
+
+use bpf_rs_core::{test_tags};
+
+test_tags! {
+    with_invalid_return_code_test1:
+        __description("bpf_exit with invalid return code. test1"),
+        __failure,
+        __msg("R0 is not a known value");
+    with_valid_return_code_test2:
+        __description("bpf_exit with valid return code. test2"),
+        __success;
+    with_valid_return_code_test3:
+        __description("bpf_exit with valid return code. test3"),
+        __success;
+    with_invalid_return_code_test4:
+        __description("bpf_exit with invalid return code. test4"),
+        __failure,
+        __msg("R0 has smin=2 smax=2 should have been in [0, 1]");
+}
+
+#[link_section = "netfilter"]
+#[no_mangle]
+#[inline(never)]
+// BPF_NAKED: with_invalid_return_code_test1
+extern "C" fn with_invalid_return_code_test1() {
+    unsafe {
+        core::arch::asm!(
+            "r0 = *(u64*)(r1 + 0);",
+            "exit;",
+            options(nostack)
+        );
+    }
+}
+
+#[link_section = "netfilter"]
+#[no_mangle]
+#[inline(never)]
+// BPF_NAKED: with_valid_return_code_test2
+extern "C" fn with_valid_return_code_test2() {
+    unsafe {
+        core::arch::asm!(
+            "r0 = 0;",
+            "exit;",
+            options(nostack)
+        );
+    }
+}
+
+#[link_section = "netfilter"]
+#[no_mangle]
+#[inline(never)]
+// BPF_NAKED: with_valid_return_code_test3
+extern "C" fn with_valid_return_code_test3() {
+    unsafe {
+        core::arch::asm!(
+            "r0 = 1;",
+            "exit;",
+            options(nostack)
+        );
+    }
+}
+
+#[link_section = "netfilter"]
+#[no_mangle]
+#[inline(never)]
+// BPF_NAKED: with_invalid_return_code_test4
+extern "C" fn with_invalid_return_code_test4() {
+    unsafe {
+        core::arch::asm!(
+            "r0 = 2;",
+            "exit;",
+            options(nostack)
+        );
+    }
+}
+
+// The C source declares no license.
+#[panic_handler]
+fn panic(_: &core::panic::PanicInfo) -> ! {
+    loop {}
+}

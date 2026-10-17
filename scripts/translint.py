@@ -17,8 +17,10 @@ Classes checked (suppress per file with `// translint: allow(<class>)`):
                  __msg / ...) must be mirrored by a test_tags! declaration,
                  which scripts/btf_test_tags.py appends to the built object.
                  A message may relax ONLY register/stack-slot/insn-index
-                 tokens, via the matcher's own {{regex}} brackets; anything
-                 else diverging from the C tag is an error.
+                 tokens, via the matcher's own {{regex}} brackets, and name
+                 the translation's source file where the C names its own
+                 ("<func> @ verifier_cfg.rs"); anything else diverging from
+                 the C tag is an error.
   decl-tags      [ERROR] the C object's other BTF decl tags must be on the
                  same declaration in the Rust object: `contains:` (the
                  node type of a bpf_rb_root / bpf_list_head) and
@@ -182,6 +184,8 @@ CODEGEN_TOKENS = [
     (re.compile(r"\bfp-\d+\b"), "<X>"),      # stack slots
     (re.compile(r"\boff=-?\d+\b"), "<X>"),
     (re.compile(r"\binsn \d+\b"), "insn <X>"),
+    # "<func> @ <file>.c": the source file of the line info is the .rs
+    (re.compile(r" @ (\w+)\.(?:c|rs)\b"), r" @ \1.<src>"),
     (re.compile(r"processed \d+ insns"), "processed <X> insns"),
 ]
 

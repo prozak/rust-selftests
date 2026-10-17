@@ -62,6 +62,7 @@ bpf_map! {
 
 #[link_section = "tc"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: xadd_w_check_unaligned_stack
 extern "C" fn xadd_w_check_unaligned_stack() {
     unsafe {
@@ -71,13 +72,14 @@ extern "C" fn xadd_w_check_unaligned_stack() {
             "lock *(u32 *)(r10 - 7) += w0;",
             "r0 = *(u64*)(r10 - 8);",
             "exit;",
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "tc"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: xadd_w_check_unaligned_map
 extern "C" fn xadd_w_check_unaligned_map() {
     unsafe {
@@ -88,21 +90,22 @@ extern "C" fn xadd_w_check_unaligned_map() {
             "r2 += -8;",
             "r1 = {map_hash_8b} ll;",
             "call 1;",
-            "if r0 != 0 goto l0_xadd_w_check_unaligned_map;",
+            "if r0 != 0 goto l0_0;",
             "exit;",
-            "l0_xadd_w_check_unaligned_map:",
+            "l0_0:",
             "r1 = 1;",
             "lock *(u32 *)(r0 + 3) += w1;",
             "r0 = *(u32*)(r0 + 3);",
             "exit;",
             map_hash_8b = sym map_hash_8b,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "xdp"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: xadd_w_check_unaligned_pkt
 extern "C" fn xadd_w_check_unaligned_pkt() {
     unsafe {
@@ -111,10 +114,10 @@ extern "C" fn xadd_w_check_unaligned_pkt() {
             "r3 = *(u32*)(r1 + 4);",
             "r1 = r2;",
             "r1 += 8;",
-            "if r1 < r3 goto l0_xadd_w_check_unaligned_pkt;",
+            "if r1 < r3 goto l0_1;",
             "r0 = 99;",
-            "goto l1_xadd_w_check_unaligned_pkt;",
-            "l0_xadd_w_check_unaligned_pkt:",
+            "goto l1_1;",
+            "l0_1:",
             "r0 = 1;",
             "r1 = 0;",
             "*(u32*)(r2 + 0) = r1;",
@@ -123,15 +126,16 @@ extern "C" fn xadd_w_check_unaligned_pkt() {
             "lock *(u32 *)(r2 + 1) += w0;",
             "lock *(u32 *)(r2 + 2) += w0;",
             "r0 = *(u32*)(r2 + 1);",
-            "l1_xadd_w_check_unaligned_pkt:",
+            "l1_1:",
             "exit;",
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "tc"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: src_dst_got_mangled_1
 extern "C" fn src_dst_got_mangled_1() {
     unsafe {
@@ -142,20 +146,21 @@ extern "C" fn src_dst_got_mangled_1() {
             "*(u64*)(r10 - 8) = r0;",
             "lock *(u64 *)(r10 - 8) += r0;",
             "lock *(u64 *)(r10 - 8) += r0;",
-            "if r6 != r0 goto l0_src_dst_got_mangled_1;",
-            "if r7 != r10 goto l0_src_dst_got_mangled_1;",
+            "if r6 != r0 goto l0_2;",
+            "if r7 != r10 goto l0_2;",
             "r0 = *(u64*)(r10 - 8);",
             "exit;",
-            "l0_src_dst_got_mangled_1:",
+            "l0_2:",
             "r0 = 42;",
             "exit;",
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "tc"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: src_dst_got_mangled_2
 extern "C" fn src_dst_got_mangled_2() {
     unsafe {
@@ -166,20 +171,21 @@ extern "C" fn src_dst_got_mangled_2() {
             "*(u32*)(r10 - 8) = r0;",
             "lock *(u32 *)(r10 - 8) += w0;",
             "lock *(u32 *)(r10 - 8) += w0;",
-            "if r6 != r0 goto l0_src_dst_got_mangled_2;",
-            "if r7 != r10 goto l0_src_dst_got_mangled_2;",
+            "if r6 != r0 goto l0_3;",
+            "if r7 != r10 goto l0_3;",
             "r0 = *(u32*)(r10 - 8);",
             "exit;",
-            "l0_src_dst_got_mangled_2:",
+            "l0_3:",
             "r0 = 42;",
             "exit;",
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "tc"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: xadd_variable_stack_offset
 extern "C" fn xadd_variable_stack_offset() {
     unsafe {
@@ -196,7 +202,7 @@ extern "C" fn xadd_variable_stack_offset() {
             "lock *(u64 *)(r1 + 0) += r2;",
             "r0 = 0;",
             "exit;",
-            options(noreturn)
+            options(nostack)
         );
     }
 }

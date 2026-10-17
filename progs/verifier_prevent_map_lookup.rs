@@ -62,6 +62,7 @@ static map_prog2_socket: map_prog2_socket = map_prog2_socket {
 
 #[link_section = "perf_event"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: map_lookup_in_stack_trace
 extern "C" fn map_lookup_in_stack_trace() {
     unsafe {
@@ -74,13 +75,14 @@ extern "C" fn map_lookup_in_stack_trace() {
             "call 1;",
             "exit;",
             map_stacktrace = sym map_stacktrace,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "socket"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: map_lookup_in_prog_array
 extern "C" fn map_lookup_in_prog_array() {
     unsafe {
@@ -93,7 +95,7 @@ extern "C" fn map_lookup_in_prog_array() {
             "call 1;",
             "exit;",
             map_prog2_socket = sym map_prog2_socket,
-            options(noreturn)
+            options(nostack)
         );
     }
 }

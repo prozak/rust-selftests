@@ -24,6 +24,11 @@ def lower(ir, source):
         instructions = [line.strip() for line in body.splitlines()
                         if line.strip() and not line.strip().endswith(':')
                         and not line.lstrip().startswith('#dbg_')]
+        # an asm with several outputs (the value it leaves in r0 plus
+        # clobbers) returns a struct: the extractvalue of its result is
+        # ABI plumbing, not a generated instruction
+        instructions = [i for i in instructions
+                        if not re.match(r'%[\w.]+ = extractvalue \{.*\} %[\w.]+, \d+', i)]
         if len(instructions) != 2 or 'asm sideeffect' not in instructions[0] or not re.match(r'(ret |unreachable)', instructions[1]):
             raise ValueError(f'{name}: raw body must contain only asm and a terminator: {instructions}')
         # No operand may use the sret pointer (a raw function cannot name it).

@@ -153,6 +153,9 @@ $(BLDDIR)/libbpf_rs_core.rlib: $(wildcard bpf-rs-core/src/*.rs) $(DEPDIR)/libbtf
 # --- Rust -> LLVM bitcode ---
 $(BLDDIR)/ksock_lsm.bc $(BLDDIR)/ksock_wq.bc: progs/common/ksock.rs
 $(BLDDIR)/arena_kfunc.bc $(BLDDIR)/arena_kfunc_jit.bc $(BLDDIR)/struct_ops_arena.bc: progs/common/arena.rs
+# The hand-translated C bodies a generated verifier_* translation include!s
+# (scripts/naked_gen.py --with-c-bodies).
+$(foreach h,$(wildcard progs/hand/*.rs),$(eval $(BLDDIR)/$(notdir $(h:.rs=)).bc: $(h)))
 # `// RUSTC_OPT_LEVEL: <0-3|s|z>` in a translation overrides OPT_LEVEL for
 # that one object (the later -C opt-level wins): for a loop whose verifier
 # cost depends on the exact code shape (pyperf600_nounroll).

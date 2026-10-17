@@ -16,7 +16,7 @@
 // scripts/translint.py's naked-verbatim check compares the built object
 // with the C object instruction by instruction.
 
-// BPF_PROGRAM_ORDER: stack_out_of_bounds uninitialized_stack1 uninitialized_stack2 invalid_fp_arithmetic non_invalid_fp_arithmetic misaligned_read_from_stack stack_ptr_arith_preserves_frameno
+// BPF_PROGRAM_ORDER: stack_out_of_bounds uninitialized_stack1 uninitialized_stack2 invalid_fp_arithmetic non_invalid_fp_arithmetic misaligned_read_from_stack stack_ptr_arith_preserves_frameno stack_ptr_arith_preserves_frameno_subprog
 
 use bpf_rs_core::{bpf_map, bpf_object, test_tags};
 
@@ -72,6 +72,7 @@ bpf_map! {
 
 #[link_section = "socket"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: stack_out_of_bounds
 extern "C" fn stack_out_of_bounds() {
     unsafe {
@@ -79,13 +80,14 @@ extern "C" fn stack_out_of_bounds() {
             "r1 = 0;",
             "*(u64*)(r10 + 8) = r1;",
             "exit;",
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "socket"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: uninitialized_stack1
 extern "C" fn uninitialized_stack1() {
     unsafe {
@@ -96,13 +98,14 @@ extern "C" fn uninitialized_stack1() {
             "call 1;",
             "exit;",
             map_hash_8b = sym map_hash_8b,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "socket"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: uninitialized_stack2
 extern "C" fn uninitialized_stack2() {
     unsafe {
@@ -110,13 +113,14 @@ extern "C" fn uninitialized_stack2() {
             "r2 = r10;",
             "r0 = *(u64*)(r2 - 8);",
             "exit;",
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "socket"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: invalid_fp_arithmetic
 extern "C" fn invalid_fp_arithmetic() {
     unsafe {
@@ -126,13 +130,14 @@ extern "C" fn invalid_fp_arithmetic() {
             "r1 -= 8;",
             "*(u64*)(r1 + 0) = r0;",
             "exit;",
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "socket"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: non_invalid_fp_arithmetic
 extern "C" fn non_invalid_fp_arithmetic() {
     unsafe {
@@ -140,13 +145,14 @@ extern "C" fn non_invalid_fp_arithmetic() {
             "r0 = 0;",
             "*(u64*)(r10 - 8) = r0;",
             "exit;",
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "socket"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: misaligned_read_from_stack
 extern "C" fn misaligned_read_from_stack() {
     unsafe {
@@ -154,13 +160,14 @@ extern "C" fn misaligned_read_from_stack() {
             "r2 = r10;",
             "r0 = *(u64*)(r2 - 4);",
             "exit;",
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "socket"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: stack_ptr_arith_preserves_frameno
 extern "C" fn stack_ptr_arith_preserves_frameno() {
     unsafe {
@@ -182,7 +189,7 @@ extern "C" fn stack_ptr_arith_preserves_frameno() {
             "exit;",
             map_hash_8b = sym map_hash_8b,
             stack_ptr_arith_preserves_frameno_subprog = sym stack_ptr_arith_preserves_frameno_subprog,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
@@ -201,7 +208,7 @@ extern "C" fn stack_ptr_arith_preserves_frameno_subprog() {
             "*(u64 *)(r7 + 0) = r3;",
             "r0 = 0;",
             "exit;",
-            options(noreturn)
+            options(nostack)
         );
     }
 }

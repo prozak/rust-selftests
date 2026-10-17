@@ -28,15 +28,20 @@ scripts/translint.py's naked-verbatim check then compares the built
 object's instruction stream against the C object's, relocation by
 relocation (scripts/naked_verbatim.py).
 
+A function with a C body is hand work: with --with-c-bodies the generated
+file include!s progs/hand/<name>.rs, which the generator writes once (a
+stub and the C text per such function) and never overwrites. A function
+that only references kfuncs (`__kfunc_btf_root`, `kfunc_root`: a BTF
+prototype for each kfunc the asm calls) is generated whatever its name.
+
 What the generator refuses (reported as "unsupported", per file in
---survey): a function with a C body (other than the C's __kfunc_btf_root,
-whose kfunc calls it reproduces), a naked function with parameters,
-statically initialized map slots, map members it does not know (map_extra,
-pinning), a kfunc variable (`extern const int x __ksym`), a struct the
-Rust layout could not reproduce. Those files are hand work.
+--survey): a kfunc variable (`extern const int x __ksym`), a `.percpu`
+section, a map member it does not know, a struct the Rust layout could not
+reproduce, a function header it cannot parse (`typeof`).
 
 Usage:
   scripts/naked_gen.py <name>...          write progs/<name>.rs
+  scripts/naked_gen.py --with-c-bodies <name>...   ... and progs/hand/<name>.rs
   scripts/naked_gen.py --stdout <name>    print instead of writing
   scripts/naked_gen.py --survey [name...] what can be generated, per file
                                           (default: every verifier_*.c)
@@ -182,12 +187,13 @@ def strip_attrs(head):
     (rest, [attribute, ...]) with each attribute's text as written."""
     attrs, out, i = [], [], 0
     while True:
-        j = head.find("__attribute__", i)
-        if j < 0:
+        m = re.compile(r"__attribute(?:__)?\s*\(").search(head, i)
+        if not m:
             out.append(head[i:])
             break
+        j = m.start()
         out.append(head[i:j])
-        k = head.find("(", j)
+        k = m.end() - 1
         depth, m = 0, k
         while m < len(head):
             c = head[m]
@@ -252,15 +258,16 @@ class Func:
         self.name, self.static, self.section = name, static, section
         self.rtype, self.params, self.naked, self.body = rtype, params, naked, body
         self.stmts, self.operands, self.rust_params = [], [], []   # filled by resolve
+        self.asm_index, self.clobbers, self.root, self.c_text = 0, [], None, ""
 
 
 def parse_function(head, body):
     rest, attrs = strip_attrs(head)
     section = None
     for a in attrs:
-        m = re.fullmatch(r'section\s*\(\s*"((?:[^"\\]|\\.)*)"\s*\)', a)
+        m = re.fullmatch(r"section\s*\((.*)\)", a, re.S)
         if m:
-            section = m.group(1)
+            section = c_string(m.group(1))   # SEC("?fentry.s/" SYS_PREFIX "x")
     rest = re.sub(r"\s+", " ", rest).strip()
     rest = re.sub(r"\b(?:inline|__inline|__inline__)\b", "", rest).strip()
     m = re.fullmatch(r"(static )?(.*?)\s*\b([A-Za-z_]\w*)\s*\((.*)\)", rest, re.S)
@@ -271,6 +278,26 @@ def parse_function(head, body):
         params = ""
     return Func(m.group(3), bool(m.group(1)), section, m.group(2).strip(),
                 params, "naked" in attrs, body)
+
+
+def c_function_text(raw, name):
+    """The definition of function `name` in the raw C source (from the
+    blank line before its head to its closing brace), for a comment."""
+    m = re.search(r"\b" + re.escape(name) + r"\s*\([^;{)]*\)\s*(?:__attribute__\(\(.*?\)\)\s*)*\{", raw, re.S)
+    if not m:
+        return f"(definition of {name} not found in the source)"
+    start = raw.rfind("\n\n", 0, m.start())
+    start = 0 if start < 0 else start + 2
+    depth, i = 0, m.end() - 1
+    while i < len(raw):
+        if raw[i] == "{":
+            depth += 1
+        elif raw[i] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        i += 1
+    return raw[start:i + 1]
 
 
 def c_string(text):
@@ -323,6 +350,8 @@ def parse_asm(f):
     parts = split_top(m.group(1), ":")
     if len(parts) > 4:
         raise Unsupported(f"{f.name}: asm statement with {len(parts) - 1} colons")
+    if len(parts) > 3:
+        f.clobbers = [c_string(c) for c in split_top(parts[3], ",") if c.strip()]
     if len(parts) > 1 and parts[1].strip():
         raise Unsupported(f"{f.name}: asm output operands")
     ops = []
@@ -451,7 +480,11 @@ class Btf:
                 extra = struct.unpack_from("<i", data, pos)[0]
                 pos += 4
             elif kind == K_ENUM64:
-                pos += 12 * vlen
+                extra = []
+                for _ in range(vlen):
+                    n, lo, hi = struct.unpack_from("<III", data, pos)
+                    extra.append((self.s(n), lo | (hi << 32)))
+                    pos += 12
             self.types[tid] = BtfType(kind, self.s(name_off), size, vlen, kflag, extra)
             tid += 1
 
@@ -613,6 +646,18 @@ class CObject:
                 out[s.name] = self.elf.sections[s.shndx].name
         return out
 
+    def arg_tags(self):
+        """Function name -> [(parameter index, tag)] of the C object's
+        parameter decl tags (bpf_misc.h's __arg_nonnull, __arg_untrusted, ...)."""
+        btf, out = self.btf, {}
+        for t in btf.types.values():
+            if t.kind != K_DECL_TAG or t.name.startswith("comment:") or t.extra < 0:
+                continue
+            target = btf.types[t.size]
+            if target.kind == K_FUNC:
+                out.setdefault(target.name, []).append((t.extra, t.name))
+        return out
+
     def test_tags(self):
         """Program name -> [decl tag payload, ...] in test_loader order."""
         btf, out = self.btf, {}
@@ -684,11 +729,14 @@ NULLARY_REV = {v: k for k, v in btf_test_tags.NULLARY.items()}
 VALUED_REV = {v: k for k, v in btf_test_tags.VALUED.items()}
 
 
-def tag_macro(payload):
+def tag_macro(payload, name):
     if payload in NULLARY_REV:
         return NULLARY_REV[payload]
     key, sep, val = payload.partition("=")
     if sep and key in VALUED_REV:
+        # the verifier names a function's source file from the line info
+        # ("<func> @ <file>:<line>"): for this object that is the .rs
+        val = val.replace(f" @ {name}.c", f" @ {name}.rs")
         return f"{VALUED_REV[key]}({rust_str(val)})"
     raise Unsupported(f"test tag {payload!r} has no bpf_misc.h macro in btf_test_tags.py")
 
@@ -705,8 +753,9 @@ C_RETURN_TYPES = {
 
 
 class Generator:
-    def __init__(self, name):
+    def __init__(self, name, with_c_bodies=False):
         self.name = name
+        self.with_c_bodies = with_c_bodies
         self.cpath = os.path.join(C_PROGS, name + ".c")
         opath = os.path.join(C_OBJS, name + ".bpf.o")
         if os.path.exists(opath + ".corig"):
@@ -718,9 +767,10 @@ class Generator:
         self.obj = CObject(opath)
         self.errors = []
         self.funcs = []
-        self.root = None            # the C's __kfunc_btf_root body
+        self.n_asm = 0              # asm statements using %= seen, in source order
         self.map_names, self.global_names, self.extern_names = [], [], []
         self.needs_cvoid = False
+        self.hand = None
         self.stats = {}
 
     def count(self, key, n=1):
@@ -729,22 +779,45 @@ class Generator:
     # -- C source
     def parse(self):
         text = preprocess(self.cpath)
+        with open(self.cpath) as fh:
+            self.raw = fh.read()
         for head, body in split_items(text):
             if body is None:
                 continue
             f = parse_function(head, body)
             if f.naked:
+                # AsmPrinter::PrintSpecial bumps its counter once per asm
+                # statement that expands a `%=` (${:uid}), from 0
+                if "%=" in body:
+                    f.asm_index = self.n_asm
+                    self.n_asm += 1
                 self.funcs.append(f)
-            elif f.name == "__kfunc_btf_root":
-                self.root = f
+            elif self.root_statements(f):
+                self.n_asm += body.count("%=")
+                self.funcs.append(f)
+            elif self.with_c_bodies:
+                self.n_asm += body.count("%=")
+                f.c_text = c_function_text(self.raw, f.name)
+                self.funcs.append(f)
             else:
                 self.errors.append(f"C body: {f.name}")
-        if not self.funcs:
+        if not any(f.naked for f in self.funcs):
             self.errors.append("no naked function")
 
     def resolve(self):
         entries, per_func = [], {}
         for f in self.funcs:
+            if f.root:
+                continue
+            if not f.naked:
+                try:
+                    f.rust_params = self.params(f)
+                except Unsupported as e:
+                    self.errors.append(str(e))
+                if f.rtype not in C_RETURN_TYPES:
+                    self.errors.append(f"{f.name}: return type {f.rtype!r}")
+                self.count("hand")
+                continue
             try:
                 template, ops = parse_asm(f)
             except Unsupported as e:
@@ -770,6 +843,8 @@ class Generator:
         resolved = {(fn, op): v for (fn, op, _e), v in zip(entries, values)}
         funcs = {f.name for f in self.funcs}
         for f in self.funcs:
+            if not f.naked:
+                continue
             template, ops = per_func[f.name]
             bindings, kinds = {}, {}
             for opname, constraint, expr in ops:
@@ -811,7 +886,9 @@ class Generator:
                     stmts[i] = f"{m.group(1)} {{{target}}};"
                     self.count("text-sym")
             f.stmts = stmts
-            f.operands = sorted(bindings.items())
+            # C tolerates an operand the template never uses; asm! does not
+            used = {m for st in stmts for m in re.findall(r"\{(\w+)\}", st)}
+            f.operands = [(k, v) for k, v in bindings.items() if k in used]
             self.count("programs" if f.section else "subprogs")
 
     def params(self, f):
@@ -820,6 +897,7 @@ class Generator:
         so the BTF prototype keeps the C's parameter count."""
         out = []
         for p in split_top(f.params, ","):
+            p = strip_attrs(p)[0]
             p = re.sub(r"\s+", " ", p).strip()
             if not p:
                 continue
@@ -841,7 +919,12 @@ class Generator:
         t = re.sub(r"/\*.*?\*/", " ", template, flags=re.S)
         if "{" in t or "}" in t or "$" in t:
             raise Unsupported(f"{f.name}: brace or dollar in asm text")
-        t = t.replace("%%", "\x01").replace("%=", f.name)
+        # `%=` is LLVM's per-module inline asm counter (${:uid}), bumped
+        # per asm statement that uses it, in emission order: with the
+        # functions kept in source order (BPF_PROGRAM_ORDER) the number is
+        # clang's, so even an asm-defined symbol (a jump table) keeps its
+        # C name
+        t = t.replace("%%", "\x01").replace("%=", str(f.asm_index))
 
         def sub(m):
             if m.group(1) not in kinds:
@@ -939,6 +1022,18 @@ class Generator:
                         members.append((mname, f"[*const {inner}; 0]", "[]"))
                     else:
                         raise Unsupported(f"map {var.name}: values element kind {pt.kind}")
+                    continue
+                if mt.kind in (K_ENUM, K_ENUM64) and mt.vlen == 1:
+                    # `__ulong(map_extra, v)`: an enum whose one enumerator is v
+                    ename = f"{var.name}__{mname}"
+                    value = mt.extra[0][1]
+                    if mt.kind == K_ENUM and mt.kflag:
+                        value = value - (1 << 32) if value >= 1 << 31 else value
+                    self.obj.types.defs.append(
+                        "#[allow(non_camel_case_types)]\n#[repr(u64)]\n"
+                        f"enum {ename} {{\n    __unique_value = {value:#x},\n}}")
+                    members.append((mname, ename, f"{ename}::__unique_value"))
+                    plain = False
                     continue
                 if mt.kind != K_PTR:
                     raise Unsupported(f"map {var.name}: member {mname} of BTF kind {mt.kind}")
@@ -1072,16 +1167,15 @@ class Generator:
             self.count("kfuncs")
         return out
 
-    def kfunc_root(self):
-        """The C's __kfunc_btf_root: plain calls of each kfunc with literal
-        arguments, whose only purpose is a BTF prototype for the kfuncs the
-        asm calls (llc emits one only for a real call)."""
-        if self.root is None:
-            return None
-        btf = self.obj.btf
-        protos = dict(self.extern_names)
-        calls = []
-        for stmt in split_top(self.root.body, ";"):
+    def root_statements(self, f):
+        """The statements of a C function that only references kfuncs
+        (`__kfunc_btf_root`, `kfunc_root`: a BTF prototype for each kfunc
+        the asm calls, since llc emits one only for a real call or address
+        load), as [("call", name, [args]) | ("ref", [names])], or None when
+        the body is anything else."""
+        kfuncs = {name for kind, name, _tid in self.obj.ksyms() if kind == K_FUNC}
+        out = []
+        for stmt in split_top(f.body, ";"):
             stmt = stmt.strip()
             if not stmt:
                 continue
@@ -1090,28 +1184,51 @@ class Generator:
                 refs = []
                 for item in split_top(m.group(1), ","):
                     mm = re.fullmatch(r'\s*"r"\s*\(\s*&\s*([A-Za-z_]\w*)\s*\)\s*', item)
-                    if not mm or mm.group(1) not in protos:
-                        raise Unsupported(f"__kfunc_btf_root: asm operand {item.strip()[:40]!r}")
-                    refs.append(f"in(reg) {mm.group(1)} as usize")
-                calls.append('        core::arch::asm!("", ' + ", ".join(refs)
+                    if not mm or mm.group(1) not in kfuncs:
+                        return None
+                    refs.append(mm.group(1))
+                out.append(("ref", refs))
+                continue
+            m = re.fullmatch(r"([A-Za-z_]\w*)\s*\((.*)\)", stmt, re.S)
+            if not m or m.group(1) not in kfuncs:
+                return None
+            args = [re.sub(r"\s+", "", a) for a in split_top(m.group(2), ",")]
+            if any(not re.fullmatch(r"\(*(?:\(void\*\))?0x?[0-9a-fA-F]*\)*", a) for a in args):
+                return None
+            out.append(("call", m.group(1), args))
+        if not out or f.params or f.rtype != "void":
+            return None
+        f.root = out
+        return True
+
+    def kfunc_root(self, f):
+        """Rust for a kfunc-reference function (root_statements)."""
+        btf = self.obj.btf
+        protos = dict(self.extern_names)
+        calls = []
+        for stmt in f.root:
+            if stmt[0] == "ref":
+                refs = [f"in(reg) {name} as usize" for name in stmt[1]]
+                # asm! insists every operand appears in the template; a
+                # comment is enough, the loads happen before the asm
+                tmpl = "/* " + " ".join("{%d}" % i for i in range(len(refs))) + " */"
+                calls.append(f'        core::arch::asm!("{tmpl}", ' + ", ".join(refs)
                              + ", options(nostack, preserves_flags));")
                 self.count("root-refs", len(refs))
                 continue
-            m = re.fullmatch(r"([A-Za-z_]\w*)\s*\((.*)\)", stmt, re.S)
-            if not m or m.group(1) not in protos:
-                raise Unsupported(f"__kfunc_btf_root: statement {stmt[:40]!r}")
+            _k, name, cargs = stmt
             args = []
-            for i, (arg, (_n, ptid)) in enumerate(zip(split_top(m.group(2), ","), protos[m.group(1)].extra)):
-                arg = re.sub(r"\s+", "", arg)
-                if not re.fullmatch(r"\(*(?:\(void\*\))?0x?[0-9a-fA-F]*\)*", arg):
-                    raise Unsupported(f"__kfunc_btf_root: argument {arg!r}")
+            for arg, (_n, ptid) in zip(cargs, protos[name].extra):
                 if btf.types[btf.strip(ptid)].kind == K_PTR:
                     args.append("core::ptr::null_mut()")
                 else:
                     args.append(re.sub(r"[()]", "", arg))
-            calls.append(f"        {m.group(1)}({', '.join(args)});")
-        self.count("root-calls", len(calls))
-        return ("#[no_mangle]\nextern \"C\" fn __kfunc_btf_root() {\n    unsafe {\n"
+            calls.append(f"        {name}({', '.join(args)});")
+            self.count("root-calls")
+        attrs = "#[no_mangle]\n" + ("" if f.section else "#[inline(never)]\n")
+        return (f"// {f.name}: the C's reference to each kfunc the asm calls, for its\n"
+                f"// BTF prototype (llc emits one only for a real call or address load).\n"
+                + attrs + f'extern "C" fn {f.name}() {{\n    unsafe {{\n'
                 + "\n".join(calls) + "\n    }\n}")
 
     # -- the file
@@ -1125,7 +1242,7 @@ class Generator:
         for f in self.funcs:
             if f.name not in c_funcs:
                 raise Unsupported(f"{f.name}: not a function of the C object")
-        ours = {f.name for f in self.funcs} | ({"__kfunc_btf_root"} if self.root else set())
+        ours = {f.name for f in self.funcs}
         missing = sorted(set(c_funcs) - ours)
         if missing:
             raise Unsupported(f"C object functions not in the source: {', '.join(missing)}")
@@ -1133,7 +1250,6 @@ class Generator:
         maps = self.maps()
         globs = self.globals()
         externs = self.externs()
-        root = self.kfunc_root()
         tags = self.obj.test_tags()
         known = set(self.map_names) | set(self.global_names) | {n for n, _p in self.extern_names} | ours
         for f in self.funcs:
@@ -1143,15 +1259,28 @@ class Generator:
                 if target not in known:
                     raise Unsupported(f"{f.name}: operand refers to unknown symbol {target}")
         lic_sym, lic = self.obj.license()
+        self.hand = self.hand_file()
 
         out = ["// SPDX-License-Identifier: GPL-2.0", "#![no_std]", "#![no_main]",
                "#![feature(asm_experimental_arch)]", "#![allow(named_asm_labels)]"]
-        if any("as usize" in b for f in self.funcs for _o, b in f.operands) or (root and "as usize" in root):
+        hand_text = self.hand[1] if self.hand else ""
+        if any("as usize" in b for f in self.funcs for _o, b in f.operands) \
+                or any(s[0] == "ref" for f in self.funcs if f.root for s in f.root) \
+                or "as usize" in hand_text:
             out.append("#![allow(function_casts_as_integer)]")
+        if "#[linkage" in hand_text:
+            out.append("#![feature(linkage)]")
         out.append("")
+        hand = [f.name for f in self.funcs if not f.naked and not f.root]
         out.append(f"// Translation of tools/testing/selftests/bpf/progs/{self.name}.c, GENERATED")
-        out += ["// by scripts/naked_gen.py (bpf-rs-core idiom): every function in the C",
-                "// source is `__naked` hand-written BPF asm, carried here verbatim as",
+        if hand:
+            out += ["// by scripts/naked_gen.py --with-c-bodies (bpf-rs-core idiom), except the",
+                    f"// function(s) with C bodies, translated by hand in progs/hand/{self.name}.rs",
+                    "// (include!d below): " + ", ".join(hand) + ".",
+                    "// Every other function in the C"]
+        else:
+            out.append("// by scripts/naked_gen.py (bpf-rs-core idiom): every function in the C")
+        out += ["// source is `__naked` hand-written BPF asm, carried here verbatim as",
                 "// `// BPF_NAKED:` raw asm (scripts/naked_abi.py) with bpf_misc.h's operands",
                 "// resolved the way clang resolves them (helper ids and constants as",
                 "// literals; maps, subprograms and kfuncs as `sym`), the `%=` labels",
@@ -1165,15 +1294,18 @@ class Generator:
             uses.append("bpf_map")
         if tags:
             uses.append("test_tags")
+        if self.obj.arg_tags():
+            uses.append("arg_tags")
         # rustc emits functions sorted by name; keep the C's source order
-        # within the program sections (scripts/program_order.py)
-        programs = [f.name for f in self.funcs if f.section]
+        # in every section, .text included (scripts/program_order.py), so
+        # even a pc-relative call to a subprogram encodes the same
+        programs = [f.name for f in self.funcs]
         if len(programs) > 1:
             out.append("// BPF_PROGRAM_ORDER: " + " ".join(programs))
             out.append("")
         if uses:
             out.append("use bpf_rs_core::{" + ", ".join(sorted(uses)) + "};")
-        if self.needs_cvoid or any("c_void" in d for d in self.obj.types.defs) \
+        if self.needs_cvoid or hand or any("c_void" in d for d in self.obj.types.defs) \
                 or any("c_void" in m for m in maps) or any("c_void" in g for g in globs):
             out.append("use core::ffi::c_void;")
         out.append("")
@@ -1182,7 +1314,7 @@ class Generator:
             out.append("test_tags! {")
             for f in self.funcs:
                 if f.name in tags:
-                    macros = [tag_macro(p) for p in tags.pop(f.name)]
+                    macros = [tag_macro(p, self.name) for p in tags.pop(f.name)]
                     out.append(f"    {f.name}:")
                     out.append("        " + ",\n        ".join(macros) + ";")
             if tags:
@@ -1193,6 +1325,15 @@ class Generator:
             out += ["// Map key/value types, shaped like the C object's BTF (the kernel",
                     "// checks some of them member by member, so no explicit padding).",
                     "// translint: allow(padding)"]
+        arg_tags = self.obj.arg_tags()
+        if arg_tags:
+            out.append("arg_tags! {")
+            for fn, tags in arg_tags.items():
+                if fn not in ours:
+                    raise Unsupported(f"parameter tags on {fn}, not a function of the source")
+                out.append(f"    {fn}: " + ", ".join(f'{i}: {rust_str(tag)}' for i, tag in sorted(tags)) + ";")
+            out.append("}")
+            out.append("")
         for d in self.obj.types.defs:
             out.append(d)
             out.append("")
@@ -1207,11 +1348,12 @@ class Generator:
             out += externs
             out.append("}")
             out.append("")
-        if root:
-            out.append(root)
-            out.append("")
         for f in self.funcs:
-            out.append(self.emit_function(f))
+            if f.naked or f.root:
+                out.append(self.emit_function(f))
+                out.append("")
+        if self.hand:
+            out.append(f'include!("hand/{self.name}.rs");')
             out.append("")
         if lic_sym == "_license":
             out.append(f'bpf_object!("{lic}");')
@@ -1227,27 +1369,90 @@ class Generator:
                     "    loop {}", "}"]
         return "\n".join(out) + "\n"
 
-    def emit_function(self, f):
-        lines = []
+    def hand_file(self):
+        """progs/hand/<name>.rs: the hand-translated C bodies, written with
+        stubs when absent and never overwritten."""
+        hand = [f for f in self.funcs if not f.naked and not f.root]
+        if not hand:
+            return None
+        path = os.path.join(REPO, "progs", "hand", self.name + ".rs")
+        if os.path.exists(path):
+            with open(path) as fh:
+                text = fh.read()
+            missing = [f.name for f in hand if not re.search(r"\bfn " + f.name + r"\b", text)]
+            if missing:
+                raise Unsupported(f"{os.path.relpath(path, REPO)} lacks {', '.join(missing)}")
+            return path, text, False
+        out = [f"// SPDX-License-Identifier: GPL-2.0",
+               f"// The C bodies of tools/testing/selftests/bpf/progs/{self.name}.c, translated",
+               f"// by hand; include!d by the generated progs/{self.name}.rs (scripts/naked_gen.py",
+               "// --with-c-bodies writes this file once, with stubs, and never overwrites it).", ""]
+        for f in hand:
+            out.append(self.emit_hand(f))
+            out.append("")
+        text = "\n".join(out)
+        return path, text, True
+
+    def emit_hand(self, f):
+        """A function with a C body: the C, and a stub to replace by hand."""
+        ret = C_RETURN_TYPES[f.rtype]
+        if "c_void" in ret:
+            self.needs_cvoid = True
+        lines = [f"// HAND: {f.name} -- translate the C below (see the file comment)"]
+        lines += [("//   " + ln.replace("\t", "    ")).rstrip() for ln in f.c_text.splitlines()]
         if f.section:
             lines.append(f'#[link_section = "{f.section}"]')
         lines.append("#[no_mangle]")
         if not f.section:
             lines.append("#[inline(never)]")
+        params = ", ".join(f.rust_params)
+        lines.append(f'extern "C" fn {f.name}({params}){" -> " + ret if ret else ""} {{')
+        lines.append("    todo!()")
+        lines.append("}")
+        return "\n".join(lines)
+
+    def emit_function(self, f):
+        if f.root:
+            return self.kfunc_root(f)
+        if not f.naked:
+            return self.emit_hand(f)
+        lines = []
+        if f.section:
+            lines.append(f'#[link_section = "{f.section}"]')
+        lines.append("#[no_mangle]")
+        lines.append("#[inline(never)]")
         lines.append(f"// BPF_NAKED: {f.name}")
         ret = C_RETURN_TYPES[f.rtype]
         if "c_void" in ret:
             self.needs_cvoid = True
         params = ", ".join(f.rust_params)
         lines.append(f'extern "C" fn {f.name}({params}){" -> " + ret if ret else ""} {{')
+        if ret:
+            lines.append(f"    let ret: {ret};")
         lines.append("    unsafe {")
         lines.append("        core::arch::asm!(")
         for s in f.stmts:
             lines.append(f"            {rust_str(s)},")
         for op, binding in f.operands:
             lines.append(f"            {op} = {binding},")
-        lines.append("            options(noreturn)")
-        lines += ["        );", "    }", "}"]
+        # Not options(noreturn): the optimizer would infer `noreturn` for the
+        # function and delete a Rust caller's code after `call` (a subprogram
+        # returning a value to a hand-translated program). The function
+        # returns what the asm left in r0 instead, an output the optimizer
+        # cannot fold, and scripts/naked_abi.py turns the `ret` into
+        # `unreachable`. With a register input, the C's clobber list decides
+        # which register the input gets (clang's choice is the oracle).
+        if ret:
+            lines.append('            out("r0") ret,')
+        if any(b.startswith("in(reg)") for _o, b in f.operands):
+            for c in f.clobbers:
+                if re.fullmatch(r"r[0-9]", c) and not (ret and c == "r0"):
+                    lines.append(f'            out("{c}") _,')
+        lines.append("            options(nostack)")
+        lines += ["        );", "    }"]
+        if ret:
+            lines.append("    ret")
+        lines.append("}")
         return "\n".join(lines)
 
 
@@ -1283,6 +1488,8 @@ def main(argv):
     ap.add_argument("names", nargs="*")
     ap.add_argument("--survey", action="store_true")
     ap.add_argument("--stdout", action="store_true")
+    ap.add_argument("--with-c-bodies", action="store_true",
+                    help="emit a function with a C body as a stub to translate by hand")
     args = ap.parse_args(argv[1:])
     names = args.names
     if args.survey:
@@ -1295,18 +1502,24 @@ def main(argv):
     rc = 0
     for name in names:
         try:
-            text = Generator(name).generate()
+            gen = Generator(name, args.with_c_bodies)
+            text = gen.generate()
         except Unsupported as e:
             print(f"[naked_gen] {name}: unsupported: {e}", file=sys.stderr)
             rc = 1
             continue
         if args.stdout:
             sys.stdout.write(text)
-        else:
-            path = os.path.join(REPO, "progs", name + ".rs")
-            with open(path, "w") as fh:
-                fh.write(text)
-            print(f"[naked_gen] wrote {os.path.relpath(path, REPO)}")
+            continue
+        path = os.path.join(REPO, "progs", name + ".rs")
+        with open(path, "w") as fh:
+            fh.write(text)
+        print(f"[naked_gen] wrote {os.path.relpath(path, REPO)}")
+        if gen.hand and gen.hand[2]:
+            os.makedirs(os.path.dirname(gen.hand[0]), exist_ok=True)
+            with open(gen.hand[0], "w") as fh:
+                fh.write(gen.hand[1])
+            print(f"[naked_gen] wrote {os.path.relpath(gen.hand[0], REPO)}: translate its C bodies")
     return rc
 
 

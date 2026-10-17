@@ -403,7 +403,12 @@ function name, and takes maps, globals, kfunc externs, the license and
 the test_tags! from the C object's BTF and ELF, verbatim. Regenerate
 such a file rather than editing it; `scripts/naked_gen.py --survey` says
 which files the generator cannot do (a C body, a kfunc variable, ...)
-and why. The `naked-verbatim` class of `scripts/translint.py`
+and why. A file that mixes naked programs with a few C functions is
+generated with `--with-c-bodies`: the generated file include!s
+`progs/hand/<name>.rs`, written once with a stub and the C text for each
+such function and never overwritten, where those bodies are translated by
+hand (a function that only references kfuncs for their BTF prototypes,
+`__kfunc_btf_root`, is generated regardless of its name). The `naked-verbatim` class of `scripts/translint.py`
 (`scripts/naked_verbatim.py`) then checks every `// BPF_NAKED:` function
 of the built object against the C object instruction by instruction,
 relocation symbols included, which is the real assertion for a verbatim

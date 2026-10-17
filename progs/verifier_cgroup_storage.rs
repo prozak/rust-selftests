@@ -138,6 +138,7 @@ bpf_map! {
 
 #[link_section = "cgroup/skb"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: valid_cgroup_storage_access
 extern "C" fn valid_cgroup_storage_access() {
     unsafe {
@@ -150,13 +151,14 @@ extern "C" fn valid_cgroup_storage_access() {
             "r0 &= 1;",
             "exit;",
             cgroup_storage = sym cgroup_storage,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "cgroup/skb"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: invalid_cgroup_storage_access_1
 extern "C" fn invalid_cgroup_storage_access_1() {
     unsafe {
@@ -169,13 +171,14 @@ extern "C" fn invalid_cgroup_storage_access_1() {
             "r0 &= 1;",
             "exit;",
             map_hash_8b = sym map_hash_8b,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "cgroup/skb"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: invalid_cgroup_storage_access_2
 extern "C" fn invalid_cgroup_storage_access_2() {
     unsafe {
@@ -186,13 +189,14 @@ extern "C" fn invalid_cgroup_storage_access_2() {
             "call 81;",
             "r0 &= 1;",
             "exit;",
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "cgroup/skb"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: invalid_cgroup_storage_access_3
 extern "C" fn invalid_cgroup_storage_access_3() {
     unsafe {
@@ -205,13 +209,14 @@ extern "C" fn invalid_cgroup_storage_access_3() {
             "r0 = 0;",
             "exit;",
             cgroup_storage = sym cgroup_storage,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "cgroup/skb"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: invalid_cgroup_storage_access_4
 extern "C" fn invalid_cgroup_storage_access_4() {
     unsafe {
@@ -224,13 +229,14 @@ extern "C" fn invalid_cgroup_storage_access_4() {
             "r1 += 1;",
             "exit;",
             cgroup_storage = sym cgroup_storage,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "cgroup/skb"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: invalid_cgroup_storage_access_5
 extern "C" fn invalid_cgroup_storage_access_5() {
     unsafe {
@@ -243,13 +249,14 @@ extern "C" fn invalid_cgroup_storage_access_5() {
             "r0 &= 1;",
             "exit;",
             cgroup_storage = sym cgroup_storage,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "cgroup/skb"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: invalid_cgroup_storage_access_6
 extern "C" fn invalid_cgroup_storage_access_6() {
     unsafe {
@@ -262,13 +269,14 @@ extern "C" fn invalid_cgroup_storage_access_6() {
             "r0 &= 1;",
             "exit;",
             cgroup_storage = sym cgroup_storage,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "cgroup/skb"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: per_cpu_cgroup_storage_access
 extern "C" fn per_cpu_cgroup_storage_access() {
     unsafe {
@@ -281,13 +289,14 @@ extern "C" fn per_cpu_cgroup_storage_access() {
             "r0 &= 1;",
             "exit;",
             percpu_cgroup_storage = sym percpu_cgroup_storage,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "cgroup/skb"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: cpu_cgroup_storage_access_1
 extern "C" fn cpu_cgroup_storage_access_1() {
     unsafe {
@@ -300,13 +309,14 @@ extern "C" fn cpu_cgroup_storage_access_1() {
             "r0 &= 1;",
             "exit;",
             map_hash_8b = sym map_hash_8b,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "cgroup/skb"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: cpu_cgroup_storage_access_2
 extern "C" fn cpu_cgroup_storage_access_2() {
     unsafe {
@@ -317,13 +327,14 @@ extern "C" fn cpu_cgroup_storage_access_2() {
             "call 81;",
             "r0 &= 1;",
             "exit;",
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "cgroup/skb"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: cpu_cgroup_storage_access_3
 extern "C" fn cpu_cgroup_storage_access_3() {
     unsafe {
@@ -336,13 +347,14 @@ extern "C" fn cpu_cgroup_storage_access_3() {
             "r0 = 0;",
             "exit;",
             percpu_cgroup_storage = sym percpu_cgroup_storage,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "cgroup/skb"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: cpu_cgroup_storage_access_4
 extern "C" fn cpu_cgroup_storage_access_4() {
     unsafe {
@@ -355,13 +367,14 @@ extern "C" fn cpu_cgroup_storage_access_4() {
             "r1 += 1;",
             "exit;",
             cgroup_storage = sym cgroup_storage,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "cgroup/skb"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: cpu_cgroup_storage_access_5
 extern "C" fn cpu_cgroup_storage_access_5() {
     unsafe {
@@ -374,13 +387,14 @@ extern "C" fn cpu_cgroup_storage_access_5() {
             "r0 &= 1;",
             "exit;",
             percpu_cgroup_storage = sym percpu_cgroup_storage,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "cgroup/skb"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: cpu_cgroup_storage_access_6
 extern "C" fn cpu_cgroup_storage_access_6() {
     unsafe {
@@ -393,13 +407,14 @@ extern "C" fn cpu_cgroup_storage_access_6() {
             "r0 &= 1;",
             "exit;",
             percpu_cgroup_storage = sym percpu_cgroup_storage,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "cgroup/skb"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: non_zero_flags_on_a_pruned_path
 extern "C" fn non_zero_flags_on_a_pruned_path() {
     unsafe {
@@ -413,7 +428,7 @@ extern "C" fn non_zero_flags_on_a_pruned_path() {
             "r0 = 0;",
             "exit;",
             cgroup_storage = sym cgroup_storage,
-            options(noreturn)
+            options(nostack)
         );
     }
 }

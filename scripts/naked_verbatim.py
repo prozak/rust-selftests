@@ -22,6 +22,7 @@ from bpfelf import BpfElf  # noqa: E402
 STT_FUNC = 2
 STT_SECTION = 3
 LD_IMM64 = 0x18
+CALL = 0x85
 
 
 def function(elf, name):
@@ -39,15 +40,26 @@ def function(elf, name):
         if sym.value <= off < sym.value + sym.size:
             target = r.sym
             if target.type == STT_SECTION:
-                imm = int.from_bytes(data[off - sym.value + 4:off - sym.value + 8], "little", signed=True)
-                if len(data) >= off - sym.value + 16 and data[off - sym.value] == LD_IMM64:
-                    hi = int.from_bytes(data[off - sym.value + 12:off - sym.value + 16], "little", signed=True)
+                i = off - sym.value
+                imm = int.from_bytes(data[i + 4:i + 8], "little", signed=True)
+                if data[i] == LD_IMM64 and len(data) >= i + 16:
+                    hi = int.from_bytes(data[i + 12:i + 16], "little", signed=True)
                     imm = (imm & 0xFFFFFFFF) | (hi << 32)
+                elif data[i] == CALL:
+                    imm = (imm + 1) * 8        # the callee's insn index - 1
                 named = elf.named_symbol_at(target.shndx, imm)
                 target_name = named.name if named else f"{elf.sections[target.shndx].name}+{imm}"
             else:
                 target_name = target.name
             relocs[off - sym.value] = target_name
+    # a pc-relative call (no relocation) names its callee just as well
+    for i in range(0, len(data) - 7, 8):
+        if data[i] == CALL and data[i + 1] == 0x10 and i not in relocs:
+            imm = int.from_bytes(data[i + 4:i + 8], "little", signed=True)
+            named = elf.named_symbol_at(sym.shndx, sym.value + i + (imm + 1) * 8)
+            relocs[i] = named.name if named else f"{sec.name}+{sym.value + i + (imm + 1) * 8}"
+        if data[i] == LD_IMM64:
+            i += 8
     return sec.name, data, relocs
 
 

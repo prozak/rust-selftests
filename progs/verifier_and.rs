@@ -65,6 +65,7 @@ bpf_map! {
 
 #[link_section = "socket"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: invalid_and_of_negative_number
 extern "C" fn invalid_and_of_negative_number() {
     unsafe {
@@ -75,23 +76,24 @@ extern "C" fn invalid_and_of_negative_number() {
             "r2 += -8;",
             "r1 = {map_hash_48b} ll;",
             "call 1;",
-            "if r0 == 0 goto l0_invalid_and_of_negative_number;",
+            "if r0 == 0 goto l0_0;",
             "r1 = *(u8*)(r0 + 0);",
             "r1 &= -4;",
             "r1 <<= 2;",
             "r0 += r1;",
-            "l0_invalid_and_of_negative_number:",
+            "l0_0:",
             "r1 = 4;",
             "*(u64*)(r0 + 0) = r1;",
             "exit;",
             map_hash_48b = sym map_hash_48b,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "socket"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: invalid_range_check
 extern "C" fn invalid_range_check() {
     unsafe {
@@ -102,7 +104,7 @@ extern "C" fn invalid_range_check() {
             "r2 += -8;",
             "r1 = {map_hash_48b} ll;",
             "call 1;",
-            "if r0 == 0 goto l0_invalid_range_check;",
+            "if r0 == 0 goto l0_1;",
             "r1 = *(u32*)(r0 + 0);",
             "r9 = 1;",
             "w1 %= 2;",
@@ -115,17 +117,18 @@ extern "C" fn invalid_range_check() {
             "w3 *= 0x10000000;",
             "r0 += r3;",
             "*(u32*)(r0 + 0) = r3;",
-            "l0_invalid_range_check:",
+            "l0_1:",
             "r0 = r0;",
             "exit;",
             map_hash_48b = sym map_hash_48b,
-            options(noreturn)
+            options(nostack)
         );
     }
 }
 
 #[link_section = "socket"]
 #[no_mangle]
+#[inline(never)]
 // BPF_NAKED: known_subreg_with_unknown_reg
 extern "C" fn known_subreg_with_unknown_reg() {
     unsafe {
@@ -134,12 +137,12 @@ extern "C" fn known_subreg_with_unknown_reg() {
             "r0 <<= 32;",
             "r0 += 1;",
             "r0 &= 0xFFFF1234;",
-            "if w0 < 1 goto l0_known_subreg_with_unknown_reg;",
+            "if w0 < 1 goto l0_2;",
             "r1 = *(u32*)(r1 + 512);",
-            "l0_known_subreg_with_unknown_reg:",
+            "l0_2:",
             "r0 = 0;",
             "exit;",
-            options(noreturn)
+            options(nostack)
         );
     }
 }

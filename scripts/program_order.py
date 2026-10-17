@@ -1,8 +1,19 @@
 #!/usr/bin/env python3
-"""Preserve explicitly declared load order without changing function bodies."""
+"""Preserve explicitly declared load order without changing function bodies.
+
+A function without a section attribute is a .text subprogram; listing one
+orders the whole of .text, as listing a program orders its section.
+"""
 from pathlib import Path
 import re
 import sys
+
+
+def section_of(match):
+    """The ELF section a definition lands in: its section attribute, else
+    .text (a subprogram)."""
+    section = re.search(r'section "([^"]+)"', match[0].splitlines()[0])
+    return section[1] if section else '.text'
 
 
 def lower(ir, source):
@@ -24,14 +35,10 @@ def lower(ir, source):
         if len(matches) != 1:
             raise ValueError(f'{name}: expected one function definition')
         selected[name] = matches[0]
-        section = re.search(r'section "([^"]+)"', matches[0][0].splitlines()[0])
-        if not section:
-            raise ValueError(f'{name}: expected a program section')
-        sections.add(section[1])
+        sections.add(section_of(matches[0]))
     # Require the whole section, so an omitted program cannot interleave.
     for m in functions:
-        section = re.search(r'section "([^"]+)"', m[0].splitlines()[0])
-        if section and section[1] in sections and m not in selected.values():
+        if section_of(m) in sections and m not in selected.values():
             raise ValueError('program order omits a function in the selected section')
     positions = sorted(selected.values(), key=lambda m: m.start())
     for position, name in reversed(list(zip(positions, names))):

@@ -76,3 +76,14 @@ def test_unused_parameters_keep_the_signature():
     ir = 'define void @p(ptr %ctx) #0 section "tc" !dbg !1 {\n  call void asm sideeffect "exit;", ""()\n  ret void\n}\n'
     out = lower(ir, '// BPF_NAKED: p\n')
     assert 'define void @p(ptr %ctx) naked section "tc" !dbg !1' in out
+
+
+def test_extractvalue_of_the_asm_result_is_plumbing():
+    # asm!(..., out("r0") ret, out("r1") _) returns a struct the function
+    # unpacks before `ret`: no instruction of its own
+    ir = ('define i32 @p() !dbg !1 {\n'
+          '  %0 = tail call { i32, i64 } asm sideeffect "r0 = 7; exit;", "=&{r0},=&{r1}"()\n'
+          '  %1 = extractvalue { i32, i64 } %0, 0\n  ret i32 %1\n}\n')
+    out = lower(ir, '// BPF_NAKED: p\n')
+    assert 'define i32 @p() naked !dbg !1' in out
+    assert '  unreachable' in out

@@ -1,13 +1,25 @@
 #!/bin/bash
-# fetch-llvm.sh — install the LLVM release this repo builds with into
-# LLVM_PREFIX (default .build/llvm): the official llvm-project binary
-# tarball, checked against its published sha256. LLVM_TARBALL=<file> uses
-# an already downloaded copy instead of fetching it.
+# fetch-llvm.sh — install an LLVM release into LLVM_PREFIX (default
+# .build/llvm): the official llvm-project binary tarball, checked against
+# its published sha256. LLVM_TARBALL=<file> uses an already downloaded copy
+# instead of fetching it.
+#
+# NOT the current path: while patches/llvm/ holds backend fixes the releases
+# lack, the repo builds its LLVM from source with scripts/build-llvm.sh and
+# this script refuses to run. When upstream carries them, delete the patches,
+# set VERSION/SHA256 below to the first release that has them, and this
+# script is the LLVM install again.
 
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "${REPO}/scripts/paths.sh"
+
+if ls "${REPO}"/patches/llvm/*.patch >/dev/null 2>&1; then
+    echo "fetch-llvm.sh: patches/llvm/ is not empty and no release carries" \
+         "those patches; build LLVM with scripts/build-llvm.sh" >&2
+    exit 1
+fi
 
 VERSION=22.1.8
 NAME="LLVM-${VERSION}-Linux-X64.tar.xz"

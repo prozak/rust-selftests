@@ -7,7 +7,7 @@
 #   BUILD_DIR         root of everything built from public sources (.build/)
 #   KERNEL_SRC        bpf-next worktree at kernel-commit, built for x86_64
 #   SELFTESTS_OUTPUT  tools/testing/selftests/bpf build output
-#   LLVM_PREFIX       LLVM >= 22 install (scripts/fetch-llvm.sh)
+#   LLVM_PREFIX       LLVM 23 install (scripts/build-llvm.sh)
 #   QEMU_KERNEL       bzImage booted by virtme-ng
 
 RS_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

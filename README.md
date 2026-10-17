@@ -170,8 +170,9 @@ a 32-thread machine running Ubuntu 24.04 with gcc 13.3.
 
 Host tools: the usual kernel build dependencies (gcc, make, flex, bison,
 bc, libelf, libssl, cmake for pahole), `qemu-system-x86_64`,
-[virtme-ng](https://github.com/arighi/virtme-ng) 1.41, Rust stable with the
-`rust-src` component (1.96.1 here), Python 3.12.
+[virtme-ng](https://github.com/arighi/virtme-ng) 1.41, Rust 1.99.1 with the
+`rust-src` component (`rust-toolchain.toml` pins it; rustup installs it on
+first use), cmake and ninja for LLVM, Python 3.12.
 
 ```sh
 git clone --recurse-submodules https://github.com/prozak/rust-selftests
@@ -180,19 +181,24 @@ git -C rust-bpf fetch origin pull/6/head              # #[btf_tag], not merged y
 git -C rust-bpf checkout FETCH_HEAD
 cd rust-selftests
 
-scripts/fetch-llvm.sh             # LLVM 22.1.8 release -> .build/llvm       (1.9 GB download, 12 GB unpacked)
+scripts/build-llvm.sh             # LLVM release/23.x + patches/llvm/ -> .build/llvm  (40 min on 32 CPUs, 2 GB)
 scripts/build-qemu-kernel.sh      # bpf-next at kernel-commit -> .build/bpf-next   (300 MB fetch, 4 min, 9 GB)
 scripts/build-qemu-selftests.sh   # kernel selftests -> .build/selftests-output-qemu  (1 min, 1.3 GB)
 ```
 
-Build rust-bpf's support libraries with the same LLVM and a stable rustc
-(its Makefile defaults to nightly):
+The LLVM is built from source because the translations need a BPF backend
+fix the release tarballs do not carry yet (`patches/llvm/`, issue #49);
+`scripts/fetch-llvm.sh` installs a release tarball instead once they do.
+
+Build rust-bpf's support libraries with the same LLVM and the same rustc
+(its Makefile defaults to nightly; run this from `rust-selftests/` so the
+toolchain file resolves `rustc`):
 
 ```sh
 make -C ../rust-bpf \
   LLVM_PREFIX=$PWD/.build/llvm \
-  RUSTC=$(rustup which --toolchain stable rustc) \
-  RUST_SRC=$(rustc +stable --print sysroot)/lib/rustlib/src/rust/library
+  RUSTC=$(rustup which rustc) \
+  RUST_SRC=$(rustc --print sysroot)/lib/rustlib/src/rust/library
 ```
 
 Tested with rust-bpf at `1dc4bb7` plus pull request #6 (`3e35246`), which

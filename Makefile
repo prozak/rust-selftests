@@ -29,7 +29,7 @@
 #                     test_progs, generated skeletons)
 #   RUSTBPF           4ast/rust-bpf checkout with built bld_deps/ and tools,
 #                     with pull request #6 (btf_tags.py) merged
-#   LLVM_PREFIX       LLVM >= 22 install (llc/opt/llvm-link/llvm-readelf...)
+#   LLVM_PREFIX       LLVM 23 install (scripts/build-llvm.sh; llc/opt/llvm-link/...)
 #   UML_HARNESS       uml-veristat checkout (uml-veristat/uml-test-progs;
 #                     FLAVOR=uml only)
 #   UML_INSTALL_DIR   uml-veristat install to boot (FLAVOR=uml only)

@@ -1,0 +1,8 @@
+# The rustc every object is built with (Makefile: RUSTC ?= rustc, resolved
+# by the rustup proxy from this file). Its LLVM major must match LLVM_PREFIX:
+# 1.99.1 is on LLVM 23.1, scripts/build-llvm.sh installs release/23.x.
+# rust-bpf's bld_deps must be built with the same rustc (README).
+[toolchain]
+channel = "1.99.1"
+components = ["rust-src"]
+profile = "minimal"

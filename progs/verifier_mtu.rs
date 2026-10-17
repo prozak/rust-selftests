@@ -17,11 +17,55 @@
 use core::ffi::c_void;
 use core::mem::MaybeUninit;
 
+use bpf_rs_core::bpf_map;
 use bpf_rs_core::ctx::__sk_buff;
-use bpf_rs_core::helpers::bpf_check_mtu;
+use bpf_rs_core::helpers::{bpf_check_mtu, bpf_get_current_comm, bpf_map_lookup_elem};
 use bpf_rs_core::test_tags;
 
 const TCX_PASS: i32 = 0;
+const XDP_PASS: i32 = 2;
+
+/// UAPI struct xdp_md (linux/bpf.h); the xdp program's context must be
+/// typed so in BTF.
+#[repr(C)]
+pub struct xdp_md {
+    pub data: u32,
+    pub data_end: u32,
+    pub data_meta: u32,
+    pub ingress_ifindex: u32,
+    pub rx_queue_index: u32,
+    pub egress_ifindex: u32,
+}
+
+// BPF_MAP_TYPE_ARRAY = 2, BPF_F_RDONLY_PROG = 1 << 7, BPF_F_WRONLY_PROG = 1 << 8.
+bpf_map! {
+    map_mtu_wo {
+        r#type: *const [i32; 2],
+        max_entries: *const [i32; 1],
+        map_flags: *const [i32; 256], // BPF_F_WRONLY_PROG
+        key: *const u32,
+        value: *const u32,
+    }
+}
+
+bpf_map! {
+    map_mtu_rw {
+        r#type: *const [i32; 2],
+        max_entries: *const [i32; 1],
+        key: *const u32,
+        value: *const u32,
+    }
+}
+
+bpf_map! {
+    map_mtu_ro {
+        r#type: *const [i32; 2],
+        max_entries: *const [i32; 1],
+        map_flags: *const [i32; 128], // BPF_F_RDONLY_PROG
+        key: *const u32,
+        value: *const u32,
+    }
+}
 
 test_tags! {
     tc_uninit_mtu:
@@ -30,6 +74,11 @@ test_tags! {
         __caps_unpriv("39|12"),
         __failure_unpriv,
         __msg_unpriv("invalid read from stack");
+    tc_writeonly_mtu: __failure, __msg("read from map forbidden");
+    tc_readwrite_mtu: __success;
+    xdp_writeonly_mtu: __failure, __msg("read from map forbidden");
+    tc_readonly_mtu: __failure, __msg("write into map forbidden");
+    tc_writeonly_output: __success;
 }
 
 #[link_section = "tc/ingress"]
@@ -38,6 +87,61 @@ extern "C" fn tc_uninit_mtu(ctx: *const __sk_buff) -> i32 {
     let mut mtu: MaybeUninit<u32> = MaybeUninit::uninit();
 
     bpf_check_mtu(ctx as *const c_void, 0, mtu.as_mut_ptr(), 0, 0);
+    TCX_PASS
+}
+
+#[link_section = "tc/ingress"]
+#[no_mangle]
+extern "C" fn tc_writeonly_mtu(ctx: *const __sk_buff) -> i32 {
+    let key: u32 = 0;
+    let mtu = bpf_map_lookup_elem(&map_mtu_wo, &key) as *mut u32;
+    if !mtu.is_null() {
+        bpf_check_mtu(ctx as *const c_void, 0, mtu, 0, 0);
+    }
+    TCX_PASS
+}
+
+#[link_section = "tc/ingress"]
+#[no_mangle]
+extern "C" fn tc_readwrite_mtu(ctx: *const __sk_buff) -> i32 {
+    let key: u32 = 0;
+    let mtu = bpf_map_lookup_elem(&map_mtu_rw, &key) as *mut u32;
+    if !mtu.is_null() {
+        bpf_check_mtu(ctx as *const c_void, 0, mtu, 0, 0);
+    }
+    TCX_PASS
+}
+
+#[link_section = "xdp"]
+#[no_mangle]
+extern "C" fn xdp_writeonly_mtu(ctx: *const xdp_md) -> i32 {
+    let key: u32 = 0;
+    let mtu = bpf_map_lookup_elem(&map_mtu_wo, &key) as *mut u32;
+    if !mtu.is_null() {
+        bpf_check_mtu(ctx as *const c_void, 0, mtu, 0, 0);
+    }
+    XDP_PASS
+}
+
+#[link_section = "tc/ingress"]
+#[no_mangle]
+extern "C" fn tc_readonly_mtu(ctx: *const __sk_buff) -> i32 {
+    let key: u32 = 0;
+    let mtu = bpf_map_lookup_elem(&map_mtu_ro, &key) as *mut u32;
+    if !mtu.is_null() {
+        bpf_check_mtu(ctx as *const c_void, 0, mtu, 0, 0);
+    }
+    TCX_PASS
+}
+
+#[link_section = "tc/ingress"]
+#[no_mangle]
+extern "C" fn tc_writeonly_output(_ctx: *const __sk_buff) -> i32 {
+    let key: u32 = 0;
+    let out = bpf_map_lookup_elem(&map_mtu_wo, &key) as *mut u32;
+    if !out.is_null() {
+        bpf_get_current_comm(out as *mut c_void, core::mem::size_of::<u32>() as u32);
+    }
     TCX_PASS
 }
 

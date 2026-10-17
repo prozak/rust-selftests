@@ -244,6 +244,10 @@ $(RUSTBPF)/btf_tags.py:
 	@[ -f $@ ] || { echo "$@ is missing: rust-selftests needs rust-bpf with pull request #6 (the btf_tag attribute) merged, see README" >&2; exit 1; }
 
 # --- Final BPF object ---
+# -relocation-model=static, as clang's BPF target defaults to: under llc's
+# PIC default a read-only table of function pointers (verifier_callx_rodata)
+# is "read-only with relocations", a writable .data.rel.ro section, where
+# the C object has it in .rodata.
 ORDER_SRCS := $(shell grep -l '^// BPF_PROGRAM_ORDER:' progs/*.rs)
 $(patsubst progs/%.rs,$(BLDDIR)/%.bpf.o,$(ORDER_SRCS)): scripts/program_order.py
 $(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc scripts/naked_abi.py scripts/btf_graph_types.py scripts/private_sections.py \
@@ -256,7 +260,7 @@ $(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc scripts/naked_abi.py scripts/btf_graph_t
 	python3 scripts/private_sections.py $@.abi.ll $(SELFTESTS_OUTPUT)/$*.bpf.o
 	@if grep -q '^// BPF_PROGRAM_ORDER:' progs/$*.rs; then python3 scripts/program_order.py $@.abi.ll progs/$*.rs; fi
 	python3 scripts/maps_section.py $@.abi.ll
-	$(LLC) -march=bpfel -mcpu=v4 -filetype=obj -o $@.tmp $@.abi.ll
+	$(LLC) -march=bpfel -mcpu=v4 -relocation-model=static -filetype=obj -o $@.tmp $@.abi.ll
 	$(LLVM_OBJCOPY) \
 		--remove-section=.eh_frame --remove-section=.rel.eh_frame \
 		--remove-section=.gcc_except_table \

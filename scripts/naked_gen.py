@@ -538,7 +538,7 @@ class RustTypes:
 
     def __init__(self, btf):
         self.btf = btf
-        self.defs, self.done, self.failed = [], set(), {}
+        self.defs, self.done, self.failed, self.packed = [], set(), {}, set()
 
     def rust(self, tid):
         btf = self.btf
@@ -558,6 +558,8 @@ class RustTypes:
             p = btf.types[btf.strip(t.size)]
             if p.kind in (K_INT, K_ARRAY, K_FLOAT) or (p.kind in (K_STRUCT, K_UNION) and p.name):
                 return "*mut " + self.rust(t.size)
+            if p.kind == K_FUNC_PROTO:
+                return self.fn_pointer(btf.strip(t.size))
             return "*mut c_void"
         if t.kind == K_ARRAY:
             elem, _idx, n = t.extra
@@ -576,6 +578,22 @@ class RustTypes:
 
     def fail(self, t):
         raise Unsupported(f"BTF kind {t.kind} ({t.name!r}) as a value type")
+
+    def fn_pointer(self, proto_tid):
+        """`extern "C" fn(...) -> R` for a FUNC_PROTO: Sync (a raw pointer is
+        not, and a .rodata table of function pointers is a `static`), and
+        the C's BTF shape (a pointer to a function prototype)."""
+        btf = self.btf
+        t = btf.types[proto_tid]
+
+        def one(tid):
+            pt = btf.types[btf.strip(tid)]
+            if pt.kind == K_PTR:
+                return "*mut c_void"
+            return self.rust(tid)
+        params = ", ".join(one(p) for _n, p in t.extra)
+        ret = "" if btf.strip(t.size) == 0 else " -> " + one(t.size)
+        return f'extern "C" fn({params}){ret}'
 
     def local_like(self, tid, depth=0):
         """Whether a struct looks like one the C file defines (a callback
@@ -609,13 +627,18 @@ class RustTypes:
             size, align = 0, 1
             for _name, mtid, off in t.extra:
                 s, a = self.size_align(mtid)
+                if off % 8:
+                    raise Unsupported(f"struct {t.name}: bitfield member")
+                if t.kind == K_STRUCT and (off // 8) % a:
+                    self.packed.add(btf.strip(tid))      # repr(C, packed)
+                    a = 1
                 align = max(align, a)
                 if t.kind == K_UNION:
                     size = max(size, s)
                 else:
-                    if off % 8 or (off // 8) % a:
-                        raise Unsupported(f"struct {t.name}: member not naturally aligned")
                     size = off // 8 + s
+            if btf.strip(tid) in self.packed:
+                align = 1
             return (size + align - 1) // align * align, align
         return self.fail(t)
 
@@ -647,17 +670,22 @@ class RustTypes:
                 name = f"__anon{i}"
             fields.append(f"    {ident(name)}: {self.rust(mtid)},")
         size, _align = self.size_align(tid)
+        if size != t.size and tid in self.packed:
+            size = sum(0 for _ in ()) or t.size   # packed: the C size is the layout
         if size != t.size:
             raise Unsupported(f"struct {t.name}: C size {t.size}, natural Rust "
                               f"layout {size} (explicit alignment or padding)")
         kw = "union" if t.kind == K_UNION else "struct"
+        repr_ = "#[repr(C, packed)]" if tid in self.packed else "#[repr(C)]"
         # plain data, Copy: a union's members must be
-        self.defs.append("#[allow(non_camel_case_types, non_snake_case)]\n#[repr(C)]\n#[derive(Clone, Copy)]\n"
+        self.defs.append("#[allow(non_camel_case_types, non_snake_case)]\n" + repr_ + "\n#[derive(Clone, Copy)]\n"
                          + f"{kw} {t.name} {{\n" + "\n".join(fields) + "\n}")
 
-    def literal(self, tid, data):
-        """A Rust literal of type `tid` holding the bytes `data`."""
+    def literal(self, tid, data, rels=None, base=0):
+        """A Rust literal of type `tid` holding the bytes `data`; `rels`
+        maps an offset (from `base`) to the symbol a pointer there names."""
         btf = self.btf
+        rels = rels or {}
         t = btf.types[btf.strip(tid)]
         if t.kind == K_INT:
             flags = (t.extra >> 24) & 0xF
@@ -668,18 +696,20 @@ class RustTypes:
         if t.kind in (K_ENUM, K_ENUM64):
             return str(int.from_bytes(data[:t.size], "little", signed=bool(t.kflag)))
         if t.kind == K_PTR:
+            if base in rels:
+                return rels[base]
             if any(data[:8]):
-                raise Unsupported("non-null pointer initializer")
+                raise Unsupported("non-null pointer initializer without a relocation")
             return "core::ptr::null_mut()"
         if t.kind == K_ARRAY:
             elem, _idx, n = t.extra
             es = self.size_align(elem)[0]
-            items = [self.literal(elem, data[i * es:(i + 1) * es]) for i in range(n)]
+            items = [self.literal(elem, data[i * es:(i + 1) * es], rels, base + i * es) for i in range(n)]
             if n > 4 and len(set(items)) == 1:
                 return f"[{items[0]}; {n}]"
             return "[" + ", ".join(items) + "]"
         if t.kind == K_STRUCT:
-            fields = [f"{ident(name)}: {self.literal(mtid, data[off // 8:])}"
+            fields = [f"{ident(name)}: {self.literal(mtid, data[off // 8:], rels, base + off // 8)}"
                       for name, mtid, off in t.extra]
             return f"{t.name} {{ " + ", ".join(fields) + " }"
         raise Unsupported(f"initializer of BTF kind {t.kind}")
@@ -714,6 +744,26 @@ class CObject:
             target = btf.types[t.size]
             if target.kind == K_FUNC:
                 out.setdefault(target.name, []).append((t.extra, t.name))
+        return out
+
+    def type_tags(self):
+        """[(struct name, member, tag)] for every struct/union member whose
+        pointer type carries a BTF type tag (`__kptr`, `__uptr`, ...)."""
+        btf, out = self.btf, []
+        for t in btf.types.values():
+            if t.kind not in (K_STRUCT, K_UNION) or not t.name:
+                continue
+            for mname, mtid, _off in t.extra:
+                tid = mtid
+                while True:
+                    m = btf.types[tid]
+                    if m.kind == K_TYPE_TAG:
+                        out.append((t.name, mname, m.name))
+                        break
+                    if m.kind in (K_PTR,) + MODIFIERS and m.kind != K_TYPE_TAG:
+                        tid = m.size
+                        continue
+                    break
         return out
 
     def test_tags(self):
@@ -877,7 +927,7 @@ class Generator:
                 self.funcs.append(f)
             else:
                 self.errors.append(f"C body: {f.name}")
-        if not any(f.naked for f in self.funcs):
+        if not any(f.naked for f in self.funcs) and not self.with_c_bodies:
             self.errors.append("no naked function")
 
     def resolve(self):
@@ -959,7 +1009,8 @@ class Generator:
             # keeps a `__used` static alive through internalize/globaldce
             for i, s in enumerate(stmts):
                 m = re.fullmatch(r"(call|goto|gotol|callx) ([A-Za-z_]\w*);", s) \
-                    or re.fullmatch(r"(r\d = )([A-Za-z_]\w*) ll;", s)
+                    or re.fullmatch(r"(r\d = )([A-Za-z_]\w*) ll;", s) \
+                    or re.fullmatch(r"(\.quad|\.8byte) ([A-Za-z_]\w*);", s)     # a table entry
                 if m and m.group(2) in funcs:
                     target = rust_fn(m.group(2))
                     if target not in bindings:
@@ -1253,14 +1304,44 @@ class Generator:
                 data = sec.data[voff:voff + vsize] if sec and sec.data else b""
                 data = data + b"\0" * (vsize - len(data))
                 ty = types.rust(var.size)
-                lit = types.literal(var.size, data)
+                rels = {}
+                for off, r in elf.relocs.get(sec.idx, {}).items() if sec else []:
+                    if voff <= off < voff + vsize:
+                        target = r.sym
+                        if target.type == STT_SECTION:
+                            imm = struct.unpack_from("<q", sec.data, off)[0]
+                            target = elf.named_symbol_at(target.shndx, imm)
+                        if target is None or not target.name:
+                            raise Unsupported(f"{var.name}: relocation against an unnamed symbol")
+                        if target.type == 2:    # a function's address
+                            rels[off - voff] = rust_fn(target.name)
+                        else:
+                            rels[off - voff] = f"core::ptr::addr_of!({target.name}) as *mut c_void"
+                            self.needs_cvoid = True
+                lit = types.literal(var.size, data, rels)
                 attrs = []
                 zero = not any(data)
-                if ds.name not in (".data", ".bss", ".rodata") or (ds.name == ".data" and zero):
+                # rustc puts a read-only static with relocations (a table of
+                # function pointers) in .data.rel.ro: name the C's section
+                if ds.name not in (".data", ".bss", ".rodata") or (ds.name == ".data" and zero) \
+                        or (ds.name == ".rodata" and rels):
                     attrs.append(f'#[link_section = "{ds.name}"]')
                 attrs.append("#[no_mangle]")
+                attrs.append("#[allow(non_upper_case_globals)]")    # the C's name
                 mut = "" if ds.name.startswith(".rodata") else "mut "
-                out.append("\n".join(attrs) + f"\nstatic {mut}{var.name}: {ty} = {lit};")
+                rname = var.name
+                if not re.fullmatch(r"[A-Za-z_]\w*", var.name):
+                    # a C function-local static (`fn.___fmt`): exported under
+                    # its symbol name, spelled with underscores in Rust
+                    rname = re.sub(r"\W", "_", var.name)
+                    attrs = [a for a in attrs if a != "#[no_mangle]"] + [f'#[export_name = "{var.name}"]']
+                if not mut and ("*mut " in ty or "*const " in ty):
+                    # raw pointers are not Sync: a `static mut`, kept read-only
+                    # by the explicit section
+                    mut = "mut "
+                    if not any(a.startswith("#[link_section") for a in attrs):
+                        attrs.insert(0, f'#[link_section = "{ds.name}"]')
+                out.append("\n".join(attrs) + f"\nstatic {mut}{rname}: {ty} = {lit};")
                 self.global_names.append(var.name)
                 self.count("globals")
         return out
@@ -1379,10 +1460,11 @@ class Generator:
                     raise Unsupported(f"{f.name}: operand refers to unknown symbol {target}")
         lic_sym, lic = self.obj.license()
         self.hand = self.hand_file()
-
-        out = ["// SPDX-License-Identifier: GPL-2.0", "#![no_std]", "#![no_main]",
-               "#![feature(asm_experimental_arch)]", "#![allow(named_asm_labels)]"]
         hand_text = self.hand[1] if self.hand else ""
+
+        out = ["// SPDX-License-Identifier: GPL-2.0", "#![no_std]", "#![no_main]"]
+        if any(f.naked for f in self.funcs) or "asm!" in hand_text:
+            out += ["#![feature(asm_experimental_arch)]", "#![allow(named_asm_labels)]"]
         if any("as usize" in b for f in self.funcs for _o, b in f.operands) \
                 or any(s[0] == "ref" for f in self.funcs if f.root for s in f.root) \
                 or "as usize" in hand_text:
@@ -1415,6 +1497,9 @@ class Generator:
             uses.append("test_tags")
         if self.obj.arg_tags():
             uses.append("arg_tags")
+        if any(st in {d.split("\n")[3].split()[1] for d in self.obj.types.defs}
+               for st, _m, _t in self.obj.type_tags()):
+            uses.append("btf_type_tags")
         # rustc emits functions sorted by name; keep the C's source order
         # in every section, .text included (scripts/program_order.py), so
         # even a pc-relative call to a subprogram encodes the same
@@ -1460,6 +1545,16 @@ class Generator:
             out += ["// Map key/value types, shaped like the C object's BTF (the kernel",
                     "// checks some of them member by member, so no explicit padding).",
                     "// translint: allow(padding)"]
+        # `__kptr` and friends on struct members: btf_type_tags!
+        # (scripts/btf_type_tags.py), for the types this file defines
+        defined = {d.split("\n")[3].split()[1] for d in self.obj.types.defs}
+        type_tags = [(st, m, tag) for st, m, tag in self.obj.type_tags() if st in defined]
+        if type_tags:
+            out.append("btf_type_tags! {")
+            for st, m, tag in type_tags:
+                out.append(f"    {st}.{m}: {tag};")
+            out.append("}")
+            out.append("")
         arg_tags = self.obj.arg_tags()
         if arg_tags:
             out.append("arg_tags! {")

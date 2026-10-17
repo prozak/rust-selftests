@@ -214,12 +214,27 @@ extern "C" fn sub(_ctx: *const c_void) -> i32 {
     0
 }
 
+// A relaxed fetch whose result is discarded is what selects the
+// non-fetching insn, so each operation keeps a *_noreturn_value of each
+// width to cover that lowering as well.
 #[link_section = ".addr_space.1"]
 #[no_mangle]
 static mut and64_value: u64 = 0x110u64 << 32;
 #[link_section = ".addr_space.1"]
 #[no_mangle]
+static mut and64_result: u64 = 0;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut and64_noreturn_value: u64 = 0x110u64 << 32;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
 static mut and32_value: u32 = 0x110;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut and32_result: u32 = 0;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut and32_noreturn_value: u32 = 0x110;
 
 #[link_section = "raw_tp/sys_enter"]
 #[no_mangle]
@@ -229,20 +244,43 @@ extern "C" fn and(_ctx: *const c_void) -> i32 {
             return 0;
         }
 
-        (*(cast_kern(core::ptr::addr_of_mut!(and64_value)) as *mut AtomicU64))
+        let r = (*(cast_kern(core::ptr::addr_of_mut!(and64_value)) as *mut AtomicU64))
+            .fetch_and(0x011u64 << 32, Ordering::SeqCst);
+        *cast_kern(core::ptr::addr_of_mut!(and64_result)) = r;
+        let r = (*(cast_kern(core::ptr::addr_of_mut!(and32_value)) as *mut AtomicU32))
+            .fetch_and(0x011, Ordering::SeqCst);
+        *cast_kern(core::ptr::addr_of_mut!(and32_result)) = r;
+        // __sync_fetch_and_*() is seq_cst; a relaxed 32-bit atomicrmw whose
+        // result is used made LLVM 22 emit the non-fetching insn and store
+        // the operand. A discarded relaxed fetch is what selects the
+        // non-fetching insn, as the C's __c11_atomic_fetch_*() does.
+        (*(cast_kern(core::ptr::addr_of_mut!(and64_noreturn_value)) as *mut AtomicU64))
             .fetch_and(0x011u64 << 32, Ordering::Relaxed);
-        (*(cast_kern(core::ptr::addr_of_mut!(and32_value)) as *mut AtomicU32))
+        (*(cast_kern(core::ptr::addr_of_mut!(and32_noreturn_value)) as *mut AtomicU32))
             .fetch_and(0x011, Ordering::Relaxed);
     }
     0
 }
 
+// u32s first: .addr_space.1 must not have holes, as in the C.
 #[link_section = ".addr_space.1"]
 #[no_mangle]
 static mut or32_value: u32 = 0x110;
 #[link_section = ".addr_space.1"]
 #[no_mangle]
+static mut or32_result: u32 = 0;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut or32_noreturn_value: u32 = 0x110;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
 static mut or64_value: u64 = 0x110u64 << 32;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut or64_result: u64 = 0;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut or64_noreturn_value: u64 = 0x110u64 << 32;
 
 #[link_section = "raw_tp/sys_enter"]
 #[no_mangle]
@@ -252,9 +290,19 @@ extern "C" fn or(_ctx: *const c_void) -> i32 {
             return 0;
         }
 
-        (*(cast_kern(core::ptr::addr_of_mut!(or64_value)) as *mut AtomicU64))
+        let r = (*(cast_kern(core::ptr::addr_of_mut!(or64_value)) as *mut AtomicU64))
+            .fetch_or(0x011u64 << 32, Ordering::SeqCst);
+        *cast_kern(core::ptr::addr_of_mut!(or64_result)) = r;
+        let r = (*(cast_kern(core::ptr::addr_of_mut!(or32_value)) as *mut AtomicU32))
+            .fetch_or(0x011, Ordering::SeqCst);
+        *cast_kern(core::ptr::addr_of_mut!(or32_result)) = r;
+        // __sync_fetch_and_*() is seq_cst; a relaxed 32-bit atomicrmw whose
+        // result is used made LLVM 22 emit the non-fetching insn and store
+        // the operand. A discarded relaxed fetch is what selects the
+        // non-fetching insn, as the C's __c11_atomic_fetch_*() does.
+        (*(cast_kern(core::ptr::addr_of_mut!(or64_noreturn_value)) as *mut AtomicU64))
             .fetch_or(0x011u64 << 32, Ordering::Relaxed);
-        (*(cast_kern(core::ptr::addr_of_mut!(or32_value)) as *mut AtomicU32))
+        (*(cast_kern(core::ptr::addr_of_mut!(or32_noreturn_value)) as *mut AtomicU32))
             .fetch_or(0x011, Ordering::Relaxed);
     }
     0
@@ -265,7 +313,19 @@ extern "C" fn or(_ctx: *const c_void) -> i32 {
 static mut xor64_value: u64 = 0x110u64 << 32;
 #[link_section = ".addr_space.1"]
 #[no_mangle]
+static mut xor64_result: u64 = 0;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut xor64_noreturn_value: u64 = 0x110u64 << 32;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
 static mut xor32_value: u32 = 0x110;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut xor32_result: u32 = 0;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut xor32_noreturn_value: u32 = 0x110;
 
 #[link_section = "raw_tp/sys_enter"]
 #[no_mangle]
@@ -275,9 +335,19 @@ extern "C" fn xor(_ctx: *const c_void) -> i32 {
             return 0;
         }
 
-        (*(cast_kern(core::ptr::addr_of_mut!(xor64_value)) as *mut AtomicU64))
+        let r = (*(cast_kern(core::ptr::addr_of_mut!(xor64_value)) as *mut AtomicU64))
+            .fetch_xor(0x011u64 << 32, Ordering::SeqCst);
+        *cast_kern(core::ptr::addr_of_mut!(xor64_result)) = r;
+        let r = (*(cast_kern(core::ptr::addr_of_mut!(xor32_value)) as *mut AtomicU32))
+            .fetch_xor(0x011, Ordering::SeqCst);
+        *cast_kern(core::ptr::addr_of_mut!(xor32_result)) = r;
+        // __sync_fetch_and_*() is seq_cst; a relaxed 32-bit atomicrmw whose
+        // result is used made LLVM 22 emit the non-fetching insn and store
+        // the operand. A discarded relaxed fetch is what selects the
+        // non-fetching insn, as the C's __c11_atomic_fetch_*() does.
+        (*(cast_kern(core::ptr::addr_of_mut!(xor64_noreturn_value)) as *mut AtomicU64))
             .fetch_xor(0x011u64 << 32, Ordering::Relaxed);
-        (*(cast_kern(core::ptr::addr_of_mut!(xor32_value)) as *mut AtomicU32))
+        (*(cast_kern(core::ptr::addr_of_mut!(xor32_noreturn_value)) as *mut AtomicU32))
             .fetch_xor(0x011, Ordering::Relaxed);
     }
     0
@@ -365,18 +435,125 @@ extern "C" fn xchg(_ctx: *const c_void) -> i32 {
     0
 }
 
+extern "C" {
+    fn bpf_arena_alloc_pages(map: *const c_void, addr: *mut c_void, count: u32, node: i32, flags: u64) -> *mut u64;
+    fn bpf_arena_free_pages(map: *const c_void, addr: *mut c_void, count: u32);
+}
+const NUMA_NO_NODE: i32 = -1;
+
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut fetch_src_r0_value: u64 = 0x11000000110;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut fetch_src_r0_result: u64 = 0;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut fetch_dst_r0_value: u64 = 0x11000000110;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut fetch_dst_r0_result: u64 = 0;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut fetch_dst_r0_readback: u64 = 0;
+
+// BPF_ATOMIC_OP(BPF_DW, BPF_OR | BPF_FETCH, dst, src, 0): opcode 0xdb
+// (BPF_STX | BPF_DW | BPF_ATOMIC), regs byte src << 4 | dst, off 0,
+// imm 0x41 (BPF_OR | BPF_FETCH). The old value lands in src.
+macro_rules! fetch_or_dw {
+    (r0, r1) => { ".byte 0xdb, 0x10, 0x00, 0x00, 0x41, 0x00, 0x00, 0x00" }; // dst r0, src r1
+    (r1, r0) => { ".byte 0xdb, 0x01, 0x00, 0x00, 0x41, 0x00, 0x00, 0x00" }; // dst r1, src r0
+}
+
+// A fetching OR with the operand in r0, and one with the arena pointer in r0.
+// The x86 JIT needs RAX for its CMPXCHG loop and substitutes BPF_REG_AX for
+// whichever of the two is r0, so both have to keep working. Hand-written
+// because the compiler picks its own registers and will not reliably emit
+// either. The arena addresses are cast to kernel pointers outside the asm
+// (the C spells the addr_space_cast inside it); the atomic and its registers
+// are what the test is about.
+#[link_section = "raw_tp/sys_enter"]
+#[no_mangle]
+extern "C" fn fetch_r0(_ctx: *const c_void) -> i32 {
+    unsafe {
+        if (bpf_get_current_pid_tgid() >> 32) != pid as u64 {
+            return 0;
+        }
+
+        let value = cast_kern(core::ptr::addr_of_mut!(fetch_src_r0_value));
+        let result = cast_kern(core::ptr::addr_of_mut!(fetch_src_r0_result));
+        core::arch::asm!(
+            "r0 = 0x1100000011 ll",
+            fetch_or_dw!(r1, r0),
+            "*(u64 *)({result} + 0) = r0",
+            in("r1") value,
+            out("r0") _,
+            result = in(reg) result,
+            options(nostack, preserves_flags),
+        );
+
+        let value = cast_kern(core::ptr::addr_of_mut!(fetch_dst_r0_value));
+        let result = cast_kern(core::ptr::addr_of_mut!(fetch_dst_r0_result));
+        let readback = cast_kern(core::ptr::addr_of_mut!(fetch_dst_r0_readback));
+        core::arch::asm!(
+            "r1 = 0x1100000011 ll",
+            fetch_or_dw!(r0, r1),
+            "*(u64 *)({result} + 0) = r1",
+            // r0 is only read by the atomic, so it must still be the pointer.
+            "r3 = *(u64 *)(r0 + 0)",
+            "*(u64 *)({readback} + 0) = r3",
+            in("r0") value,
+            out("r1") _,
+            out("r3") _,
+            result = in(reg) result,
+            readback = in(reg) readback,
+            options(nostack, preserves_flags),
+        );
+    }
+    0
+}
+
 #[link_section = ".addr_space.1"]
 #[no_mangle]
 static mut uaf_sink: u64 = 0;
 #[link_section = ".addr_space.1"]
 #[no_mangle]
 static mut uaf_recovery_fails: u64 = 0;
+// Register state after the r0 forms below fault, checked by the test
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut uaf_r1_after_dst_r0: u64 = 0;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut uaf_r0_before_dst_r0: u64 = 0;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut uaf_r0_after_dst_r0: u64 = 0;
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut uaf_r0_after_src_r0: u64 = 0;
+// What reading the faulted address again gives, see the end of uaf()
+#[link_section = ".addr_space.1"]
+#[no_mangle]
+static mut uaf_reread: u64 = 0;
 
-// Real body is `#if ... && !__TARGET_ARCH_arm64 && !__TARGET_ARCH_x86` in
-// the C source, i.e. already excluded upstream on this (x86) target: no
-// bpf_arena_alloc_pages/free_pages kfunc calls occur here even in the
-// pristine clang-built object, so uaf_recovery_fails simply stays at its
-// zero init, matching `ASSERT_EQ(skel->arena->uaf_recovery_fails, 0, ...)`.
+// volatile __u64 uaf_recovery_fails: every decrement is its own store.
+#[inline(always)]
+unsafe fn uaf_fail_dec() {
+    let p = cast_kern(core::ptr::addr_of_mut!(uaf_recovery_fails));
+    core::ptr::write_volatile(p, core::ptr::read_volatile(p).wrapping_sub(1));
+}
+
+#[inline(always)]
+unsafe fn uaf_sink_add(v: u64) {
+    let p = cast_kern(core::ptr::addr_of_mut!(uaf_sink));
+    *p = (*p).wrapping_add(v);
+}
+
+// Every atomic below touches a freed arena page; the JIT's exception table
+// recovers each fault and the program keeps going, which is what the
+// uaf_recovery_fails countdown records. The C compiles this body on x86 since
+// __BPF_FEATURE_ADDR_SPACE_CAST (LLVM 19) and 645f5fcf.
 #[link_section = "syscall"]
 #[no_mangle]
 extern "C" fn uaf(_ctx: *const c_void) -> i32 {
@@ -384,6 +561,127 @@ extern "C" fn uaf(_ctx: *const c_void) -> i32 {
         if (bpf_get_current_pid_tgid() >> 32) != pid as u64 {
             return 0;
         }
+
+        let page = bpf_arena_alloc_pages(
+            &arena as *const _ as *const c_void,
+            core::ptr::null_mut(),
+            1,
+            NUMA_NO_NODE,
+            0,
+        );
+        bpf_arena_free_pages(&arena as *const _ as *const c_void, page.cast(), 1);
+        *cast_kern(core::ptr::addr_of_mut!(uaf_recovery_fails)) = 26;
+        *cast_kern(core::ptr::addr_of_mut!(uaf_r1_after_dst_r0)) = 1;
+        *cast_kern(core::ptr::addr_of_mut!(uaf_r0_after_dst_r0)) = 1;
+        *cast_kern(core::ptr::addr_of_mut!(uaf_r0_after_src_r0)) = 1;
+        *cast_kern(core::ptr::addr_of_mut!(uaf_reread)) = 1;
+
+        let page32 = cast_kern(page as *mut u32) as *mut AtomicU32;
+        uaf_sink_add((*page32).fetch_add(1, Ordering::SeqCst) as u64);
+        uaf_fail_dec();
+        (*page32).fetch_add(1, Ordering::SeqCst);
+        uaf_fail_dec();
+        uaf_sink_add((*page32).fetch_sub(1, Ordering::SeqCst) as u64);
+        uaf_fail_dec();
+        (*page32).fetch_sub(1, Ordering::SeqCst);
+        uaf_fail_dec();
+        uaf_sink_add((*page32).fetch_and(1, Ordering::SeqCst) as u64);
+        uaf_fail_dec();
+        (*page32).fetch_and(1, Ordering::SeqCst);
+        uaf_fail_dec();
+        uaf_sink_add((*page32).fetch_or(1, Ordering::SeqCst) as u64);
+        uaf_fail_dec();
+        (*page32).fetch_or(1, Ordering::SeqCst);
+        uaf_fail_dec();
+        uaf_sink_add((*page32).fetch_xor(1, Ordering::SeqCst) as u64);
+        uaf_fail_dec();
+        (*page32).fetch_xor(1, Ordering::SeqCst);
+        uaf_fail_dec();
+        uaf_sink_add(
+            (*page32)
+                .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+                .unwrap_or_else(|v| v) as u64,
+        );
+        uaf_fail_dec();
+        uaf_sink_add((*page32).swap(1, Ordering::SeqCst) as u64);
+        uaf_fail_dec();
+
+        let page64 = cast_kern(page) as *mut AtomicU64;
+        uaf_sink_add((*page64).fetch_add(1, Ordering::SeqCst));
+        uaf_fail_dec();
+        (*page64).fetch_add(1, Ordering::SeqCst);
+        uaf_fail_dec();
+        uaf_sink_add((*page64).fetch_sub(1, Ordering::SeqCst));
+        uaf_fail_dec();
+        (*page64).fetch_sub(1, Ordering::SeqCst);
+        uaf_fail_dec();
+        uaf_sink_add((*page64).fetch_and(1, Ordering::SeqCst));
+        uaf_fail_dec();
+        (*page64).fetch_and(1, Ordering::SeqCst);
+        uaf_fail_dec();
+        uaf_sink_add((*page64).fetch_or(1, Ordering::SeqCst));
+        uaf_fail_dec();
+        (*page64).fetch_or(1, Ordering::SeqCst);
+        uaf_fail_dec();
+        uaf_sink_add((*page64).fetch_xor(1, Ordering::SeqCst));
+        uaf_fail_dec();
+        (*page64).fetch_xor(1, Ordering::SeqCst);
+        uaf_fail_dec();
+        uaf_sink_add(
+            (*page64)
+                .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+                .unwrap_or_else(|v| v),
+        );
+        uaf_fail_dec();
+        uaf_sink_add((*page64).swap(1, Ordering::SeqCst));
+        uaf_fail_dec();
+
+        // The x86 JIT needs RAX for the CMPXCHG loop it lowers a fetching
+        // AND/OR/XOR into, and substitutes BPF_REG_AX for r0 when r0 is
+        // either operand. Only then does the fault fixup have to name that
+        // register, so spell both forms out: the compiler picks its own and
+        // never produces them.
+        //
+        // The freed page is the first of the arena, whose 32-bit address is
+        // 0, which would make "the address register was left alone" an empty
+        // check. Use the page after it, which is unmapped as well.
+        let next = cast_kern((page as *mut u8).add(4096));
+        let before = cast_kern(core::ptr::addr_of_mut!(uaf_r0_before_dst_r0));
+        let after_r0 = cast_kern(core::ptr::addr_of_mut!(uaf_r0_after_dst_r0));
+        let after_r1 = cast_kern(core::ptr::addr_of_mut!(uaf_r1_after_dst_r0));
+        core::arch::asm!(
+            "r1 = 1",
+            "*(u64 *)({before} + 0) = r0",
+            fetch_or_dw!(r0, r1),
+            "*(u64 *)({after_r0} + 0) = r0",
+            "*(u64 *)({after_r1} + 0) = r1",
+            in("r0") next,
+            out("r1") _,
+            before = in(reg) before,
+            after_r0 = in(reg) after_r0,
+            after_r1 = in(reg) after_r1,
+            options(nostack, preserves_flags),
+        );
+        uaf_fail_dec();
+
+        let after_src = cast_kern(core::ptr::addr_of_mut!(uaf_r0_after_src_r0));
+        core::arch::asm!(
+            "r0 = 1",
+            fetch_or_dw!(r1, r0),
+            "*(u64 *)({after_src} + 0) = r0",
+            in("r1") next,
+            out("r0") _,
+            after_src = in(reg) after_src,
+            options(nostack, preserves_flags),
+        );
+        uaf_fail_dec();
+
+        // If a fault were recovered by the arena mapping its zeroed scratch
+        // page rather than by the JIT's exception table entry, the access
+        // above would have succeeded and written there. The page has to
+        // still be unmapped, so that the read faults and gives 0.
+        let v = core::ptr::read_volatile(next as *const u64);
+        *cast_kern(core::ptr::addr_of_mut!(uaf_reread)) = v;
     }
     0
 }

@@ -106,6 +106,7 @@ test_tags! {
         __stderr("CPU: {{[0-9]+}} UID: 0 PID: {{[0-9]+}} Comm: {{.*}}"),
         __stderr("Call trace:\n{{([a-zA-Z_][a-zA-Z0-9_]*\\+0x[0-9a-fA-F]+/0x[0-9a-fA-F]+\n|[ \t]+[^\n]+\n)*}}");
     stream_print_stack_invalid_id: __success, __retval(-2);
+    stream_empty: __success, __retval(0);
     stream_print_kfuncs_locked: __arch_x86_64, __arch_arm64, __success, __retval(0),
         __stdout("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
         __stderr("CPU: {{[0-9]+}} UID: 0 PID: {{[0-9]+}} Comm: {{.*}}"),
@@ -117,13 +118,6 @@ const BPF_STDERR: i32 = 2;
 const ENOSPC: i32 = 28;
 const E2BIG: i32 = 7;
 const BPF_MAX_LOOPS: i32 = 8 * 1024 * 1024;
-// byte offset of `struct bpf_arena.user_vm_start` in *this* kernel build's
-// vmlinux BTF (`bpftool btf dump file vmlinux -j`: bits_offset=3904 / 8 =
-// 488) - NOT the 280 verifier_arena_globals2.rs's memory note recorded for
-// a different lane's kernel build; struct bpf_arena's layout isn't ABI, so
-// this offset must be re-checked per kernel checkout, not copied.
-const USER_VM_START_OFFSET: i16 = 488;
-
 // #define _STR "xxx...53 x's" (54 chars, no macro-level global - a literal
 // string constant materialized locally wherever the C source used it).
 const STR_LEN: usize = 54;
@@ -197,6 +191,9 @@ static array: BpfMap<i32, elem, { maps::ARRAY }, 1> = BpfMap::new();
 // int size; -> .bss
 #[no_mangle]
 static mut size: i32 = 0;
+// int nmi_stream_prints; -> .bss
+#[no_mangle]
+static mut nmi_stream_prints: i32 = 0;
 // u64 fault_addr; -> .bss. `u64` in vmlinux.h/kernel BTF is `unsigned long`
 // (not `unsigned long long`) on 64-bit - btf_rename.py maps Rust `usize` to
 // that C spelling (see [[c-long-globals-need-isize]]), which is what the
@@ -273,6 +270,16 @@ unsafe fn cast_kern<T>(p: *mut T) -> *mut T {
     );
     p
 }
+
+// byte offset of `struct bpf_arena.user_vm_start` in *this* kernel build's
+// vmlinux BTF (`bpftool btf dump file vmlinux`: bits_offset=3968 / 8 = 496
+// at the 645f5fcf pin; it was 488 at 3ccdb078 and 280 on an older lane
+// kernel). struct bpf_arena's layout isn't ABI, so this offset must be
+// re-checked at every kernel bump. The C reads the field through a CO-RE
+// relocation on vmlinux.h's struct; the same read through a #[btf] view
+// here crashes opt in BPFAbstractMemberAccess (the unused field-info
+// call, #49), so the offset stays hand-encoded until LLVM carries the fix.
+const USER_VM_START_OFFSET: i16 = 496;
 
 /// In-place `r = *(u64 *)(r + USER_VM_START_OFFSET)`: single
 /// BPF_LDX|BPF_MEM|BPF_DW insn, offset baked in (no separate ALU op) -
@@ -393,6 +400,31 @@ extern "C" fn stream_syscall(_ctx: *const c_void) -> i32 {
     const FOO: [u8; 4] = *b"foo\0";
     unsafe {
         stream_printk0(BPF_STDOUT, FOO.as_ptr());
+    }
+    0
+}
+
+const EMPTY_STR: [u8; 1] = *b"\0";
+const NMI_STR: [u8; 4] = *b"nmi\0";
+
+#[link_section = "syscall"]
+#[no_mangle]
+extern "C" fn stream_empty(_ctx: *const c_void) -> i32 {
+    unsafe { stream_printk0(BPF_STDOUT, EMPTY_STR.as_ptr()) }
+}
+
+#[link_section = "perf_event"]
+#[no_mangle]
+extern "C" fn stream_nmi(_ctx: *const c_void) -> i32 {
+    if unsafe { nmi_stream_prints } != 0 {
+        return 0;
+    }
+    // Retry on a later sample if the write failed, e.g. with -EBUSY.
+    if unsafe { stream_printk0(BPF_STDOUT, NMI_STR.as_ptr()) } != 0 {
+        return 0;
+    }
+    unsafe {
+        nmi_stream_prints = 1;
     }
     0
 }

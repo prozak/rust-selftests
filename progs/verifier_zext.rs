@@ -155,8 +155,10 @@ extern "C" fn zext_lost_across_checkpoint() {
             "if r8 != 0 goto 1f;",
             "r6 = 32;",
             "goto 2f;",
-            "1: w6 = 32;",
-            "2: r0 = r6;",
+            "1:",
+            "w6 = 32;",
+            "2:",
+            "r0 = r6;",
             "r0 >>= 32;",
             "exit;",
             options(nostack)
@@ -283,7 +285,8 @@ extern "C" fn zext_cfg_hi_used_one_branch() {
             "if r0 == 0 goto 1f;",
             "r0 = r6;",
             "exit;",
-            "1: r0 = 0;",
+            "1:",
+            "r0 = 0;",
             "exit;",
             options(nostack)
         );
@@ -409,7 +412,8 @@ extern "C" fn alu32_and_32bit_conditional() {
             "w2 = 28;",
             "if w2 > w1 goto 1f;",
             "r0 = 0;",
-            "1: exit;",
+            "1:",
+            "exit;",
             options(nostack)
         );
     }
@@ -428,7 +432,8 @@ extern "C" fn alu32_and_64bit_conditional() {
             "r2 = 28;",
             "if r2 > r1 goto 1f;",
             "r0 = 0;",
-            "1: exit;",
+            "1:",
+            "exit;",
             options(nostack)
         );
     }
@@ -449,7 +454,8 @@ extern "C" fn alu64_and_conditionals() {
             "if w2 > w1 goto 1f;",
             "if r2 > r1 goto 1f;",
             "r0 = 0;",
-            "1: exit;",
+            "1:",
+            "exit;",
             options(nostack)
         );
     }
@@ -520,7 +526,8 @@ extern "C" fn probe_mem() {
             "r0 += r2;",
             "r0 += r3;",
             "r0 += r4;",
-            "1: exit;",
+            "1:",
+            "exit;",
             bpf_rdonly_cast = sym bpf_rdonly_cast,
             options(nostack)
         );

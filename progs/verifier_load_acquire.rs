@@ -111,7 +111,8 @@ extern "C" fn load_acquire_8() {
             ".8byte 1103806571219;",
             "if r2 == r1 goto 1f;",
             "r0 = 1;",
-            "1:exit;",
+            "1:",
+            "exit;",
             options(nostack)
         );
     }
@@ -130,7 +131,8 @@ extern "C" fn load_acquire_16() {
             ".8byte 1103806505675;",
             "if r2 == r1 goto 1f;",
             "r0 = 1;",
-            "1:exit;",
+            "1:",
+            "exit;",
             options(nostack)
         );
     }
@@ -149,7 +151,8 @@ extern "C" fn load_acquire_32() {
             ".8byte 1103806374595;",
             "if r2 == r1 goto 1f;",
             "r0 = 1;",
-            "1:exit;",
+            "1:",
+            "exit;",
             options(nostack)
         );
     }
@@ -168,7 +171,8 @@ extern "C" fn load_acquire_64() {
             ".8byte 1103806112475;",
             "if r2 == r1 goto 1f;",
             "r0 = 1;",
-            "1:exit;",
+            "1:",
+            "exit;",
             options(nostack)
         );
     }

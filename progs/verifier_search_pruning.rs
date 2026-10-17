@@ -423,7 +423,8 @@ extern "C" fn short_loop1() {
     unsafe {
         core::arch::asm!(
             "r7 = *(u16 *)(r1 +0);",
-            "1: r7 += 0x1ab064b9;",
+            "1:",
+            "r7 += 0x1ab064b9;",
             ".8byte 31560386058520389;",
             "r7 &= 0x1ee60e;",
             "r7 += r1;",

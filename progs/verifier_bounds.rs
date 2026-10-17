@@ -2279,7 +2279,8 @@ extern "C" fn signed_unsigned_intersection32_case1(_ctx: *mut c_void) {
             "if w0 s> 0x1 goto 1f;",
             "if w0 s< 0x0 goto 1f;",
             "r10 = 0;",
-            "1: exit;",
+            "1:",
+            "exit;",
             options(nostack)
         );
     }
@@ -2299,7 +2300,8 @@ extern "C" fn signed_unsigned_intersection32_case2(_ctx: *mut c_void) {
             "if w0 s> 5 goto 1f;",
             "if w0 <= 5 goto 1f;",
             "r10 = 0;",
-            "1: exit;",
+            "1:",
+            "exit;",
             options(nostack)
         );
     }
@@ -2454,9 +2456,11 @@ extern "C" fn deduce64_from_32_before_block_start() {
             "r3 = 0x200000005 ll;",
             "if r0 >= r2 goto 1f;",
             "r10 = 0;",
-            "1: if r0 <= r3 goto 2f;",
+            "1:",
+            "if r0 <= r3 goto 2f;",
             "r10 = 0;",
-            "2: exit;",
+            "2:",
+            "exit;",
             options(nostack)
         );
     }
@@ -2480,9 +2484,11 @@ extern "C" fn deduce64_from_32_wrapping_32bit() {
             "r2 = 0x200000005 ll;",
             "if r0 >= r1 goto 1f;",
             "r10 = 0;",
-            "1: if r0 <= r2 goto 2f;",
+            "1:",
+            "if r0 <= r2 goto 2f;",
             "r10 = 0;",
-            "2: exit;",
+            "2:",
+            "exit;",
             options(nostack)
         );
     }
@@ -2532,12 +2538,15 @@ extern "C" fn range_within_cnum_cross_both_boundaries() {
             "if r0 > r1 goto 1f;",
             "r0 += 0x7FFFFFF0;",
             "goto 2f;",
-            "1: call 7;",
+            "1:",
+            "call 7;",
             "if r0 < 0x100 goto 3f;",
             "if r0 > 0x200 goto 3f;",
-            "2: if r0 != 0x100 goto 3f;",
+            "2:",
+            "if r0 != 0x100 goto 3f;",
             "r0 /= 0;",
-            "3: exit;",
+            "3:",
+            "exit;",
             options(nostack)
         );
     }

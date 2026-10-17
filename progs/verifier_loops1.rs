@@ -452,7 +452,8 @@ extern "C" fn maybe_exit_scc_bug1() {
     unsafe {
         core::arch::asm!(
             "r0 = 100;",
-            "1:*(u64 *)(r10 - 512) = r0;",
+            "1:",
+            "*(u64 *)(r10 - 512) = r0;",
             "if r0 <= 0x0 goto 1b;",
             "exit;",
             options(nostack)
@@ -467,12 +468,14 @@ extern "C" fn loop_stack_frames_reg() {
     unsafe {
         core::arch::asm!(
             "*(u64 *)(r10 - 8) = 1;",
-            "1:r0 = *(u64 *)(r1 + 0);",
+            "1:",
+            "r0 = *(u64 *)(r1 + 0);",
             "if r0 != 0 goto 2f;",
             "r1 = r10;",
             "r1 += -8;",
             "goto 1b;",
-            "2:exit;",
+            "2:",
+            "exit;",
             options(nostack)
         );
     }

@@ -65,12 +65,14 @@ extern "C" fn gotol_large_imm() {
     unsafe {
         core::arch::asm!(
             "gotol 1f;",
-            "0: r0 = 0;",
+            "0:",
+            "r0 = 0;",
             ".rept 40000;",
             "r0 += 1;",
             ".endr;",
             "exit;",
-            "1: gotol 0b;",
+            "1:",
+            "gotol 0b;",
             options(nostack)
         );
     }

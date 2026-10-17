@@ -23,6 +23,7 @@
 // BPF_PROGRAM_ORDER: identity_subprog global_identity_subprog callback_subprog subprog_result_precise fp_leaking_subprog sneaky_fp_leaking_subprog fp_precise_subprog_result sneaky_fp_precise_subprog_result global_subprog_result_precise loop_callback_bad callback_precise_return_fail callback_result_precise parent_callee_saved_reg_precise parent_callee_saved_reg_precise_global parent_callee_saved_reg_precise_with_callback parent_stack_slot_precise parent_stack_slot_precise_global parent_stack_slot_precise_with_callback subprog_with_precise_arg subprog_arg_precise subprog_spill_reg_precise subprog_spill_into_parent_stack_slot_precise stack_slot_aliases_precision identity_tail_call subprog_result_tail_call ld_abs_subprog ld_abs_backtrack_both_paths
 
 use bpf_rs_core::{bpf_map, bpf_object, test_tags};
+#[allow(unused_imports)]
 use core::ffi::c_void;
 
 test_tags! {
@@ -485,7 +486,8 @@ extern "C" fn global_subprog_result_precise() -> i32 {
             "call {global_identity_subprog};",
             "if r0 < 4 goto 1f;",
             "r0 = 4 - 1;",
-            "1:r0 *= 4;",
+            "1:",
+            "r0 *= 4;",
             "r1 = {vals};",
             "r1 += r0;",
             "r0 = *(u32 *)(r1 + 0);",
@@ -515,7 +517,8 @@ extern "C" fn loop_callback_bad() -> u64 {
             "call 7;",
             "if r0 s> 1000 goto 1f;",
             "r0 = 0;",
-            "1:goto +0;",
+            "1:",
+            "goto +0;",
             "exit;",
             out("r0") ret,
             options(nostack)
@@ -572,7 +575,8 @@ extern "C" fn callback_result_precise() -> i32 {
             "r1 = {vals};",
             "r1 += r6;",
             "r0 = *(u32 *)(r1 + 0);",
-            "1:exit;",
+            "1:",
+            "exit;",
             vals = in(reg) core::ptr::addr_of!(vals),
             callback_subprog = in(reg) callback_subprog as usize,
             out("r0") ret,

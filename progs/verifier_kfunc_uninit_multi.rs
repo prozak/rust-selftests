@@ -105,9 +105,9 @@ extern "C" fn multiple_outputs() {
             "if r1 != 0x2a2a2a2a goto 1f;",
             "r1 = *(u32 *)(r10 - 4);",
             "if r1 == 0x2a2a2a2a goto 2f;",
-            "1:;",
+            "1:",
             "r0 = 0;",
-            "2:;",
+            "2:",
             "exit;",
             bpf_kfunc_test_uninit_multi = sym bpf_kfunc_test_uninit_multi,
             options(nostack)

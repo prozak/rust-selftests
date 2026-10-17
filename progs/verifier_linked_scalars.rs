@@ -389,7 +389,8 @@ extern "C" fn scalars_alu32_basic() {
             "r0 >>= 32;",
             "if r0 == 0 goto 1f;",
             "r0 /= 0;",
-            "1: r0 = 0;",
+            "1:",
+            "r0 = 0;",
             "exit;",
             options(nostack)
         );

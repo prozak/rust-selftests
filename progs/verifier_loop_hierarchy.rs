@@ -167,7 +167,8 @@ extern "C" fn loop_single() {
     unsafe {
         core::arch::asm!(
             "r0 = 0;",
-            "1: r0 += 1;",
+            "1:",
+            "r0 += 1;",
             "if r0 < 10 goto 1b;",
             "exit;",
             options(nostack)
@@ -183,10 +184,12 @@ extern "C" fn loop_two_independent() {
     unsafe {
         core::arch::asm!(
             "r0 = 0;",
-            "1: r0 += 1;",
+            "1:",
+            "r0 += 1;",
             "if r0 < 10 goto 1b;",
             "r1 = 0;",
-            "2: r1 += 1;",
+            "2:",
+            "r1 += 1;",
             "if r1 < 10 goto 2b;",
             "exit;",
             options(nostack)
@@ -202,9 +205,11 @@ extern "C" fn loop_nested() {
     unsafe {
         core::arch::asm!(
             "r0 = 0;",
-            "1: r0 += 1;",
+            "1:",
+            "r0 += 1;",
             "r1 = 0;",
-            "2: r1 += 1;",
+            "2:",
+            "r1 += 1;",
             "if r1 < 5 goto 2b;",
             "if r0 < 10 goto 1b;",
             "exit;",
@@ -224,8 +229,10 @@ extern "C" fn fwd_edges_no_loop() {
             "if r0 > 0 goto 1f;",
             "r0 = 2;",
             "goto 2f;",
-            "1: r0 = 3;",
-            "2: exit;",
+            "1:",
+            "r0 = 3;",
+            "2:",
+            "exit;",
             options(nostack)
         );
     }
@@ -239,12 +246,15 @@ extern "C" fn loop_nested_siblings() {
     unsafe {
         core::arch::asm!(
             "r0 = 0;",
-            "1: r0 += 1;",
+            "1:",
+            "r0 += 1;",
             "r1 = 0;",
-            "2: r1 += 1;",
+            "2:",
+            "r1 += 1;",
             "if r1 < 5 goto 2b;",
             "r2 = 0;",
-            "3: r2 += 1;",
+            "3:",
+            "r2 += 1;",
             "if r2 < 5 goto 3b;",
             "if r0 < 10 goto 1b;",
             "exit;",
@@ -261,11 +271,14 @@ extern "C" fn loop_three_levels() {
     unsafe {
         core::arch::asm!(
             "r0 = 0;",
-            "1: r0 += 1;",
+            "1:",
+            "r0 += 1;",
             "r1 = 0;",
-            "2: r1 += 1;",
+            "2:",
+            "r1 += 1;",
             "r2 = 0;",
-            "3: r2 += 1;",
+            "3:",
+            "r2 += 1;",
             "if r2 < 3 goto 3b;",
             "if r1 < 5 goto 2b;",
             "if r0 < 10 goto 1b;",
@@ -283,11 +296,13 @@ extern "C" fn loop_with_if_else() {
     unsafe {
         core::arch::asm!(
             "r0 = 0;",
-            "1: r0 += 1;",
+            "1:",
+            "r0 += 1;",
             "r1 = r0;",
             "if r1 > 5 goto 2f;",
             "r1 = 1;",
-            "2: r0 += r1;",
+            "2:",
+            "r0 += r1;",
             "if r0 < 100 goto 1b;",
             "exit;",
             options(nostack)
@@ -305,10 +320,13 @@ extern "C" fn loop_irreducible() {
             "call 7;",
             "r1 = 0;",
             "if r0 > 5 goto 2f;",
-            "1: r1 = 1;",
+            "1:",
+            "r1 = 1;",
             "goto 3f;",
-            "2: r1 = 2;",
-            "3: r0 += r1;",
+            "2:",
+            "r1 = 2;",
+            "3:",
+            "r0 += r1;",
             "if r0 < 16 goto 1b;",
             "exit;",
             options(nostack)
@@ -324,7 +342,8 @@ extern "C" fn loop_self() {
     unsafe {
         core::arch::asm!(
             "call 7;",
-            "1: if r0 < 10 goto 1b;",
+            "1:",
+            "if r0 < 10 goto 1b;",
             "exit;",
             options(nostack)
         );
@@ -339,13 +358,17 @@ extern "C" fn loop_nested_siblings_common_ancestors() {
     unsafe {
         core::arch::asm!(
             "r0 = 0;",
-            "1: r0 += 1;",
+            "1:",
+            "r0 += 1;",
             "r1 = 0;",
-            "2: r1 += 1;",
+            "2:",
+            "r1 += 1;",
             "r2 = 0;",
-            "3: r2 += 1;",
+            "3:",
+            "r2 += 1;",
             "if r2 < 3 goto 3b;",
-            "4: r2 += -1;",
+            "4:",
+            "r2 += -1;",
             "if r2 != 0 goto 4b;",
             "if r1 < 4 goto 2b;",
             "if r0 < 5 goto 1b;",
@@ -364,12 +387,17 @@ extern "C" fn loop_outer_backedge_from_inner() {
         core::arch::asm!(
             "r6 = 99;",
             "r2 = 2;",
-            "2: r6 += 1;",
-            "3: r2 += 1;",
-            "4: if r2 == 3 goto 2b;",
-            "5: if r6 > 100 goto 7f;",
+            "2:",
+            "r6 += 1;",
+            "3:",
+            "r2 += 1;",
+            "4:",
+            "if r2 == 3 goto 2b;",
+            "5:",
+            "if r6 > 100 goto 7f;",
             "goto 3b;",
-            "7: r0 = 0;",
+            "7:",
+            "r0 = 0;",
             "exit;",
             options(nostack)
         );

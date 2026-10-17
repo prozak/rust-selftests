@@ -22,6 +22,7 @@
 // BPF_PROGRAM_ORDER: check_valid_spill_fill valid_spill_fill_skb_mark spill_fill_ptr_to_mem with_invalid_reg_offset_0 check_corrupted_spill_fill check_corrupted_spill_fill_lsb check_corrupted_spill_fill_msb scalar_offset_to_skb_data_1 uninit_u32_from_the_stack u16_offset_to_skb_data u64_offset_to_skb_data _6_offset_to_skb_data addr_offset_to_skb_data scalar_offset_to_skb_data_2 and_then_at_fp_8 spill_32bit_of_64bit_fail spill_16bit_of_32bit_fail spill_subregs_preserve_stack_zero partial_stack_load_preserves_zeros partial_stack_load_preserves_partial_zeros stack_load_preserves_mixed_zero_and_zero_spill stack_load_preserves_const_precision stack_load_preserves_const_precision_subreg spill_32bit_range_track spill_64bit_of_64bit_ok spill_32bit_of_32bit_ok spill_16bit_of_16bit_ok spill_8bit_of_8bit_ok spill_unbounded fill_32bit_after_spill_64bit fill_32bit_after_spill_64bit_preserve_id fill_32bit_after_spill_64bit_clear_id old_imprecise_scalar_vs_cur_stack_misc old_precise_scalar_vs_cur_stack_misc old_stack_misc_vs_cur_scalar old_stack_misc_vs_cur_ctx_ptr stack_noperfmon_reject_invalid_read stack_noperfmon_spill_32bit_onto_64bit_slot old_imprecise_scalar32_vs_cur_stack_misc stack_noperfmon_reject_atomic_on_narrow_spill stack_noperfmon_reject_helper_read_of_narrow_spill var_off_write_over_scalar_spill partial_fill_from_cleaned_pointer_spill imprecise_scalar_spill_half_dead spill_fill_ptr_to_tp_buffer spill_fill_dynptr_subprog spill_fill_const_ptr_to_dynptr
 
 use bpf_rs_core::{bpf_map, bpf_object, test_tags};
+#[allow(unused_imports)]
 use core::ffi::c_void;
 
 test_tags! {
@@ -329,6 +330,15 @@ test_tags! {
         __success;
     spill_fill_const_ptr_to_dynptr:
         __success;
+}
+
+// Map key/value types, shaped like the C object's BTF (the kernel
+// checks some of them member by member, so no explicit padding).
+// translint: allow(padding)
+#[allow(non_camel_case_types)]
+#[repr(C)]
+struct bpf_dynptr {
+    __opaque: [u64; 2],
 }
 
 bpf_map! {
@@ -1173,10 +1183,12 @@ extern "C" fn old_imprecise_scalar_vs_cur_stack_misc() {
             "r0 = 42;",
             "*(u64*)(r10 - 8) = r0;",
             "goto 2f;",
-            "1:call 5;",
+            "1:",
+            "call 5;",
             "*(u16*)(r10 - 8) = r0;",
             "*(u16*)(r10 - 4) = r0;",
-            "2:r1 = *(u64*)(r10 - 8);",
+            "2:",
+            "r1 = *(u64*)(r10 - 8);",
             "exit;",
             options(nostack)
         );
@@ -1195,10 +1207,12 @@ extern "C" fn old_precise_scalar_vs_cur_stack_misc() {
             "r0 = 42;",
             "*(u64*)(r10 - 8) = r0;",
             "goto 2f;",
-            "1:call 5;",
+            "1:",
+            "call 5;",
             "*(u64*)(r10 - 8) = r0;",
             "*(u32*)(r10 - 4) = r0;",
-            "2:r1 = *(u64*)(r10 - 8);",
+            "2:",
+            "r1 = *(u64*)(r10 - 8);",
             "if r1 == 42 goto +0;",
             "exit;",
             options(nostack)
@@ -1219,9 +1233,11 @@ extern "C" fn old_stack_misc_vs_cur_scalar() {
             "*(u16*)(r10 - 8) = r0;",
             "*(u16*)(r10 - 4) = r0;",
             "goto 2f;",
-            "1:r0 = 42;",
+            "1:",
+            "r0 = 42;",
             "*(u64*)(r10 - 8) = r0;",
-            "2:r0 = *(u64*)(r10 - 8);",
+            "2:",
+            "r0 = *(u64*)(r10 - 8);",
             "exit;",
             options(nostack)
         );
@@ -1242,8 +1258,10 @@ extern "C" fn old_stack_misc_vs_cur_ctx_ptr() {
             "*(u64*)(r10 - 8) = r0;",
             "*(u32*)(r10 - 4) = r0;",
             "goto 2f;",
-            "1:*(u64*)(r10 - 8) = r9;",
-            "2:r1 = *(u64*)(r10 - 8);",
+            "1:",
+            "*(u64*)(r10 - 8) = r9;",
+            "2:",
+            "r1 = *(u64*)(r10 - 8);",
             "exit;",
             options(nostack)
         );
@@ -1297,10 +1315,12 @@ extern "C" fn old_imprecise_scalar32_vs_cur_stack_misc() {
             "r0 = 42;",
             "*(u32*)(r10 - 8) = r0;",
             "goto 2f;",
-            "1:call 5;",
+            "1:",
+            "call 5;",
             "*(u16*)(r10 - 8) = r0;",
             "*(u16*)(r10 - 6) = r0;",
-            "2:r1 = *(u64*)(r10 - 8);",
+            "2:",
+            "r1 = *(u64*)(r10 - 8);",
             "exit;",
             options(nostack)
         );
@@ -1399,8 +1419,10 @@ extern "C" fn imprecise_scalar_spill_half_dead() {
             "if r0 > 42 goto 1f;",
             "r6 = 0;",
             "goto 2f;",
-            "1:r6 = 100500;",
-            "2:goto +0;",
+            "1:",
+            "r6 = 100500;",
+            "2:",
+            "goto +0;",
             "*(u64 *)(r10 - 8) = r6;",
             "goto +0;",
             "r7 = *(u32 *)(r10 - 4);",

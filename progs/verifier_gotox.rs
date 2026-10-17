@@ -22,6 +22,7 @@
 // BPF_PROGRAM_ORDER: jump_table_ok jump_table_reserved_field_src_reg jump_table_reserved_field_non_zero_off jump_table_reserved_field_non_zero_imm jump_table_terminal_gotox terminal_gotox_subprog1 terminal_gotox_subprog2 jump_table_terminal_gotox_subprog jump_table_no_jump_table jump_table_incorrect_dst_reg_type jump_table_invalid_read_size_u32 jump_table_invalid_read_size_u16 jump_table_invalid_read_size_u8 jump_table_misaligned_access jump_table_invalid_mem_acceess_pos jump_table_invalid_mem_acceess_neg jump_table_add_sub_ok jump_table_no_writes jump_table_use_reg_r0 jump_table_use_reg_r1 jump_table_use_reg_r2 jump_table_use_reg_r3 jump_table_use_reg_r4 jump_table_use_reg_r5 jump_table_use_reg_r6 jump_table_use_reg_r7 jump_table_use_reg_r8 jump_table_use_reg_r9 test_subprog jump_table_outside_subprog jump_table_contains_non_unique_values spill_fill_ptr_to_insn too_many_gotox_edges gotox_edges_at_limit gotox_edges_subprog gotox_edges_across_subprogs jump_table_target_nop
 
 use bpf_rs_core::{bpf_object, test_tags};
+#[allow(unused_imports)]
 use core::ffi::c_void;
 
 test_tags! {
@@ -998,13 +999,13 @@ extern "C" fn too_many_gotox_edges() {
             ".pushsection .jumptables,\"\",@progbits;",
             ".quad 1f - socket;",
             ".popsection;",
-            "1:;",
+            "1:",
             ".8byte 13;",
             ".endr;",
             ".pushsection .jumptables,\"\",@progbits;",
             ".quad 2f - socket;",
             ".popsection;",
-            "2:;",
+            "2:",
             "r0 = 0;",
             "exit;",
             options(nostack)
@@ -1032,7 +1033,7 @@ extern "C" fn gotox_edges_at_limit() {
             "r0 = *(u64 *)(r1 + 0);",
             "r1 += 8;",
             ".8byte 13;",
-            "1:;",
+            "1:",
             ".endr;",
             "r0 = 0;",
             "exit;",
@@ -1058,13 +1059,13 @@ extern "C" fn gotox_edges_subprog() {
             ".pushsection .jumptables,\"\",@progbits;",
             ".quad 1f - .text;",
             ".popsection;",
-            "1:;",
+            "1:",
             ".8byte 13;",
             ".endr;",
             ".pushsection .jumptables,\"\",@progbits;",
             ".quad 2f - .text;",
             ".popsection;",
-            "2:;",
+            "2:",
             "r0 = 0;",
             "exit;",
             options(nostack)
@@ -1090,13 +1091,13 @@ extern "C" fn gotox_edges_across_subprogs() {
             ".pushsection .jumptables,\"\",@progbits;",
             ".quad 1f - socket;",
             ".popsection;",
-            "1:;",
+            "1:",
             ".8byte 13;",
             ".endr;",
             ".pushsection .jumptables,\"\",@progbits;",
             ".quad 2f - socket;",
             ".popsection;",
-            "2:;",
+            "2:",
             "call {gotox_edges_subprog};",
             "exit;",
             gotox_edges_subprog = sym gotox_edges_subprog,

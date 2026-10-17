@@ -175,8 +175,10 @@ extern "C" fn asymmetric_diamond() {
             "r1 = 3;",
             "r1 = 4;",
             "goto 2f;",
-            "1: r1 = 9;",
-            "2: exit;",
+            "1:",
+            "r1 = 9;",
+            "2:",
+            "exit;",
             options(nostack)
         );
     }
@@ -190,7 +192,8 @@ extern "C" fn simple_loop() {
     unsafe {
         core::arch::asm!(
             "r0 = 0;",
-            "1: r0 += 1;",
+            "1:",
+            "r0 += 1;",
             "if r0 < 10 goto 1b;",
             "exit;",
             options(nostack)
@@ -206,11 +209,13 @@ extern "C" fn loop_with_if_else_body() {
     unsafe {
         core::arch::asm!(
             "r0 = 0;",
-            "1: r0 += 1;",
+            "1:",
+            "r0 += 1;",
             "r1 = r0;",
             "if r1 > 5 goto 2f;",
             "r1 = 1;",
-            "2: r0 += r1;",
+            "2:",
+            "r0 += r1;",
             "if r0 < 100 goto 1b;",
             "exit;",
             options(nostack)
@@ -226,9 +231,11 @@ extern "C" fn nested_loops() {
     unsafe {
         core::arch::asm!(
             "r0 = 0;",
-            "1: r0 += 1;",
+            "1:",
+            "r0 += 1;",
             "r1 = 0;",
-            "2: r1 += 1;",
+            "2:",
+            "r1 += 1;",
             "if r1 < 5 goto 2b;",
             "if r0 < 10 goto 1b;",
             "exit;",
@@ -245,12 +252,14 @@ extern "C" fn multi_backedge_header() {
     unsafe {
         core::arch::asm!(
             "r6 = 0;",
-            "1: r6 += 1;",
+            "1:",
+            "r6 += 1;",
             "if r6 > 10 goto 2f;",
             "r7 = r6;",
             "if r7 < 5 goto 1b;",
             "goto 1b;",
-            "2: r0 = 0;",
+            "2:",
+            "r0 = 0;",
             "exit;",
             options(nostack)
         );
@@ -267,10 +276,13 @@ extern "C" fn irreducible() {
             "call 7;",
             "r1 = 0;",
             "if r0 > 5 goto 2f;",
-            "1: r1 = 1;",
+            "1:",
+            "r1 = 1;",
             "goto 3f;",
-            "2: r1 = 2;",
-            "3: r0 += r1;",
+            "2:",
+            "r1 = 2;",
+            "3:",
+            "r0 += r1;",
             "if r0 < 16 goto 1b;",
             "exit;",
             options(nostack)
@@ -289,8 +301,10 @@ extern "C" fn idoms_diamond_sub() -> u64 {
             "if r0 > 0 goto 1f;",
             "r0 = 1;",
             "goto 2f;",
-            "1: r0 = 2;",
-            "2: exit;",
+            "1:",
+            "r0 = 2;",
+            "2:",
+            "exit;",
             out("r0") ret,
             options(nostack)
         );
@@ -320,7 +334,8 @@ extern "C" fn idoms_entry_header_sub() -> u64 {
     let ret: u64;
     unsafe {
         core::arch::asm!(
-            "1: r1 += 1;",
+            "1:",
+            "r1 += 1;",
             "if r1 < 10 goto 1b;",
             "r0 = 0;",
             "exit;",
@@ -355,7 +370,8 @@ extern "C" fn self_loop() {
     unsafe {
         core::arch::asm!(
             "call 7;",
-            "1: if r0 < 10 goto 1b;",
+            "1:",
+            "if r0 < 10 goto 1b;",
             "exit;",
             options(nostack)
         );

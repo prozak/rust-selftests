@@ -119,7 +119,8 @@ extern "C" fn store_release_8() {
             "w2 = *(u8 *)(r10 - 1);",
             "if r2 == r1 goto 1f;",
             "r0 = 1;",
-            "1:exit;",
+            "1:",
+            "exit;",
             options(nostack)
         );
     }
@@ -138,7 +139,8 @@ extern "C" fn store_release_16() {
             "w2 = *(u16 *)(r10 - 2);",
             "if r2 == r1 goto 1f;",
             "r0 = 1;",
-            "1:exit;",
+            "1:",
+            "exit;",
             options(nostack)
         );
     }
@@ -157,7 +159,8 @@ extern "C" fn store_release_32() {
             "w2 = *(u32 *)(r10 - 4);",
             "if r2 == r1 goto 1f;",
             "r0 = 1;",
-            "1:exit;",
+            "1:",
+            "exit;",
             options(nostack)
         );
     }
@@ -176,7 +179,8 @@ extern "C" fn store_release_64() {
             "r2 = *(u64 *)(r10 - 8);",
             "if r2 == r1 goto 1f;",
             "r0 = 1;",
-            "1:exit;",
+            "1:",
+            "exit;",
             options(nostack)
         );
     }

@@ -22,6 +22,7 @@
 // BPF_PROGRAM_ORDER: bpf_trap_with_simple_c bpf_trap_at_func_end dead_bpf_trap_in_middle live_bpf_trap_in_middle
 
 use bpf_rs_core::{bpf_object, test_tags};
+#[allow(unused_imports)]
 use core::ffi::c_void;
 
 test_tags! {

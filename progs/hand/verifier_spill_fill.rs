@@ -5,14 +5,6 @@
 
 use bpf_rs_core::helpers::{bpf_dynptr_data, bpf_dynptr_from_mem};
 
-/// `struct bpf_dynptr { __u64 __opaque[2]; }` (uapi), named so in BTF: the
-/// verifier recognizes a global subprogram's `struct bpf_dynptr *` argument.
-#[allow(non_camel_case_types)]
-#[repr(C)]
-struct bpf_dynptr {
-    __opaque: [u64; 2],
-}
-
 // HAND: spill_fill_dynptr_subprog -- translate the C below (see the file comment)
 //   __noinline int spill_fill_dynptr_subprog(struct bpf_dynptr *dptr)
 //   {

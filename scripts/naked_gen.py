@@ -87,6 +87,16 @@ def ident(name):
     return "r#" + name if name in RUST_KEYWORDS else name
 
 
+def rust_fn(name):
+    """The Rust name of a C function: a keyword (`self`) gets a trailing
+    underscore and keeps its symbol through #[export_name]."""
+    return name + "_" if name in RUST_KEYWORDS else name
+
+
+def fn_attrs(name):
+    return f'#[export_name = "{name}"]' if name in RUST_KEYWORDS else "#[no_mangle]"
+
+
 # --- clang: the selftests' own flags ---------------------------------------
 
 _SYS_INC = None
@@ -270,10 +280,21 @@ def parse_function(head, body):
             section = c_string(m.group(1))   # SEC("?fentry.s/" SYS_PREFIX "x")
     rest = re.sub(r"\s+", " ", rest).strip()
     rest = re.sub(r"\b(?:inline|__inline|__inline__)\b", "", rest).strip()
-    m = re.fullmatch(r"(static )?(.*?)\s*\b([A-Za-z_]\w*)\s*\((.*)\)", rest, re.S)
+    if not rest.endswith(")"):
+        raise Unsupported(f"unparsable function header {rest!r}")
+    depth, i = 0, len(rest) - 1
+    while i >= 0:
+        if rest[i] == ")":
+            depth += 1
+        elif rest[i] == "(":
+            depth -= 1
+            if depth == 0:
+                break
+        i -= 1
+    params, head = rest[i + 1:-1].strip(), rest[:i].rstrip()
+    m = re.fullmatch(r"(static )?(.*?)\s*\b([A-Za-z_]\w*)", head, re.S)
     if not m:
         raise Unsupported(f"unparsable function header {rest!r}")
-    params = m.group(4).strip()
     if params == "void":
         params = ""
     return Func(m.group(3), bool(m.group(1)), section, m.group(2).strip(),
@@ -284,6 +305,8 @@ def c_function_text(raw, name):
     """The definition of function `name` in the raw C source (from the
     blank line before its head to its closing brace), for a comment."""
     m = re.search(r"\b" + re.escape(name) + r"\s*\([^;{)]*\)\s*(?:__attribute__\(\(.*?\)\)\s*)*\{", raw, re.S)
+    if not m:    # BPF_PROG(name, args...) and friends
+        m = re.search(r"\bBPF_\w+\(\s*" + re.escape(name) + r"\b[^{]*\{", raw, re.S)
     if not m:
         return f"(definition of {name} not found in the source)"
     start = raw.rfind("\n\n", 0, m.start())
@@ -515,7 +538,7 @@ class RustTypes:
 
     def __init__(self, btf):
         self.btf = btf
-        self.defs, self.done = [], set()
+        self.defs, self.done, self.failed = [], set(), {}
 
     def rust(self, tid):
         btf = self.btf
@@ -579,8 +602,17 @@ class RustTypes:
 
     def collect(self, tid):
         if tid in self.done:
+            if tid in self.failed:
+                raise Unsupported(self.failed[tid])
             return
         self.done.add(tid)
+        try:
+            self._collect(tid)
+        except Unsupported as e:
+            self.failed[tid] = str(e)
+            raise
+
+    def _collect(self, tid):
         t = self.btf.types[tid]
         if t.kflag:
             raise Unsupported(f"struct {t.name}: bitfield members")
@@ -769,6 +801,7 @@ class Generator:
         self.funcs = []
         self.n_asm = 0              # asm statements using %= seen, in source order
         self.map_names, self.global_names, self.extern_names = [], [], []
+        self.ksym_vars = []
         self.needs_cvoid = False
         self.hand = None
         self.stats = {}
@@ -796,6 +829,9 @@ class Generator:
                 self.n_asm += body.count("%=")
                 self.funcs.append(f)
             elif self.with_c_bodies:
+                if f.name not in self.obj.functions():
+                    self.count("inlined")       # inlined away by clang
+                    continue
                 self.n_asm += body.count("%=")
                 f.c_text = c_function_text(self.raw, f.name)
                 self.funcs.append(f)
@@ -811,11 +847,11 @@ class Generator:
                 continue
             if not f.naked:
                 try:
-                    f.rust_params = self.params(f)
-                except Unsupported as e:
-                    self.errors.append(str(e))
+                    f.rust_params = self.btf_params(f) or self.params(f)
+                except Unsupported:
+                    f.rust_params = [f"_todo: () /* {f.params} */"]
                 if f.rtype not in C_RETURN_TYPES:
-                    self.errors.append(f"{f.name}: return type {f.rtype!r}")
+                    f.rtype = f"void /* {f.rtype} */"
                 self.count("hand")
                 continue
             try:
@@ -854,8 +890,11 @@ class Generator:
                         kinds[opname] = ("imm", str(value))
                         self.count("imm")
                     else:
-                        kinds[opname] = ("sym", "{" + opname + "}")
-                        bindings[opname] = f"sym {value}"
+                        # an operand named like a Rust keyword (`self`) is
+                        # renamed with the function it names
+                        key = rust_fn(opname)
+                        kinds[opname] = ("sym", "{" + key + "}")
+                        bindings[key] = f"sym {rust_fn(value) if value in funcs else value}"
                         self.count("sym")
                 else:
                     m = re.fullmatch(r"&\s*([A-Za-z_]\w*)", expr)
@@ -863,11 +902,12 @@ class Generator:
                         self.errors.append(f"{f.name}: register operand {expr!r}")
                         continue
                     target = m.group(1)
-                    kinds[opname] = ("reg", "{" + opname + "}")
+                    key = rust_fn(opname)
+                    kinds[opname] = ("reg", "{" + key + "}")
                     if target in funcs:
-                        bindings[opname] = f"in(reg) {target} as usize"
+                        bindings[key] = f"in(reg) {rust_fn(target)} as usize"
                     else:
-                        bindings[opname] = f"in(reg) core::ptr::addr_of!({target})"
+                        bindings[key] = f"in(reg) core::ptr::addr_of!({target})"
                     self.count("reg")
             try:
                 stmts = self.statements(f, template, kinds)
@@ -878,18 +918,41 @@ class Generator:
             # subprog;`) is referenced through a sym operand, which is what
             # keeps a `__used` static alive through internalize/globaldce
             for i, s in enumerate(stmts):
-                m = re.fullmatch(r"(call|goto|gotol|callx) ([A-Za-z_]\w*);", s)
+                m = re.fullmatch(r"(call|goto|gotol|callx) ([A-Za-z_]\w*);", s) \
+                    or re.fullmatch(r"(r\d = )([A-Za-z_]\w*) ll;", s)
                 if m and m.group(2) in funcs:
-                    target = m.group(2)
+                    target = rust_fn(m.group(2))
                     if target not in bindings:
                         bindings[target] = f"sym {target}"
-                    stmts[i] = f"{m.group(1)} {{{target}}};"
+                    sep = "" if m.group(1).endswith(" = ") else " "
+                    tail = " ll;" if s.endswith(" ll;") else ";"
+                    stmts[i] = f"{m.group(1)}{sep}{{{target}}}{tail}"
                     self.count("text-sym")
             f.stmts = stmts
             # C tolerates an operand the template never uses; asm! does not
             used = {m for st in stmts for m in re.findall(r"\{(\w+)\}", st)}
             f.operands = [(k, v) for k, v in bindings.items() if k in used]
             self.count("programs" if f.section else "subprogs")
+
+    def btf_params(self, f):
+        """A hand function's parameters as the C object's BTF prototype has
+        them: exact types, a named struct collected into the file; a
+        parameter the Rust cannot render becomes `*mut c_void`."""
+        btf, types = self.obj.btf, self.obj.types
+        func = next((t for t in btf.types.values() if t.kind == K_FUNC and t.name == f.name), None)
+        if func is None:
+            return None
+        proto = btf.types[func.size]
+        out = []
+        for i, (pname, ptid) in enumerate(proto.extra):
+            try:
+                rtype = types.rust(ptid)
+            except Unsupported:
+                rtype = "*mut c_void"
+            if "c_void" in rtype:
+                self.needs_cvoid = True
+            out.append(f"_{pname or f'a{i}'}: {rtype}")
+        return out
 
     def params(self, f):
         """A naked function's parameters, which its asm cannot name, as
@@ -938,7 +1001,7 @@ class Generator:
         for piece in t.split(";"):
             piece = re.sub(r"\s+", " ", piece).strip()
             while True:
-                m = re.match(r"([A-Za-z_]\w*):\s*(.*)$", piece)
+                m = re.match(r"([A-Za-z_]\w*|\d+):\s*(.*)$", piece)   # a label, numeric too
                 if not m:
                     break
                 out.append(m.group(1) + ":")
@@ -987,7 +1050,7 @@ class Generator:
                                 target = self.obj.elf.named_symbol_at(target.shndx, imm)
                             if target is None or not target.name or i < 0 or i >= n:
                                 raise Unsupported(f"map {var.name}: slot relocation")
-                            init[i] = f"{target.name} as {self.fn_type(target.name)} as *const c_void"
+                            init[i] = f"{rust_fn(target.name)} as {self.fn_type(target.name)} as *const c_void"
                             self.count("slots")
                         self.needs_cvoid = True
                         members.append((mname, f"[*const c_void; {n}]", "[" + ", ".join(init) + "]"))
@@ -1132,7 +1195,7 @@ class Generator:
         for ds in btf.datasecs():
             if ds.name in (".maps", ".ksyms", ".kconfig", "license") or ds.name.startswith(".arena"):
                 continue
-            if not re.match(r"^\.(data|bss|rodata)(\.|$)", ds.name):
+            if not re.match(r"^\.(data|bss|rodata|percpu)(\.|$)", ds.name):
                 raise Unsupported(f"DATASEC {ds.name}")
             sec = elf.section_by_name(ds.name)
             for vtid, _voff, _vsize in ds.extra:
@@ -1156,8 +1219,14 @@ class Generator:
     def externs(self):
         btf, types, out = self.obj.btf, self.obj.types, []
         for kind, name, tid in self.obj.ksyms():
+            if kind == K_VAR:
+                # `extern const int x __ksym`: scripts/ksym_vars.py mirrors
+                # the C object's declaration for a `// BTF_KSYM:` extern
+                self.ksym_vars.append((name, types.rust(btf.types[tid].size)))
+                self.count("ksym-vars")
+                continue
             if kind != K_FUNC:
-                raise Unsupported(f"ksym variable {name}")
+                raise Unsupported(f"ksym {name} of BTF kind {kind}")
             proto = btf.types[btf.types[tid].size]
             params = ", ".join(f"{ident(n) if n else f'a{i}'}: {self.param_type(p)}"
                                for i, (n, p) in enumerate(proto.extra))
@@ -1251,7 +1320,8 @@ class Generator:
         globs = self.globals()
         externs = self.externs()
         tags = self.obj.test_tags()
-        known = set(self.map_names) | set(self.global_names) | {n for n, _p in self.extern_names} | ours
+        known = set(self.map_names) | set(self.global_names) | {n for n, _p in self.extern_names} \
+            | {n for n, _t in self.ksym_vars} | ours | {rust_fn(n) for n in ours}
         for f in self.funcs:
             for _op, binding in f.operands:
                 target = re.sub(r"^(sym |in\(reg\) core::ptr::addr_of!\(|in\(reg\) )", "", binding)
@@ -1303,8 +1373,15 @@ class Generator:
         if len(programs) > 1:
             out.append("// BPF_PROGRAM_ORDER: " + " ".join(programs))
             out.append("")
+        for name, _ty in self.ksym_vars:
+            out.append(f"// BTF_KSYM: {name}")
+        if self.ksym_vars:
+            out.append("")
         if uses:
             out.append("use bpf_rs_core::{" + ", ".join(sorted(uses)) + "};")
+        if hand and not (self.needs_cvoid or any("c_void" in m for m in maps)
+                         or any("c_void" in d for d in self.obj.types.defs)):
+            out.append("#[allow(unused_imports)]")   # for the hand file's sake
         if self.needs_cvoid or hand or any("c_void" in d for d in self.obj.types.defs) \
                 or any("c_void" in m for m in maps) or any("c_void" in g for g in globs):
             out.append("use core::ffi::c_void;")
@@ -1343,8 +1420,10 @@ class Generator:
         for g in globs:
             out.append(g)
             out.append("")
-        if externs:
+        if externs or self.ksym_vars:
             out.append('extern "C" {')
+            for name, ty in self.ksym_vars:
+                out.append(f"    static {name}: {ty};")
             out += externs
             out.append("}")
             out.append("")
@@ -1395,7 +1474,7 @@ class Generator:
 
     def emit_hand(self, f):
         """A function with a C body: the C, and a stub to replace by hand."""
-        ret = C_RETURN_TYPES[f.rtype]
+        ret = C_RETURN_TYPES.get(f.rtype, "")
         if "c_void" in ret:
             self.needs_cvoid = True
         lines = [f"// HAND: {f.name} -- translate the C below (see the file comment)"]
@@ -1419,14 +1498,14 @@ class Generator:
         lines = []
         if f.section:
             lines.append(f'#[link_section = "{f.section}"]')
-        lines.append("#[no_mangle]")
+        lines.append(fn_attrs(f.name))
         lines.append("#[inline(never)]")
         lines.append(f"// BPF_NAKED: {f.name}")
         ret = C_RETURN_TYPES[f.rtype]
         if "c_void" in ret:
             self.needs_cvoid = True
         params = ", ".join(f.rust_params)
-        lines.append(f'extern "C" fn {f.name}({params}){" -> " + ret if ret else ""} {{')
+        lines.append(f'extern "C" fn {rust_fn(f.name)}({params}){" -> " + ret if ret else ""} {{')
         if ret:
             lines.append(f"    let ret: {ret};")
         lines.append("    unsafe {")

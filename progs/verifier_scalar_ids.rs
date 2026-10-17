@@ -490,7 +490,8 @@ extern "C" fn linked_regs_broken_link_2() {
             "r8 += r8;",
             "if r7 == 0 goto 1f;",
             "r0 /= 0;",
-            "1:r0 = 42;",
+            "1:",
+            "r0 = 42;",
             "exit;",
             options(nostack)
         );

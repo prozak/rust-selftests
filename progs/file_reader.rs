@@ -23,6 +23,7 @@ use core::ffi::c_void;
 
 const USER_BUF_LEN: u32 = 256000;
 const EFAULT: i32 = 14;
+const EIO: i32 = 5;
 
 #[repr(C, align(8))]
 struct bpf_dynptr {
@@ -58,6 +59,8 @@ static mut pid: i32 = 0;
 static mut err: i32 = 0;
 #[no_mangle]
 static mut run_success: i32 = 0;
+#[no_mangle]
+static mut beyond_eof_offset: u64 = 0;
 
 extern "C" {
     fn bpf_get_task_exe_file(task: *mut c_void) -> *mut c_void;
@@ -71,6 +74,151 @@ extern "C" {
         map: *mut c_void,
         callback: extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> i32,
     ) -> i32;
+    fn bpf_rcu_read_lock();
+    fn bpf_rcu_read_unlock();
+}
+
+/// `bpf_dynptr_from_file()` on the task's exe file and one byte read at
+/// beyond_eof_offset; the dynptr is discarded either way.
+#[inline(always)]
+unsafe fn read_beyond_eof(file: *mut c_void, dp: *mut c_void) -> i32 {
+    let mut ret = bpf_dynptr_from_file(file, 0, dp);
+    if ret == 0 {
+        ret = bpf_dynptr_read(
+            core::ptr::addr_of_mut!(tmp_buf) as *mut c_void,
+            1,
+            dp as *const c_void,
+            beyond_eof_offset,
+            0,
+        ) as i32;
+    }
+    bpf_dynptr_file_discard(dp);
+    ret
+}
+
+/// Task-work callbacks are verified as sleepable.
+extern "C" fn sleepable_second_callback(
+    _map: *mut c_void,
+    _key: *mut c_void,
+    _value: *mut c_void,
+) -> i32 {
+    let task = bpf_get_current_task_btf::<c_void>();
+    let mut dynptr = bpf_dynptr { opaque: [0; 2] };
+    let dp = &mut dynptr as *mut bpf_dynptr as *mut c_void;
+
+    let file = unsafe { bpf_get_task_exe_file(task) };
+    if file.is_null() {
+        unsafe { err = 5 };
+        return 0;
+    }
+
+    // freader_fetch() converts __kernel_read()'s short read at EOF to -EIO.
+    let ret = unsafe { read_beyond_eof(file, dp) };
+    unsafe { bpf_put_file(file) };
+    if ret != -EIO {
+        unsafe { err = 6 };
+        return 0;
+    }
+
+    unsafe { run_success = 1 };
+    0
+}
+
+// Exercise bpf_dynptr_from_file() first from a non-sleepable LSM program and
+// then from its sleepable task-work callback. Reading beyond EOF makes the two
+// backing implementations return different errors.
+#[link_section = "lsm/file_open"]
+#[no_mangle]
+extern "C" fn on_open_non_sleepable_first(_c: *const c_void) -> i32 {
+    let task = bpf_get_current_task_btf::<c_void>();
+    let mut dynptr = bpf_dynptr { opaque: [0; 2] };
+    let dp = &mut dynptr as *mut bpf_dynptr as *mut c_void;
+    let key: i32 = 0;
+
+    if (bpf_get_current_pid_tgid() >> 32) as i32 != unsafe { pid } {
+        return 0;
+    }
+
+    let file = unsafe { bpf_get_task_exe_file(task) };
+    if file.is_null() {
+        unsafe { err = 1 };
+        return 0;
+    }
+
+    // The non-sleepable reader cannot fault in an uncached folio.
+    let ret = unsafe { read_beyond_eof(file, dp) };
+    unsafe { bpf_put_file(file) };
+    if ret != -EFAULT {
+        unsafe { err = 2 };
+        return 0;
+    }
+
+    let work = bpf_map_lookup_elem(&arrmap, &key) as *mut elem;
+    if work.is_null() {
+        unsafe { err = 3 };
+        return 0;
+    }
+
+    let ret = unsafe {
+        bpf_task_work_schedule_signal(
+            task,
+            core::ptr::addr_of_mut!((*work).tw) as *mut c_void,
+            &arrmap as *const _ as *mut c_void,
+            sleepable_second_callback,
+        )
+    };
+    if ret != 0 {
+        unsafe { err = 4 };
+    }
+    0
+}
+
+// Exercise the opposite fixup order: the first call is made from a sleepable
+// LSM program, while the RCU read-side section makes the second non-sleepable.
+#[link_section = "lsm.s/file_open"]
+#[no_mangle]
+extern "C" fn on_open_sleepable_first(_c: *const c_void) -> i32 {
+    let task = bpf_get_current_task_btf::<c_void>();
+    let mut dynptr = bpf_dynptr { opaque: [0; 2] };
+    let dp = &mut dynptr as *mut bpf_dynptr as *mut c_void;
+
+    if (bpf_get_current_pid_tgid() >> 32) as i32 != unsafe { pid } {
+        return 0;
+    }
+
+    let file = unsafe { bpf_get_task_exe_file(task) };
+    if file.is_null() {
+        unsafe { err = 7 };
+        return 0;
+    }
+
+    unsafe {
+        let ret = read_beyond_eof(file, dp);
+        if ret != -EIO {
+            err = 8;
+        } else {
+            bpf_rcu_read_lock();
+            let mut ret = bpf_dynptr_from_file(file, 0, dp);
+            bpf_rcu_read_unlock();
+            if ret == 0 {
+                ret = bpf_dynptr_read(
+                    core::ptr::addr_of_mut!(tmp_buf) as *mut c_void,
+                    1,
+                    dp as *const c_void,
+                    beyond_eof_offset,
+                    0,
+                ) as i32;
+            }
+            bpf_dynptr_file_discard(dp);
+            if ret != -EFAULT {
+                err = 9;
+            } else {
+                run_success = 1;
+            }
+        }
+        bpf_put_file(file);
+    }
+    0
 }
 
 fn current_pid() -> i32 {

@@ -24,6 +24,9 @@ map-def structs are not load-bearing, so they are rewritten to
 An optional source argument can declare `// BTF_C_CHAR: u8` to represent
 this object's byte storage as the pinned x86 C ABI's signed `char`.
 `// BTF_C_VOID: c_void` makes pointers to Rust's c_void enum C void pointers.
+Pointers to Rust's `char` (a 4-byte INT 'char' in BTF since LLVM 23; LLVM 22
+dropped the DW_ATE_UTF base type, which left `void *`) always become C void
+pointers: translations spell `void *` as `*mut char` for that reason.
 
 Usage: btf_rename.py <obj.o> [prog.rs]
 """
@@ -144,6 +147,9 @@ def main(path, objcopy=None, source=None):
             name = get_str(name_off)
             if c_void and kind == 6 and name == "c_void":
                 void_types.add(type_id)
+            if kind == BTF_KIND_INT and name == "char" and \
+                    struct.unpack_from("<I", data, pos + 8)[0] == 4:
+                void_types.add(type_id)
             if name in anonymous and kind in (4, 5):
                 struct.pack_into("<I", data, pos, 0)
                 found_anonymous.add(name)
@@ -172,13 +178,12 @@ def main(path, objcopy=None, source=None):
         type_id += 1
 
     void_pointers = 0
-    if c_void:
-        for ptr_pos, target in pointers:
-            if target in void_types:
-                struct.pack_into("<I", data, ptr_pos + 8, 0)
-                void_pointers += 1
-        if not void_pointers:
-            raise ValueError("BTF_C_VOID requires a pointer to the c_void enum")
+    for ptr_pos, target in pointers:
+        if target in void_types:
+            struct.pack_into("<I", data, ptr_pos + 8, 0)
+            void_pointers += 1
+    if c_void and not void_pointers:
+        raise ValueError("BTF_C_VOID requires a pointer to the c_void enum")
     if anonymous - found_anonymous:
         raise ValueError(f"missing BTF struct/union for BTF_ANON: {sorted(anonymous - found_anonymous)}")
     if not renamed and not sanitized and not void_pointers:

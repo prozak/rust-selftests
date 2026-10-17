@@ -71,7 +71,8 @@ pub extern "C" fn f3(val: i32, skb: *const __sk_buff, var: i32) -> i32 {
 }
 
 test_tags! {
-    global_func1: __failure, __msg("combined stack size of 3 calls is");
+    global_func1: __load_if_no_large_stack, __failure, __msg("combined stack size of 3 calls is");
+    global_func1_deep: __failure, __msg("combined stack size of {{[0-9]+}} calls is");
 }
 
 #[link_section = "tc"]
@@ -81,6 +82,63 @@ pub extern "C" fn global_func1(skb: *const __sk_buff) -> i32 {
         .wrapping_add(f1(skb))
         .wrapping_add(f2(2, skb))
         .wrapping_add(f3(3, skb, 4))
+}
+
+// A chain of five frames that stay under 512 bytes each but add up to more
+// than the 2 KiB budget of JITs with large stacks; the chain also exceeds
+// 512 bytes after two frames, so it is rejected everywhere.
+const MAX_STACK_LARGE: usize = 480;
+
+// C: volatile char buf[MAX_STACK_LARGE] = {}; __sink(buf[MAX_STACK_LARGE - 1]);
+#[inline(always)]
+fn stack_buf_large() {
+    let mut buf = [0u8; MAX_STACK_LARGE];
+    let mut p = buf.as_mut_ptr();
+    sink(&mut p);
+    unsafe {
+        core::ptr::read_volatile(p.add(MAX_STACK_LARGE - 1));
+    }
+}
+
+#[no_mangle]
+#[inline(never)]
+pub extern "C" fn g0(skb: *const __sk_buff) -> i32 {
+    stack_buf_large();
+    unsafe { (*skb).len as i32 }
+}
+
+#[no_mangle]
+#[inline(never)]
+pub extern "C" fn g1(skb: *const __sk_buff) -> i32 {
+    stack_buf_large();
+    g0(skb).wrapping_add(unsafe { (*skb).len as i32 })
+}
+
+#[no_mangle]
+#[inline(never)]
+pub extern "C" fn g2(skb: *const __sk_buff) -> i32 {
+    stack_buf_large();
+    g1(skb).wrapping_add(unsafe { (*skb).len as i32 })
+}
+
+#[no_mangle]
+#[inline(never)]
+pub extern "C" fn g3(skb: *const __sk_buff) -> i32 {
+    stack_buf_large();
+    g2(skb).wrapping_add(unsafe { (*skb).len as i32 })
+}
+
+#[no_mangle]
+#[inline(never)]
+pub extern "C" fn g4(skb: *const __sk_buff) -> i32 {
+    stack_buf_large();
+    g3(skb).wrapping_add(unsafe { (*skb).len as i32 })
+}
+
+#[link_section = "tc"]
+#[no_mangle]
+pub extern "C" fn global_func1_deep(skb: *const __sk_buff) -> i32 {
+    g4(skb)
 }
 
 #[panic_handler]

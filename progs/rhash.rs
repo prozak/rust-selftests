@@ -5,8 +5,11 @@
 // Direct translation of tools/testing/selftests/bpf/progs/rhash.c
 // (bpf-rs-core idiom).
 
-use bpf_rs_core::helpers::{bpf_map_delete_elem, bpf_map_lookup_elem, bpf_map_update_elem};
-use bpf_rs_core::{bpf_map, bpf_object};
+use bpf_rs_core::helpers::{
+    bpf_get_current_task_btf, bpf_kptr_xchg, bpf_map_delete_elem, bpf_map_lookup_elem,
+    bpf_map_update_elem,
+};
+use bpf_rs_core::{bpf_map, bpf_object, btf_type_tags};
 use core::ffi::c_void;
 
 const BPF_ANY: u64 = 0;
@@ -30,6 +33,41 @@ bpf_map! {
         key: *const i32,
         value: *const Elem,
     }
+}
+
+// struct task_struct: only named, the kptr's target type is matched against
+// the kernel's by name.
+#[allow(non_camel_case_types)]
+#[repr(C)]
+struct task_struct {
+    _opaque: [u8; 0],
+}
+
+// struct special_elem { struct task_struct __kptr *task; int val; };
+#[allow(non_camel_case_types)]
+#[repr(C)]
+struct special_elem {
+    task: *mut task_struct,
+    val: i32,
+}
+
+btf_type_tags! {
+    special_elem.task: kptr;
+}
+
+bpf_map! {
+    special_fields {
+        r#type: *const [i32; 35],       // BPF_MAP_TYPE_RHASH
+        map_flags: *const [i32; 1],     // BPF_F_NO_PREALLOC
+        max_entries: *const [i32; 1],
+        key: *const i32,
+        value: *const special_elem,
+    }
+}
+
+extern "C" {
+    fn bpf_task_acquire(p: *mut task_struct) -> *mut task_struct;
+    fn bpf_task_release(p: *mut task_struct);
 }
 
 #[no_mangle]
@@ -266,6 +304,118 @@ extern "C" fn test_rhash_delete_nonexistent(_ctx: *const c_void) -> i32 {
     }
 
     unsafe { err = 0 };
+    0
+}
+
+#[link_section = "syscall"]
+#[no_mangle]
+extern "C" fn test_rhash_kptr_update(_ctx: *const c_void) -> i32 {
+    let val1 = special_elem { task: core::ptr::null_mut(), val: 1 };
+    let val2 = special_elem { task: core::ptr::null_mut(), val: 2 };
+    let key: i32 = 0;
+
+    unsafe {
+        err = 1;
+        if bpf_map_update_elem(&special_fields, &key, &val1, BPF_NOEXIST) != 0 {
+            return 1;
+        }
+
+        err = 2;
+        let elem = bpf_map_lookup_elem(&special_fields, &key) as *mut special_elem;
+        if elem.is_null() {
+            return 2;
+        }
+
+        err = 3;
+        let task = bpf_task_acquire(bpf_get_current_task_btf::<task_struct>());
+        if task.is_null() {
+            return 3;
+        }
+
+        err = 4;
+        let old = bpf_kptr_xchg(core::ptr::addr_of_mut!((*elem).task).cast(), task.cast())
+            as *mut task_struct;
+        if !old.is_null() {
+            bpf_task_release(old);
+            return 4;
+        }
+
+        err = 5;
+        if bpf_map_update_elem(&special_fields, &key, &val2, BPF_EXIST) != 0 {
+            return 5;
+        }
+
+        err = 6;
+        let elem = bpf_map_lookup_elem(&special_fields, &key) as *mut special_elem;
+        if elem.is_null() || (*elem).val != 2 {
+            return 6;
+        }
+
+        err = 7;
+        let old = bpf_kptr_xchg(core::ptr::addr_of_mut!((*elem).task).cast(), core::ptr::null_mut())
+            as *mut task_struct;
+        if old.is_null() {
+            return 7;
+        }
+        bpf_task_release(old);
+
+        err = 8;
+        if bpf_map_delete_elem(&special_fields, &key) != 0 {
+            return 8;
+        }
+
+        err = 0;
+    }
+    0
+}
+
+#[link_section = "syscall"]
+#[no_mangle]
+extern "C" fn test_rhash_kptr_delete(_ctx: *const c_void) -> i32 {
+    let val = special_elem { task: core::ptr::null_mut(), val: 0 };
+    let key: i32 = 0;
+
+    unsafe {
+        err = 1;
+        if bpf_map_update_elem(&special_fields, &key, &val, BPF_NOEXIST) != 0 {
+            return 1;
+        }
+
+        err = 2;
+        let elem = bpf_map_lookup_elem(&special_fields, &key) as *mut special_elem;
+        if elem.is_null() {
+            return 2;
+        }
+
+        err = 3;
+        let task = bpf_task_acquire(bpf_get_current_task_btf::<task_struct>());
+        if task.is_null() {
+            return 3;
+        }
+
+        err = 4;
+        let old = bpf_kptr_xchg(core::ptr::addr_of_mut!((*elem).task).cast(), task.cast())
+            as *mut task_struct;
+        if !old.is_null() {
+            bpf_task_release(old);
+            return 4;
+        }
+
+        err = 5;
+        if bpf_map_delete_elem(&special_fields, &key) != 0 {
+            return 5;
+        }
+
+        err = 6;
+        let old = bpf_kptr_xchg(core::ptr::addr_of_mut!((*elem).task).cast(), core::ptr::null_mut())
+            as *mut task_struct;
+        if old.is_null() {
+            return 6;
+        }
+        bpf_task_release(old);
+
+        err = 0;
+    }
     0
 }
 

@@ -1668,6 +1668,11 @@ class Executor:
         it happens to live in dropped — see _helper_generic."""
         if region.startswith("stack:"):
             return "stack"
+        if region.startswith("ro:"):
+            # Which read-only section a literal lands in is a compiler
+            # artifact (clang's .rodata.str, LLVM's merged .rodata.str1.1);
+            # what the kfunc reads out of it is captured by content.
+            return "ro"
         return self._canon_region(region)
 
     def _is_observable(self, region):

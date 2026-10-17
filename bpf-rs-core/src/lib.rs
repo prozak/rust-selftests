@@ -75,6 +75,24 @@ macro_rules! test_tags {
     ($($func:ident : $($tag:expr),+ $(,)? );+ $(;)?) => {};
 }
 
+/// Declare BTF decl tags on a function's parameters: the C source's
+/// `__arg_nonnull`, `__arg_ctx`, `__arg_trusted`, ... (bpf_misc.h), which
+/// the verifier reads when it checks a global subprogram on its own. Like
+/// [`test_tags!`] this expands to NOTHING; scripts/btf_test_tags.py reads
+/// the declaration from the source and appends a BTF_KIND_DECL_TAG with the
+/// tag string verbatim and the (0-based) parameter index as component_idx.
+///
+/// ```ignore
+/// arg_tags! {
+///     __get_frame_data: 1: "arg:nonnull", 2: "arg:nonnull", 3: "arg:nonnull";
+///     global_dynptr_stack_arg: 0: "arg:ctx";
+/// }
+/// ```
+#[macro_export]
+macro_rules! arg_tags {
+    ($($func:ident : $($idx:literal : $tag:literal),+ $(,)? );+ $(;)?) => {};
+}
+
 /// Declare the BTF type tags (`__kptr`, `__kptr_untrusted`, `__percpu_kptr`,
 /// `__uptr`) the C source puts on a struct member's pointer type.
 ///

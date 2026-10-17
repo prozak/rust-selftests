@@ -274,6 +274,71 @@ def parse_source(path):
     return entries
 
 
+def _macro_body(path, src, mask, name):
+    """The body of the one `name!` declaration in the source, or None."""
+    hits = [m for m in re.finditer(r"\b" + name + r"\s*!", mask)]
+    if not hits:
+        return None, None
+    if len(hits) > 1:
+        raise TagError(f"{path}: more than one {name}! declaration")
+    i = hits[0].end()
+    while i < len(mask) and mask[i].isspace():
+        i += 1
+    if i >= len(mask) or mask[i] not in "({[":
+        raise TagError(f"{path}: {name}! is not followed by a delimiter")
+    opener, closer = mask[i], {"(": ")", "{": "}", "[": "]"}[mask[i]]
+    depth, j = 0, i
+    while j < len(mask):
+        if mask[j] == opener:
+            depth += 1
+        elif mask[j] == closer:
+            depth -= 1
+            if depth == 0:
+                break
+        j += 1
+    if depth:
+        raise TagError(f"{path}: unterminated {name}! body")
+    return src[i + 1:j], mask[i + 1:j]
+
+
+def parse_arg_tags(path):
+    """Read the arg_tags! declaration from a .rs translation.
+
+    Returns [(func_name, [(param_index, tag), ...]), ...] in source order,
+    or [] when the translation declares none. Tags are verbatim BTF decl tag
+    strings ("arg:nonnull", "arg:ctx", ...).
+    """
+    src = open(path, encoding="utf-8").read()
+    mask = _strip_noise(src)
+    body, bmask = _macro_body(path, src, mask, "arg_tags")
+    if body is None:
+        return []
+    entries = []
+    for stmt, smask in zip(_split_top(body, ";", bmask),
+                           _split_top(bmask, ";", bmask)):
+        if not smask.strip():
+            continue
+        colon = smask.find(":")
+        if colon < 0:
+            raise TagError(f"{path}: arg_tags! entry without '<func>:': {stmt.strip()}")
+        func = stmt[:colon].strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", func):
+            raise TagError(f"{path}: bad function name {func!r} in arg_tags!")
+        tags = []
+        for item, imask in zip(_split_top(stmt[colon + 1:], ",", smask[colon + 1:]),
+                               _split_top(smask[colon + 1:], ",", smask[colon + 1:])):
+            if not imask.strip():
+                continue
+            m = re.fullmatch(r"\s*(\d+)\s*:\s*(\"[^\"]*\")\s*", item)
+            if not m:
+                raise TagError(f"{path}: arg_tags! wants '<index>: \"<tag>\"', got {item.strip()!r}")
+            tags.append((int(m.group(1)), _unquote(m.group(2))))
+        if not tags:
+            raise TagError(f"{path}: arg_tags! entry {func} declares no tag")
+        entries.append((func, tags))
+    return entries
+
+
 def parse_tag(text, path):
     """One `__failure` / `__msg("...")` attribute -> its decl tag payload."""
     m = re.fullmatch(r"(__[A-Za-z0-9_]+)\s*(?:\((.*)\))?", text, re.S)
@@ -368,14 +433,18 @@ def inject(path, entries):
                 f"{os.path.basename(path)}: no BTF FUNC named {func!r} "
                 f"(programs in this object: {', '.join(sorted(funcs))})")
         for tag in tags:
-            # "comment:<n>:" mirrors bpf_misc.h's __COUNTER__ prefix; the
-            # loader sorts tags with strverscmp to recover source order.
-            payload = f"comment:{count}:{tag}".encode() + b"\0"
+            if isinstance(tag, tuple):
+                # a parameter tag (arg_tags!): verbatim, on component <index>
+                component, payload = tag[0], tag[1].encode() + b"\0"
+            else:
+                # "comment:<n>:" mirrors bpf_misc.h's __COUNTER__ prefix; the
+                # loader sorts tags with strverscmp to recover source order.
+                component, payload = -1, f"comment:{count}:{tag}".encode() + b"\0"
+                count += 1
             name_off = str_len + len(new_strings)
             new_strings.extend(payload)
             new_types.extend(struct.pack(
-                "<IIIi", name_off, BTF_KIND_DECL_TAG << 24, funcs[func], -1))
-            count += 1
+                "<IIIi", name_off, BTF_KIND_DECL_TAG << 24, funcs[func], component))
 
     # types grow in place at the end of the type section; the string table
     # (which must stay last) shifts by exactly that much.
@@ -397,7 +466,7 @@ def inject(path, entries):
     buf.extend(out)
     struct.pack_into("<QQ", buf, shdr_base + 24, new_off, len(out))
     open(path, "wb").write(buf)
-    return count
+    return count + sum(1 for _f, tags in entries for t in tags if isinstance(t, tuple))
 
 
 def declares_failure(src):
@@ -426,7 +495,7 @@ def main(argv):
         return 2
     obj, src = argv[1], argv[2]
     try:
-        entries = parse_source(src)
+        entries = parse_source(src) + parse_arg_tags(src)
         if not entries:
             return 0
         n = inject(obj, entries)

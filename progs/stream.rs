@@ -42,7 +42,7 @@
 //    offset baked into the insn (no separate pointer-arithmetic ALU op),
 //    the only shape check_ptr_to_map_access() in the verifier permits for
 //    a CONST_PTR_TO_MAP register - reads `((struct bpf_arena *)&arena)->
-//    user_vm_start` (offset 280, confirmed via bpftool btf dump).
+//    user_vm_start` through a CO-RE relocation, like the C.
 // The actual page fault (kernel/bpf/arena.c's bpf_arena_handle_page_fault)
 // is real VMA fault-handling triggered by any out-of-range access through
 // a properly arena-cast pointer - not tied to the raw-asm store/load shape
@@ -52,11 +52,13 @@
 use bpf_rs_core::bpf_map;
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::{
+    sink,
     bpf_map_lookup_elem, bpf_spin_lock, bpf_spin_unlock, bpf_timer_init, bpf_timer_set_callback,
     bpf_timer_start,
 };
 use bpf_rs_core::maps::{self, BpfMap};
 use bpf_rs_core::test_tags;
+use btf_macros::btf;
 use core::ffi::c_void;
 
 test_tags! {
@@ -271,43 +273,24 @@ unsafe fn cast_kern<T>(p: *mut T) -> *mut T {
     p
 }
 
-// byte offset of `struct bpf_arena.user_vm_start` in *this* kernel build's
-// vmlinux BTF (`bpftool btf dump file vmlinux`: bits_offset=3968 / 8 = 496
-// at the 645f5fcf pin; it was 488 at 3ccdb078 and 280 on an older lane
-// kernel). struct bpf_arena's layout isn't ABI, so this offset must be
-// re-checked at every kernel bump. The C reads the field through a CO-RE
-// relocation on vmlinux.h's struct; the same read through a #[btf] view
-// here crashes opt in BPFAbstractMemberAccess (the unused field-info
-// call, #49), so the offset stays hand-encoded until LLVM carries the fix.
-const USER_VM_START_OFFSET: i16 = 496;
-
-/// In-place `r = *(u64 *)(r + USER_VM_START_OFFSET)`: single
-/// BPF_LDX|BPF_MEM|BPF_DW insn, offset baked in (no separate ALU op) -
-/// the only shape the verifier permits for a CONST_PTR_TO_MAP register.
-/// Reads `((struct bpf_arena *)&arena)->user_vm_start`, matching the C
-/// source's `barrier_var(ptr); user_vm_start = ptr->user_vm_start;`.
+/// `((struct bpf_arena *)&arena)->user_vm_start`, the C's `barrier_var(ptr);
+/// user_vm_start = ptr->user_vm_start;`: a CO-RE field read through a #[btf]
+/// view of the kernel's struct bpf_arena, so the offset follows the kernel
+/// (488 at pin 3ccdb078, 496 at 645f5fcf; it was hand-encoded until LLVM
+/// carried the unused-field.info fix, #49/#60). The barrier keeps the map
+/// address in a register, and the read is the single BPF_LDX|BPF_MEM|BPF_DW
+/// (offset baked in, no separate ALU op) that the verifier permits on a
+/// CONST_PTR_TO_MAP register.
 #[inline(always)]
 unsafe fn arena_base_ldx(map: u64) -> u64 {
-    let mut p = map;
-    core::arch::asm!(
-        ".byte 0x79",
-        ".ifc {0}, r0", ".byte 0x00", ".endif",
-        ".ifc {0}, r1", ".byte 0x11", ".endif",
-        ".ifc {0}, r2", ".byte 0x22", ".endif",
-        ".ifc {0}, r3", ".byte 0x33", ".endif",
-        ".ifc {0}, r4", ".byte 0x44", ".endif",
-        ".ifc {0}, r5", ".byte 0x55", ".endif",
-        ".ifc {0}, r6", ".byte 0x66", ".endif",
-        ".ifc {0}, r7", ".byte 0x77", ".endif",
-        ".ifc {0}, r8", ".byte 0x88", ".endif",
-        ".ifc {0}, r9", ".byte 0x99", ".endif",
-        ".short {off}",
-        ".long 0",
-        inout(reg) p,
-        off = const USER_VM_START_OFFSET,
-        options(nostack, preserves_flags),
-    );
-    p
+    let mut ptr = map as *mut bpf_arena;
+    sink(&mut ptr);
+    *(*ptr).user_vm_start().get().unwrap()
+}
+
+#[btf]
+struct bpf_arena {
+    user_vm_start: u64,
 }
 
 /// bpf_may_goto.h's `can_loop` (non-`__BPF_FEATURE_MAY_GOTO` hand-encoding,

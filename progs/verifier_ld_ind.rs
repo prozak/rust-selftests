@@ -22,6 +22,10 @@
 
 // BPF_PROGRAM_ORDER: ind_check_calling_conv_r1 ind_check_calling_conv_r2 ind_check_calling_conv_r3 ind_check_calling_conv_r4 ind_check_calling_conv_r5 ind_check_calling_conv_r7 ldabs_subprog ldind_subprog ld_abs_subprog_early_exit ld_ind_subprog_early_exit ld_abs_subprog_both_paths_safe ld_ind_subprog_both_paths_safe ld_abs_callback ld_abs_callback_reject ld_ind_callback_subprog ld_ind_callback ld_ind_callback_subprog_reject ld_ind_global_static ld_ind_global ld_ind_global_callback ld_ind_global_callback_reject ld_ind_global_subprog_ok ldabs_void_subprog ld_abs_void_subprog_reject ldind_void_subprog ld_ind_void_subprog_reject
 
+// the C's anonymous types, named here; scripts/btf_anon.py clears
+// the names in the object's BTF
+// BTF_ANON
+
 use bpf_rs_core::{bpf_object, test_tags};
 use core::ffi::c_void;
 
@@ -93,6 +97,63 @@ test_tags! {
         __description("ld_ind: reject void return subprog"),
         __failure,
         __msg("LD_ABS is only allowed in functions that return 'int'");
+}
+
+// Map key/value types, shaped like the C object's BTF (the kernel
+// checks some of them member by member, so no explicit padding).
+// translint: allow(padding)
+#[allow(non_camel_case_types, non_snake_case)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+union __sk_buff__anon26 {
+    flow_keys: *mut c_void,
+}
+
+#[allow(non_camel_case_types, non_snake_case)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+union __sk_buff__anon30 {
+    sk: *mut c_void,
+}
+
+#[allow(non_camel_case_types, non_snake_case)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __sk_buff {
+    len: u32,
+    pkt_type: u32,
+    mark: u32,
+    queue_mapping: u32,
+    protocol: u32,
+    vlan_present: u32,
+    vlan_tci: u32,
+    vlan_proto: u32,
+    priority: u32,
+    ingress_ifindex: u32,
+    ifindex: u32,
+    tc_index: u32,
+    cb: [u32; 5],
+    hash: u32,
+    tc_classid: u32,
+    data: u32,
+    data_end: u32,
+    napi_id: u32,
+    family: u32,
+    remote_ip4: u32,
+    local_ip4: u32,
+    remote_ip6: [u32; 4],
+    local_ip6: [u32; 4],
+    remote_port: u32,
+    local_port: u32,
+    data_meta: u32,
+    __anon26: __sk_buff__anon26,
+    tstamp: u64,
+    wire_len: u32,
+    gso_segs: u32,
+    __anon30: __sk_buff__anon30,
+    gso_size: u32,
+    tstamp_type: u8,
+    hwtstamp: u64,
 }
 
 #[link_section = "socket"]

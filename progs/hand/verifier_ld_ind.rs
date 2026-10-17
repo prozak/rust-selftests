@@ -3,7 +3,7 @@
 // by hand; include!d by the generated progs/verifier_ld_ind.rs (scripts/naked_gen.py
 // --with-c-bodies writes this file once, with stubs, and never overwrites it).
 
-use bpf_rs_core::ctx::__sk_buff;
+// (`struct __sk_buff` is the generated file's, from the C object's BTF)
 use bpf_rs_core::helpers::bpf_loop;
 
 // HAND: ld_abs_callback_reject -- translate the C below (see the file comment)

@@ -3,6 +3,7 @@
 #![no_main]
 #![feature(asm_experimental_arch)]
 #![allow(named_asm_labels)]
+#![allow(function_casts_as_integer)]
 
 // Translation of tools/testing/selftests/bpf/progs/verifier_arena_scalar.c, GENERATED
 // by scripts/naked_gen.py --with-c-bodies (bpf-rs-core idiom), except the

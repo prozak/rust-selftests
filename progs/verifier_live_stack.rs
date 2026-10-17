@@ -417,20 +417,23 @@ arg_tags! {
     global_noop_btf_arg: 0: "arg:untrusted";
 }
 
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, non_snake_case)]
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct cnt8 {
     v: i64,
 }
 
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, non_snake_case)]
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct bpf_dynptr {
     __opaque: [u64; 2],
 }
 
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, non_snake_case)]
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct task_struct {
     pid: i32,
 }

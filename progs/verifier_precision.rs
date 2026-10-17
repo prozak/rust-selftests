@@ -22,6 +22,10 @@
 
 // BPF_PROGRAM_ORDER: bpf_neg bpf_end_to_le bpf_end_to_be bpf_end_bswap bpf_load_acquire bpf_store_release state_loop_first_last_equal __bpf_cond_op_r10 bpf_cond_op_r10 bpf_cond_op_not_r10 bpf_neg_2 bpf_neg_3 bpf_neg_4 bpf_neg_5 bpf_atomic_fetch_add_precision bpf_atomic_xchg_precision bpf_atomic_fetch_or_precision bpf_atomic_fetch_and_precision bpf_atomic_fetch_xor_precision bpf_atomic_cmpxchg_precision bpf_atomic_fetch_add_dual_precision bpf_atomic_cmpxchg_dual_precision bpf_atomic_fetch_add_map_precision bpf_atomic_cmpxchg_map_precision bpf_atomic_fetch_add_32bit_precision bpf_atomic_cmpxchg_32bit_precision null_mem_arg_zero_size subprog_mem_arg null_mem_arg_global_subprog null_kfunc_arg_dynptr_slice __kfunc_btf_root
 
+// the C's anonymous types, named here; scripts/btf_anon.py clears
+// the names in the object's BTF
+// BTF_ANON
+
 use bpf_rs_core::{bpf_map, bpf_object, test_tags};
 use core::ffi::c_void;
 
@@ -223,6 +227,63 @@ test_tags! {
         __flag("BPF_F_TEST_STATE_FREQ"),
         __failure,
         __msg("R3 type=scalar expected=fp");
+}
+
+// Map key/value types, shaped like the C object's BTF (the kernel
+// checks some of them member by member, so no explicit padding).
+// translint: allow(padding)
+#[allow(non_camel_case_types, non_snake_case)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+union __sk_buff__anon26 {
+    flow_keys: *mut c_void,
+}
+
+#[allow(non_camel_case_types, non_snake_case)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+union __sk_buff__anon30 {
+    sk: *mut c_void,
+}
+
+#[allow(non_camel_case_types, non_snake_case)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct __sk_buff {
+    len: u32,
+    pkt_type: u32,
+    mark: u32,
+    queue_mapping: u32,
+    protocol: u32,
+    vlan_present: u32,
+    vlan_tci: u32,
+    vlan_proto: u32,
+    priority: u32,
+    ingress_ifindex: u32,
+    ifindex: u32,
+    tc_index: u32,
+    cb: [u32; 5],
+    hash: u32,
+    tc_classid: u32,
+    data: u32,
+    data_end: u32,
+    napi_id: u32,
+    family: u32,
+    remote_ip4: u32,
+    local_ip4: u32,
+    remote_ip6: [u32; 4],
+    local_ip6: [u32; 4],
+    remote_port: u32,
+    local_port: u32,
+    data_meta: u32,
+    __anon26: __sk_buff__anon26,
+    tstamp: u64,
+    wire_len: u32,
+    gso_segs: u32,
+    __anon30: __sk_buff__anon30,
+    gso_size: u32,
+    tstamp_type: u8,
+    hwtstamp: u64,
 }
 
 bpf_map! {

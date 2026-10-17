@@ -564,7 +564,10 @@ class RustTypes:
             return f"[{self.rust(elem)}; {n}]"
         if t.kind in (K_STRUCT, K_UNION):
             if not t.name:
-                raise Unsupported("anonymous struct/union as a value type")
+                # an anonymous type (a map's `struct { ... }` value): named
+                # here, Rust having no anonymous types; map value type
+                # names are not load-bearing for libbpf
+                t.name = f"__anon_type{tid}"
             self.collect(tid)
             return t.name
         if t.kind in (K_ENUM, K_ENUM64):
@@ -573,6 +576,22 @@ class RustTypes:
 
     def fail(self, t):
         raise Unsupported(f"BTF kind {t.kind} ({t.name!r}) as a value type")
+
+    def local_like(self, tid, depth=0):
+        """Whether a struct looks like one the C file defines (a callback
+        context, a value type) rather than a kernel type pulled in from
+        vmlinux.h: few members, of scalar, pointer or small nested types."""
+        btf = self.btf
+        t = btf.types[btf.strip(tid)]
+        if t.kind not in (K_STRUCT, K_UNION) or len(t.extra) > 8 or depth > 2:
+            return False
+        for _name, mtid, _off in t.extra:
+            m = btf.types[btf.strip(mtid)]
+            if m.kind == K_ARRAY:
+                m = btf.types[btf.strip(m.extra[0])]
+            if m.kind in (K_STRUCT, K_UNION) and not self.local_like(mtid, depth + 1):
+                return False
+        return True
 
     def size_align(self, tid):
         """Natural (repr(C)) size and alignment of the Rust rendering."""
@@ -967,7 +986,16 @@ class Generator:
         out = []
         for i, (pname, ptid) in enumerate(proto.extra):
             try:
-                rtype = types.rust(ptid)
+                pt = btf.types[btf.strip(ptid)]
+                pointee = btf.types[btf.strip(pt.size)] if pt.kind == K_PTR else None
+                if f.static and pointee is not None and pointee.kind in (K_STRUCT, K_UNION) \
+                        and btf.strip(pt.size) not in types.done \
+                        and not types.local_like(btf.strip(pt.size)):
+                    # a static function's BTF is not checked by the verifier:
+                    # spare the file a kernel struct's whole definition
+                    rtype = "*mut c_void"
+                else:
+                    rtype = types.rust(ptid)
             except Unsupported:
                 rtype = "*mut c_void"
             if "c_void" in rtype:
@@ -1398,6 +1426,9 @@ class Generator:
             out.append(f"// BTF_KSYM: {name}")
         if self.ksym_vars:
             out.append("")
+        if any(re.search(r"\b(?:__anon_type\d+|\w+__anon\d+)\b", d) for d in self.obj.types.defs):
+            out += ["// the C's anonymous types, named here; scripts/btf_anon.py clears",
+                    "// the names in the object's BTF", "// BTF_ANON", ""]
         # the Makefile reads marker lines from progs/<name>.rs only: carry
         # the hand file's over
         markers = re.findall(r"^// (?:BTF_TYPE_ID|BTF_KSYM|BTF_WEAK_KFUNC|BTF_C_CHAR|RUSTC_OPT_LEVEL): .*$",
@@ -1485,7 +1516,7 @@ class Generator:
         if os.path.exists(path):
             with open(path) as fh:
                 text = fh.read()
-            missing = [f.name for f in hand if not re.search(r"\bfn " + f.name + r"\b", text)]
+            missing = [f.name for f in hand if not re.search(r"\bfn " + rust_fn(f.name) + r"\b", text)]
             if missing:
                 raise Unsupported(f"{os.path.relpath(path, REPO)} lacks {', '.join(missing)}")
             return path, text, False
@@ -1508,11 +1539,11 @@ class Generator:
         lines += [("//   " + ln.replace("\t", "    ")).rstrip() for ln in f.c_text.splitlines()]
         if f.section:
             lines.append(f'#[link_section = "{f.section}"]')
-        lines.append("#[no_mangle]")
+        lines.append(fn_attrs(f.name))
         if not f.section:
             lines.append("#[inline(never)]")
         params = ", ".join(f.rust_params)
-        lines.append(f'extern "C" fn {f.name}({params}){" -> " + ret if ret else ""} {{')
+        lines.append(f'extern "C" fn {rust_fn(f.name)}({params}){" -> " + ret if ret else ""} {{')
         lines.append("    todo!()")
         lines.append("}")
         return "\n".join(lines)

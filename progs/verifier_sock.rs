@@ -3,6 +3,7 @@
 #![no_main]
 #![feature(asm_experimental_arch)]
 #![allow(named_asm_labels)]
+#![allow(function_casts_as_integer)]
 
 // Translation of tools/testing/selftests/bpf/progs/verifier_sock.c, GENERATED
 // by scripts/naked_gen.py --with-c-bodies (bpf-rs-core idiom), except the
@@ -20,6 +21,10 @@
 // with the C object instruction by instruction.
 
 // BPF_PROGRAM_ORDER: skb_sk_no_null_check sk_family_non_fullsock_field_1 sk_rx_queue_mapping_no_sign_ext sk_rx_queue_mapping_narrow_load_mask sk_sk_type_fullsock_field_1 sk_no_skb_sk_check_1 no_null_check_on_ret_1 sk_sk_type_fullsock_field_2 sk_family_non_fullsock_field_2 sk_sk_state_narrow_load port_word_load_backward_compatibility sk_dst_port_half_load dst_port_half_load_invalid_1 sk_dst_port_byte_load dst_port_byte_load_invalid dst_port_half_load_invalid_2 dst_ip6_load_2nd_byte sk_sk_type_narrow_load sk_sk_protocol_narrow_load skb_sk_beyond_last_field_1 sk_no_skb_sk_check_2 no_null_check_on_ret_2 skb_sk_tp_snd_cwnd_1 skb_sk_tp_bytes_acked skb_sk_beyond_last_field_2 skb_sk_tp_snd_cwnd_2 bpf_sk_release_skb_sk bpf_sk_fullsock_skb_sk bpf_tcp_sock_skb_sk sk_null_0_value_null sk_1_1_value_1 stack_value_1_stack_value map_lookup_elem_smap_key xskmap_key_xs_queue_id map_lookup_elem_sockmap_key map_lookup_elem_sockhash_key field_bpf_sk_release_sk_1 field_bpf_sk_release_sk_2 ctx_reuseport_array_key_flags reuseport_ctx_sockmap_key_flags reuseport_ctx_sockhash_key_flags of_bpf_skc_to_helpers post_bind4_read_src_ip6 post_bind4_read_mark post_bind6_read_src_ip4 sock_create_read_src_port skb_pull_data2 skb_pull_data1 invalidate_pkt_pointers_from_global_func xdp_pull_data2 xdp_pull_data1 invalidate_xdp_pkt_pointers_from_global_func invalidate_xdp_pkt_pointers tail_call static_tail_call invalidate_pkt_pointers_by_global_tail_call invalidate_pkt_pointers_by_static_tail_call invalidate_pkt_pointers_by_tail_call
+
+// the C's anonymous types, named here; scripts/btf_anon.py clears
+// the names in the object's BTF
+// BTF_ANON
 
 use bpf_rs_core::{bpf_map, bpf_object, test_tags};
 use core::ffi::c_void;

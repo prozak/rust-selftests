@@ -3,7 +3,7 @@
 // by hand; include!d by the generated progs/verifier_precision.rs (scripts/naked_gen.py
 // --with-c-bodies writes this file once, with stubs, and never overwrites it).
 
-use bpf_rs_core::ctx::__sk_buff;
+// (`struct __sk_buff` is the generated file's, from the C object's BTF)
 
 // HAND: subprog_mem_arg -- translate the C below (see the file comment)
 //   __weak int subprog_mem_arg(int *p)

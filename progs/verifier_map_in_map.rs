@@ -65,14 +65,16 @@ test_tags! {
 // Map key/value types, shaped like the C object's BTF (the kernel
 // checks some of them member by member, so no explicit padding).
 // translint: allow(padding)
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, non_snake_case)]
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct bpf_dynptr {
     __opaque: [u64; 2],
 }
 
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, non_snake_case)]
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct rb_ctx {
     rb: *mut c_void,
     dptr: bpf_dynptr,

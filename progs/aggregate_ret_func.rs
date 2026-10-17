@@ -3,6 +3,8 @@
 #![no_main]
 #![feature(asm_experimental_arch)]
 
+use core::ffi::c_void;
+
 // Raw instruction tests: preserve each register, instruction and return ABI.
 #[repr(C)]
 struct arena_pair { lo: *mut char, hi: *mut char }
@@ -105,6 +107,43 @@ extern "C" fn aggregate_ret_global_precise() -> i32 {
     unsafe { core::arch::asm!("call {global_agg_good};r6 = r2;r6 &= 7;r1 = r10;r1 += -8;r1 += r6;r0 = 0;*(u8 *)(r1 + 0) = r0;r0 = 0;exit;", global_agg_good = sym global_agg_good, options(noreturn)); }
 }
 
+// A by-value struct that smuggles a pointer, which must be rejected.
+#[repr(C)]
+struct with_ptr { p: *mut c_void, x: u64 }
+// A by-value union that smuggles a pointer, which must be rejected too.
+#[repr(C)]
+union upair_with_ptr { p: *mut c_void, halves: [u64; 2] }
+
+#[no_mangle]
+#[inline(never)]
+// BPF_NAKED: global_ret_struct_ptr
+extern "C" fn global_ret_struct_ptr() -> with_ptr {
+    unsafe { core::arch::asm!("r0 = 0;r2 = 0;exit;", options(noreturn)); }
+}
+
+#[no_mangle]
+#[inline(never)]
+#[link_section = "tc"]
+// BPF_NAKED: aggregate_ret_global_struct_ptr_fail
+extern "C" fn aggregate_ret_global_struct_ptr_fail() -> i32 {
+    unsafe { core::arch::asm!("call {global_ret_struct_ptr};r0 = 0;exit;", global_ret_struct_ptr = sym global_ret_struct_ptr, options(noreturn)); }
+}
+
+#[no_mangle]
+#[inline(never)]
+// BPF_NAKED: global_ret_union_ptr
+extern "C" fn global_ret_union_ptr() -> upair_with_ptr {
+    unsafe { core::arch::asm!("r0 = 0;r2 = 0;exit;", options(noreturn)); }
+}
+
+#[no_mangle]
+#[inline(never)]
+#[link_section = "tc"]
+// BPF_NAKED: aggregate_ret_global_union_ptr_fail
+extern "C" fn aggregate_ret_global_union_ptr_fail() -> i32 {
+    unsafe { core::arch::asm!("call {global_ret_union_ptr};r0 = 0;exit;", global_ret_union_ptr = sym global_ret_union_ptr, options(noreturn)); }
+}
+
 #[no_mangle]
 #[inline(never)]
 // BPF_NAKED: global_ret_arena_pair
@@ -193,6 +232,8 @@ bpf_rs_core::test_tags! {
     aggregate_ret_static_uninit_fail: __failure, __msg("R2 !read_ok");
     aggregate_ret_static_precise: __load_if_JITed, __success, __retval("0"), __log_level("2"), __msg("mark_precise: frame0: last_idx 5 first_idx 0 subseq_idx -1"), __msg("mark_precise: frame0: regs=r6 stack= before 4: (07) r1 += -8"), __msg("mark_precise: frame0: regs=r6 stack= before 3: (bf) r1 = r10"), __msg("mark_precise: frame0: regs=r6 stack= before 2: (57) r6 &= 7"), __msg("mark_precise: frame0: regs=r6 stack= before 1: (bf) r6 = r2"), __msg("mark_precise: frame0: regs=r2 stack= before 12: (95) exit"), __msg("mark_precise: frame1: regs=r2 stack= before 11: (b7) r2 = 4");
     aggregate_ret_global_precise: __load_if_JITed, __success, __retval("0"), __log_level("2"), __msg("mark_precise: frame0: last_idx 5 first_idx 0 subseq_idx -1"), __msg("mark_precise: frame0: regs=r6 stack= before 4: (07) r1 += -8"), __msg("mark_precise: frame0: regs=r6 stack= before 3: (bf) r1 = r10"), __msg("mark_precise: frame0: regs=r6 stack= before 2: (57) r6 &= 7"), __msg("mark_precise: frame0: regs=r6 stack= before 1: (bf) r6 = r2"), __msg("mark_precise: frame0: regs=r2 stack= before 0: (85) call pc+9");
+    aggregate_ret_global_struct_ptr_fail: __failure, __msg("Global function global_ret_struct_ptr() has unsupported return type");
+    aggregate_ret_global_union_ptr_fail: __failure, __msg("Global function global_ret_union_ptr() has unsupported return type");
     aggregate_ret_global_arena_pair: __load_if_JITed, __success, __retval("0");
     aggregate_ret_global_arena_and_scalar: __load_if_JITed, __success, __retval("0");
     aggregate_ret_global_arena_array: __load_if_JITed, __success, __retval("0");

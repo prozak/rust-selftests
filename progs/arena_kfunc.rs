@@ -24,6 +24,11 @@ extern "C" {
     fn bpf_kfunc_arena_cap_nullable_test(p: *mut u64) -> u64;
     fn bpf_kfunc_arena_args5_test(a: *mut u64, b: *mut u64, c: *mut u64, d: *mut u64, e: *mut u64) -> u64;
     fn bpf_kfunc_arena_mixed_test(a: *mut u64, b: *mut u64) -> u64;
+    fn bpf_kfunc_arena_stack_arg_test(a: u64, b: u64, c: u64, d: u64, e: u64, f: *mut u64) -> u64;
+    // `struct prog_test_pair_arg s` is passed by value in two registers,
+    // spelled out as `s_lo, s_hi` here (rustc's C ABI would pass a pointer);
+    // add_ksyms mirrors the kernel prototype onto the declaration.
+    fn bpf_kfunc_call_test_pair_arena_arg(a: u64, b: u64, c: u64, s_lo: u64, s_hi: u64, f: *mut u64) -> u64;
 }
 #[inline(always)]
 unsafe fn alloc_page() -> *mut u64 { bpf_arena_alloc_pages(&arena as *const _ as *const c_void, core::ptr::null_mut(), 1, -1, 0) }
@@ -124,10 +129,19 @@ extern "C" fn arena_arg_bad_reg(_ctx: *const c_void) -> i32 {
     unsafe { alloc_page(); bpf_kfunc_arena_arg_test(&mut buf); }
     0
 }
-// LLVM 22 selects the C source's explicit stack-argument fallback.
 #[no_mangle]
 #[link_section = "syscall"]
-extern "C" fn dummy_test(_ctx: *const c_void) -> i32 { 0 }
+extern "C" fn arena_arg_stack(_ctx: *const c_void) -> i32 {
+    unsafe { alloc_page(); bpf_kfunc_arena_stack_arg_test(1, 2, 3, 4, 5, 1 as *mut u64); }
+    0
+}
+// The struct takes two slots, so the arena pointer is the sixth.
+#[no_mangle]
+#[link_section = "syscall"]
+extern "C" fn arena_arg_stack_after_pair(_ctx: *const c_void) -> i32 {
+    unsafe { alloc_page(); bpf_kfunc_call_test_pair_arena_arg(1, 2, 3, 1, 2, 1 as *mut u64); }
+    0
+}
 
 bpf_rs_core::bpf_object!("GPL");
 bpf_rs_core::test_tags! {
@@ -138,5 +152,6 @@ bpf_rs_core::test_tags! {
     arena_arg_unpopulated: __arch_x86_64, __arch_arm64, __success, __retval("0");
     arena_arg_no_arena: __arch_x86_64, __arch_arm64, __failure, __msg("arena pointer requires a program with an associated arena");
     arena_arg_bad_reg: __arch_x86_64, __arch_arm64, __failure, __msg("R1 type=fp expected=arena, scalar");
-    dummy_test: __arch_x86_64, __arch_arm64, __description("arena_arg_stack: not supported, dummy test"), __skip("arena_arg_stack: not supported"), __success;
+    arena_arg_stack: __arch_x86_64, __arch_arm64, __failure, __msg("arena pointer cannot be a stack argument");
+    arena_arg_stack_after_pair: __arch_x86_64, __arch_arm64, __failure, __msg("arena pointer cannot be a stack argument");
 }

@@ -195,7 +195,13 @@ extern "C" fn test_subprog2(ctx: *const u64) -> i32 {
     // bpf_prog_test_load() loads test_pkt_access.bpf.o with
     // BPF_F_TEST_RND_HI32, which randomizes upper 32 bits after BPF_ALU32
     // insns; trim to the low 32 bits like the C original.
-    let ret = arg(ctx, 5) as u32;
+    //
+    // The C's `struct args_subprog2` is `{ args[1]; ret }` under
+    // `#if __clang_major__ >= 23`: clang 23 emits the ABI-accurate BTF
+    // prototype of the static target, `test_pkt_access_subprog2(skb)` with
+    // the optimized-away `val` gone, so the return value sits at slot 1
+    // (slot 5 before, when the verifier fell back to five u64 arguments).
+    let ret = arg(ctx, 1) as u32;
     if len != 74 || ret != 148 {
         return 0;
     }

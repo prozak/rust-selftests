@@ -128,8 +128,14 @@ test_tags! {
 #[no_mangle]
 extern "C" fn classifier_0(skb: *const __sk_buff) -> i32 {
     unsafe { count += 1 };
-    subprog_tail(skb, &jmp_table0);
-    subprog_tail(skb, &jmp_table1);
+    let ret1 = subprog_tail(skb, &jmp_table0);
+    let ret2 = subprog_tail(skb, &jmp_table1);
+    // C: __sink(ret1); __sink(ret2). Consuming the results keeps
+    // dead-arg-elim from voiding subprog_tail's return, which LLVM 23 would
+    // carry into BTF ("tail_call is only allowed in functions that return
+    // 'int'").
+    barrier_i32(ret1);
+    barrier_i32(ret2);
     unsafe { count }
 }
 

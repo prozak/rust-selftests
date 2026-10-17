@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0
 #![no_std]
 #![no_main]
+#![feature(linkage)]
+
+// RUSTC_OPT_LEVEL: 1
+// At opt-level 3 (LLVM 23) the frame-walk loop below keeps the verifier's
+// loop exploration from resolving its branch states (the loop_stack/SCC
+// walk at bpf-next 645f5fcf holds ~4 states per iteration for 600
+// iterations and overflows the 8192-entry jump stack: "The sequence of 8193
+// jumps is too complex"); the LLVM 22 build of the same source and the C
+// object stay under it. opt-level 1 gives the loop a shape the verifier
+// finishes in ~500k instructions, like the C's 466k.
 
 // Direct translation of
 // tools/testing/selftests/bpf/progs/pyperf600_nounroll.c (STACK_MAX_LEN=600,
@@ -142,12 +152,30 @@ fn get_thread_state(tls_base: *mut c_void, pid_data: *const PidData) -> *mut c_v
     thread_state
 }
 
+#[inline(always)]
 fn get_frame_data(
     frame_ptr: *mut c_void,
     pid_data: *const PidData,
     frame: *mut FrameData,
     symbol: *mut Symbol,
 ) -> bool {
+    __get_frame_data(frame_ptr as i64, pid_data, frame, symbol)
+}
+
+// C: `__weak bool __get_frame_data(long frame_ptr_, PidData *pidData __arg_nonnull,
+// FrameData *frame __arg_nonnull, Symbol *symbol __arg_nonnull)`: a global
+// subprog the verifier checks once, on its own, with the three pointers
+// declared non-null (arg_tags! below).
+#[no_mangle]
+#[inline(never)]
+#[linkage = "weak"]
+extern "C" fn __get_frame_data(
+    frame_ptr_: i64,
+    pid_data: *const PidData,
+    frame: *mut FrameData,
+    symbol: *mut Symbol,
+) -> bool {
+    let frame_ptr = frame_ptr_ as *mut c_void;
     let offsets = unsafe { &(*pid_data).offsets };
 
     bpf_probe_read_user(
@@ -368,3 +396,6 @@ extern "C" fn on_event(ctx: *const c_void) -> i32 {
 }
 
 bpf_object!("GPL");
+bpf_rs_core::arg_tags! {
+    __get_frame_data: 1: "arg:nonnull", 2: "arg:nonnull", 3: "arg:nonnull";
+}

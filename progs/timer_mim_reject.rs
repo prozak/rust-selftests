@@ -20,9 +20,10 @@
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::{
-    bpf_map_lookup_elem, bpf_map_update_elem, bpf_timer_init, bpf_timer_set_callback,
-    bpf_timer_start,
+    bpf_for_each_map_elem, bpf_map_lookup_elem, bpf_map_update_elem, bpf_timer_init,
+    bpf_timer_set_callback, bpf_timer_start,
 };
+use core::ffi::c_void;
 use bpf_rs_core::maps::{self, BpfMap};
 
 const CLOCK_MONOTONIC: u64 = 1;
@@ -92,7 +93,7 @@ extern "C" fn timer_cb(_map: *mut InnerMap, _key: *mut i32, _val: *mut hmap_elem
 }
 
 /// BPF_PROG(test1, int a)
-#[link_section = "fentry/bpf_fentry_test1"]
+#[link_section = "?fentry/bpf_fentry_test1"]
 #[no_mangle]
 extern "C" fn test1(_ctx: *const u64) -> i32 {
     // C: `struct hmap_elem init = {};` zeroes the padding after `pad` too.
@@ -128,6 +129,109 @@ extern "C" fn test1(_ctx: *const u64) -> i32 {
         if bpf_timer_start(core::ptr::addr_of_mut!((*val).timer), 0, 0) != 0 {
             err |= 8;
         }
+    }
+    0
+}
+
+#[repr(C)]
+struct callback_ctx {
+    map: *mut c_void,
+}
+
+extern "C" fn mismatch_iter_cb(
+    _map: *mut InnerMap,
+    _key: *mut i32,
+    val: *mut hmap_elem,
+    ctx: *mut callback_ctx,
+) -> i64 {
+    unsafe {
+        bpf_timer_init(
+            core::ptr::addr_of_mut!((*val).timer),
+            (*ctx).map as *const c_void,
+            CLOCK_MONOTONIC,
+        );
+    }
+    0
+}
+
+extern "C" fn timer_mismatch_cb(map: *mut InnerMap, _key: *mut i32, _val: *mut hmap_elem) -> i64 {
+    let mut ctx = callback_ctx { map: map as *mut c_void };
+    let array_key2: i32 = ARRAY_KEY2;
+
+    let inner_map2 = bpf_map_lookup_elem(&outer_arr, &array_key2) as *mut InnerMap;
+    if inner_map2.is_null() {
+        return 0;
+    }
+    bpf_for_each_map_elem(inner_map2, mismatch_iter_cb, &mut ctx, 0);
+    0
+}
+
+extern "C" fn match_iter_cb(
+    map: *mut InnerMap,
+    _key: *mut i32,
+    val: *mut hmap_elem,
+    _ctx: *mut callback_ctx,
+) -> i64 {
+    unsafe {
+        bpf_timer_init(core::ptr::addr_of_mut!((*val).timer), map, CLOCK_MONOTONIC);
+    }
+    0
+}
+
+extern "C" fn timer_match_cb(_map: *mut InnerMap, _key: *mut i32, _val: *mut hmap_elem) -> i64 {
+    let mut ctx = callback_ctx { map: core::ptr::null_mut() };
+    let array_key2: i32 = ARRAY_KEY2;
+
+    let inner_map2 = bpf_map_lookup_elem(&outer_arr, &array_key2) as *mut InnerMap;
+    if inner_map2.is_null() {
+        return 0;
+    }
+    bpf_for_each_map_elem(inner_map2, match_iter_cb, &mut ctx, 0);
+    0
+}
+
+/// BPF_PROG(callback_map_uid_mismatch, int a)
+#[link_section = "?fentry/bpf_fentry_test1"]
+#[no_mangle]
+extern "C" fn callback_map_uid_mismatch(_ctx: *const u64) -> i32 {
+    let array_key: i32 = ARRAY_KEY;
+    let hash_key: i32 = HASH_KEY;
+
+    let inner_map = bpf_map_lookup_elem(&outer_arr, &array_key) as *mut InnerMap;
+    if inner_map.is_null() {
+        return 0;
+    }
+    let val = bpf_map_lookup_elem(inner_map, &hash_key) as *mut hmap_elem;
+    if val.is_null() {
+        return 0;
+    }
+
+    unsafe {
+        bpf_timer_init(core::ptr::addr_of_mut!((*val).timer), inner_map, CLOCK_MONOTONIC);
+        bpf_timer_set_callback(core::ptr::addr_of_mut!((*val).timer), timer_mismatch_cb);
+    }
+    0
+}
+
+/// BPF_PROG(callback_map_uid_match, int a)
+#[link_section = "?fentry/bpf_fentry_test1"]
+#[no_mangle]
+extern "C" fn callback_map_uid_match(_ctx: *const u64) -> i32 {
+    let array_key: i32 = ARRAY_KEY;
+    let hash_key: i32 = HASH_KEY;
+
+    let inner_map = bpf_map_lookup_elem(&outer_arr, &array_key) as *mut InnerMap;
+    if inner_map.is_null() {
+        return 0;
+    }
+    let val = bpf_map_lookup_elem(inner_map, &hash_key) as *mut hmap_elem;
+    if val.is_null() {
+        return 0;
+    }
+
+    unsafe {
+        bpf_timer_init(core::ptr::addr_of_mut!((*val).timer), inner_map, CLOCK_MONOTONIC);
+        bpf_timer_set_callback(core::ptr::addr_of_mut!((*val).timer), timer_match_cb);
     }
     0
 }

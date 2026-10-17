@@ -1,0 +1,1314 @@
+#!/usr/bin/env python3
+"""Generate the Rust translation of a selftest written as naked BPF asm.
+
+Most tools/testing/selftests/bpf/progs/verifier_*.c programs are `__naked`
+functions whose body is one `asm volatile` block of hand-written BPF
+assembly, with bpf_misc.h's __imm / __imm_addr / __imm_const / __imm_insn /
+__imm_ptr operands and test_loader decl tags. There is nothing to translate
+but the operands, so this generator carries the asm verbatim:
+
+  - the C file is preprocessed with the selftests' own clang flags, so the
+    #if-selected variants and the macro-built operands are the ones the
+    oracle object was built from;
+  - every "i" operand is resolved by compiling a probe (an `#include` of
+    the C file plus one `.8byte %[op]` per operand) with the same flags and
+    reading the values and relocations back: a helper id becomes the
+    literal `call 1`, a map, function or kfunc address `{name}` with
+    `sym name`, a constant or an encoded instruction its decimal value;
+  - `%=` labels get the function name as their suffix; "r" operands
+    (__imm_ptr) become `in(reg)` inputs; a `call`/`goto` to a function
+    named in the asm text becomes a `sym` operand, which is what keeps a
+    `__used` static subprogram alive through internalize/globaldce;
+  - maps, globals, kfunc externs and the license come from the C object's
+    BTF and ELF, the test_loader tags from its decl tags, verbatim, so the
+    test_tags! declaration mirrors the oracle exactly;
+  - each function is emitted as `// BPF_NAKED:` raw asm (scripts/naked_abi.py).
+
+scripts/translint.py's naked-verbatim check then compares the built
+object's instruction stream against the C object's, relocation by
+relocation (scripts/naked_verbatim.py).
+
+What the generator refuses (reported as "unsupported", per file in
+--survey): a function with a C body (other than the C's __kfunc_btf_root,
+whose kfunc calls it reproduces), a naked function with parameters,
+statically initialized map slots, map members it does not know (map_extra,
+pinning), a kfunc variable (`extern const int x __ksym`), a struct the
+Rust layout could not reproduce. Those files are hand work.
+
+Usage:
+  scripts/naked_gen.py <name>...          write progs/<name>.rs
+  scripts/naked_gen.py --stdout <name>    print instead of writing
+  scripts/naked_gen.py --survey [name...] what can be generated, per file
+                                          (default: every verifier_*.c)
+"""
+import argparse
+import os
+import re
+import struct
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(REPO, "equiv"))
+sys.path.insert(0, HERE)
+import paths  # noqa: E402
+from bpfelf import BpfElf  # noqa: E402
+import btf_test_tags  # noqa: E402
+
+C_PROGS = os.path.join(paths.SELFTESTS_SRC, "progs")
+C_OBJS = paths.SELFTESTS_OUTPUT
+CLANG = os.path.join(paths.LLVM_PREFIX, "bin", "clang")
+
+STT_SECTION = 3
+
+RUST_KEYWORDS = {
+    "as", "break", "const", "continue", "crate", "else", "enum", "extern",
+    "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod",
+    "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct",
+    "super", "trait", "true", "type", "unsafe", "use", "where", "while",
+    "async", "await", "dyn", "abstract", "become", "box", "do", "final",
+    "macro", "override", "priv", "typeof", "unsized", "virtual", "yield",
+    "try", "gen",
+}
+
+
+class Unsupported(Exception):
+    pass
+
+
+def ident(name):
+    return "r#" + name if name in RUST_KEYWORDS else name
+
+
+# --- clang: the selftests' own flags ---------------------------------------
+
+_SYS_INC = None
+
+
+def sys_includes():
+    """Makefile's get_sys_includes: clang's own system include dirs, as
+    -idirafter, so <stdint.h> and friends resolve the way they do for the
+    oracle object."""
+    global _SYS_INC
+    if _SYS_INC is None:
+        p = subprocess.run([CLANG, "-v", "-E", "-"], input="",
+                           capture_output=True, text=True)
+        out, on = [], False
+        for line in p.stderr.splitlines():
+            if "<...> search starts here:" in line:
+                on = True
+                continue
+            if "End of search list." in line:
+                break
+            if on and line.startswith(" /"):
+                out += ["-idirafter", line.strip()]
+        _SYS_INC = out
+    return _SYS_INC
+
+
+def bpf_cflags():
+    """BPF_CFLAGS + BPF_SYS_INCLUDES + BPF_DEFINES + BPF_CC_FLAGS of the
+    selftests build (Makefile.buildvars, Makefile.skel; x86-64, the default
+    test_progs flavor), minus -Werror."""
+    out, src = C_OBJS, paths.SELFTESTS_SRC
+    tools = os.path.join(paths.KERNEL_SRC, "tools")
+    return (["-g", "-Wall", "-D__TARGET_ARCH_x86", "-mlittle-endian",
+             "-I" + os.path.join(out, "tools", "include"), "-I" + src,
+             "-I" + os.path.join(tools, "include", "uapi"),
+             "-I" + os.path.join(tools, "include"),
+             "-I" + os.path.join(src, "libarena", "include"),
+             "-I" + os.path.abspath(os.path.join(out, "..", "usr", "include")),
+             "-std=gnu11", "-fno-strict-aliasing", "-Wno-microsoft-anon-tag",
+             "-fms-extensions", "-Wno-compare-distinct-pointer-types",
+             "-Wno-initializer-overrides"]
+            + sys_includes()
+            + ["-DENABLE_ATOMICS_TESTS", "-O2", "--target=bpfel", "-mcpu=v3"])
+
+
+def clang(args, what):
+    p = subprocess.run([CLANG] + bpf_cflags() + args, capture_output=True,
+                       text=True)
+    if p.returncode:
+        err = [ln for ln in p.stderr.splitlines() if "error:" in ln]
+        raise Unsupported(f"{what}: " + (err[0] if err else p.stderr.strip()[-200:]))
+    return p.stdout
+
+
+def preprocess(cpath):
+    """The main file's own text after preprocessing (headers dropped by the
+    line markers), so #if-selected variants and macro-built operands are
+    what the oracle object was built from."""
+    out, keep = [], False
+    for line in clang(["-E", cpath], "preprocess").split("\n"):
+        m = re.match(r'# \d+ "([^"]*)"', line)
+        if m:
+            keep = os.path.abspath(m.group(1)) == os.path.abspath(cpath)
+            continue
+        if keep and not line.startswith("#"):    # SEC()'s _Pragma lines
+            out.append(line)
+    return "\n".join(out)
+
+
+# --- C parsing (preprocessed text) -----------------------------------------
+
+def split_top(text, sep):
+    """Split at `sep` outside parentheses, brackets, braces and strings."""
+    parts, depth, start, i, n = [], 0, 0, 0, len(text)
+    while i < n:
+        c = text[i]
+        if c in "\"'":
+            q = c
+            i += 1
+            while i < n and text[i] != q:
+                if text[i] == "\\":
+                    i += 1
+                i += 1
+        elif c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == sep and depth == 0:
+            parts.append(text[start:i])
+            start = i + 1
+        i += 1
+    parts.append(text[start:])
+    return parts
+
+
+def strip_attrs(head):
+    """Remove every __attribute__((...)) from a declaration head; return
+    (rest, [attribute, ...]) with each attribute's text as written."""
+    attrs, out, i = [], [], 0
+    while True:
+        j = head.find("__attribute__", i)
+        if j < 0:
+            out.append(head[i:])
+            break
+        out.append(head[i:j])
+        k = head.find("(", j)
+        depth, m = 0, k
+        while m < len(head):
+            c = head[m]
+            if c == '"':                      # a tag's message may hold parens
+                m += 1
+                while m < len(head) and head[m] != '"':
+                    if head[m] == "\\":
+                        m += 1
+                    m += 1
+            elif c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            m += 1
+        inner = head[k + 1:m].strip()
+        if inner.startswith("(") and inner.endswith(")"):
+            inner = inner[1:-1]
+        attrs += [a.strip() for a in split_top(inner, ",") if a.strip()]
+        i = m + 1
+    return "".join(out), attrs
+
+
+def is_func_header(head):
+    rest, _ = strip_attrs(head)
+    rest = rest.strip()
+    return rest.endswith(")") and "=" not in rest.split("(")[0]
+
+
+def split_items(text):
+    """Top-level items of preprocessed C: (head, body) with body None for a
+    declaration and the text between the braces for a function."""
+    items, start, depth, body_start, i, n = [], 0, 0, None, 0, len(text)
+    while i < n:
+        c = text[i]
+        if c in "\"'":
+            q = c
+            i += 1
+            while i < n and text[i] != q:
+                if text[i] == "\\":
+                    i += 1
+                i += 1
+        elif c == "{":
+            if depth == 0:
+                body_start = i
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0 and is_func_header(text[start:body_start]):
+                items.append((text[start:body_start], text[body_start + 1:i]))
+                start, body_start = i + 1, None
+        elif c == ";" and depth == 0:
+            items.append((text[start:i], None))
+            start, body_start = i + 1, None
+        i += 1
+    return items
+
+
+class Func:
+    def __init__(self, name, static, section, rtype, params, naked, body):
+        self.name, self.static, self.section = name, static, section
+        self.rtype, self.params, self.naked, self.body = rtype, params, naked, body
+        self.stmts, self.operands, self.rust_params = [], [], []   # filled by resolve
+
+
+def parse_function(head, body):
+    rest, attrs = strip_attrs(head)
+    section = None
+    for a in attrs:
+        m = re.fullmatch(r'section\s*\(\s*"((?:[^"\\]|\\.)*)"\s*\)', a)
+        if m:
+            section = m.group(1)
+    rest = re.sub(r"\s+", " ", rest).strip()
+    rest = re.sub(r"\b(?:inline|__inline|__inline__)\b", "", rest).strip()
+    m = re.fullmatch(r"(static )?(.*?)\s*\b([A-Za-z_]\w*)\s*\((.*)\)", rest, re.S)
+    if not m:
+        raise Unsupported(f"unparsable function header {rest!r}")
+    params = m.group(4).strip()
+    if params == "void":
+        params = ""
+    return Func(m.group(3), bool(m.group(1)), section, m.group(2).strip(),
+                params, "naked" in attrs, body)
+
+
+def c_string(text):
+    """Decode the concatenated C string literals that make up `text`."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c.isspace():
+            i += 1
+            continue
+        if c != '"':
+            raise Unsupported(f"asm template is not a string literal: {text[i:i + 20]!r}")
+        i += 1
+        while i < n and text[i] != '"':
+            if text[i] == "\\":
+                i += 1
+                e = text[i]
+                if e in "01234567":
+                    j = i
+                    while j < n and j < i + 3 and text[j] in "01234567":
+                        j += 1
+                    out.append(chr(int(text[i:j], 8)))
+                    i = j
+                    continue
+                if e == "x":
+                    j = i + 1
+                    while j < n and text[j] in "0123456789abcdefABCDEF":
+                        j += 1
+                    out.append(chr(int(text[i + 1:j], 16)))
+                    i = j
+                    continue
+                out.append({"n": "\n", "t": "\t", "r": "\r", "a": "\a",
+                            "b": "\b", "f": "\f", "v": "\v"}.get(e, e))
+                i += 1
+            else:
+                out.append(text[i])
+                i += 1
+        i += 1
+    return "".join(out)
+
+
+def parse_asm(f):
+    """(template, [(operand name, constraint, expr), ...]) of a naked
+    function's single asm statement."""
+    s = f.body.strip()
+    m = re.fullmatch(r"(?:__asm__|asm)\s*(?:volatile|__volatile__|__volatile)?"
+                     r"\s*\((.*)\)\s*;?", s, re.S)
+    if not m:
+        raise Unsupported(f"{f.name}: body is not a single asm statement")
+    parts = split_top(m.group(1), ":")
+    if len(parts) > 4:
+        raise Unsupported(f"{f.name}: asm statement with {len(parts) - 1} colons")
+    if len(parts) > 1 and parts[1].strip():
+        raise Unsupported(f"{f.name}: asm output operands")
+    ops = []
+    if len(parts) > 2:
+        for item in split_top(parts[2], ","):
+            item = item.strip()
+            if not item:
+                continue
+            mm = re.fullmatch(r'\[(\w+)\]\s*"([^"]*)"\s*\((.*)\)', item, re.S)
+            if not mm:
+                raise Unsupported(f"{f.name}: operand {item[:40]!r}")
+            ops.append((mm.group(1), mm.group(2), mm.group(3).strip()))
+    return c_string(parts[0]), ops
+
+
+# --- "i" operands: what clang makes of them ----------------------------------
+
+def probe_operands(cpath, entries):
+    """entries: [(func, operand name, C expression)] -> [('imm', int) |
+    ('sym', symbol name)], by compiling an `#include` of the C file plus
+    one `.8byte %[op]` per operand with the selftests' flags and reading
+    the values and relocations back."""
+    if not entries:
+        return []
+    src = [f'#include "{cpath}"',
+           '__attribute__((section("rsgen"), used)) void __rsgen_probe(void)', "{"]
+    for base in range(0, len(entries), 16):
+        chunk = entries[base:base + 16]
+        tmpl = " ".join(f".8byte %[o{base + i}];" for i in range(len(chunk)))
+        ins = ", ".join(f'[o{base + i}]"i"({expr})'
+                        for i, (_f, _n, expr) in enumerate(chunk))
+        src.append(f'\tasm volatile("{tmpl}" : : {ins});')
+    src.append("}")
+    with tempfile.TemporaryDirectory() as tmp:
+        c = os.path.join(tmp, "probe.c")
+        o = os.path.join(tmp, "probe.o")
+        with open(c, "w") as fh:
+            fh.write("\n".join(src) + "\n")
+        clang(["-c", c, "-o", o], "operand probe")
+        elf = BpfElf(o)
+    sec = elf.section_by_name("rsgen")
+    # the slots, then the `exit` clang appends to the probe function
+    if sec is None or sec.size != 8 * len(entries) + 8:
+        raise Unsupported("operand probe: unexpected rsgen section")
+    rels = elf.relocs.get(sec.idx, {})
+    out = []
+    for i in range(len(entries)):
+        off = 8 * i
+        raw = struct.unpack_from("<q", sec.data, off)[0]
+        if off in rels:
+            sym = rels[off].sym
+            if sym.type == STT_SECTION:
+                sym = elf.named_symbol_at(sym.shndx, raw)
+            if sym is None or not sym.name:
+                raise Unsupported(f"{entries[i][0]}: operand {entries[i][1]} "
+                                  f"relocates against an unnamed symbol")
+            out.append(("sym", sym.name))
+        else:
+            out.append(("imm", raw))
+    return out
+
+
+# --- BTF -----------------------------------------------------------------
+
+K_INT, K_PTR, K_ARRAY, K_STRUCT, K_UNION, K_ENUM, K_FWD, K_TYPEDEF = range(1, 9)
+K_VOLATILE, K_CONST, K_RESTRICT, K_FUNC, K_FUNC_PROTO, K_VAR, K_DATASEC = range(9, 16)
+K_FLOAT, K_DECL_TAG, K_TYPE_TAG, K_ENUM64 = 16, 17, 18, 19
+MODIFIERS = (K_TYPEDEF, K_VOLATILE, K_CONST, K_RESTRICT, K_TYPE_TAG)
+
+
+class BtfType:
+    __slots__ = ("kind", "name", "size", "vlen", "kflag", "extra")
+
+    def __init__(self, kind, name, size, vlen, kflag, extra):
+        self.kind, self.name, self.size = kind, name, size
+        self.vlen, self.kflag, self.extra = vlen, kflag, extra
+
+
+class Btf:
+    def __init__(self, data):
+        (magic, _ver, _flags, hdr_len, type_off, type_len,
+         str_off, str_len) = struct.unpack_from("<HBBIIIII", data, 0)
+        assert magic == 0xEB9F
+        sb = hdr_len + str_off
+        self.strs = data[sb:sb + str_len]
+        self.types = {0: BtfType(0, "void", 0, 0, 0, None)}
+        pos, end, tid = hdr_len + type_off, hdr_len + type_off + type_len, 1
+        while pos < end:
+            name_off, info, size = struct.unpack_from("<III", data, pos)
+            pos += 12
+            kind, vlen, kflag = (info >> 24) & 0x1F, info & 0xFFFF, info >> 31
+            extra = None
+            if kind == K_INT:
+                extra = struct.unpack_from("<I", data, pos)[0]
+                pos += 4
+            elif kind == K_ARRAY:
+                extra = struct.unpack_from("<III", data, pos)
+                pos += 12
+            elif kind in (K_STRUCT, K_UNION):
+                extra = []
+                for _ in range(vlen):
+                    n, t, off = struct.unpack_from("<III", data, pos)
+                    extra.append((self.s(n), t, off))
+                    pos += 12
+            elif kind == K_ENUM:
+                extra = []
+                for _ in range(vlen):
+                    n, v = struct.unpack_from("<Ii", data, pos)
+                    extra.append((self.s(n), v))
+                    pos += 8
+            elif kind == K_FUNC_PROTO:
+                extra = []
+                for _ in range(vlen):
+                    n, t = struct.unpack_from("<II", data, pos)
+                    extra.append((self.s(n), t))
+                    pos += 8
+            elif kind == K_VAR:
+                extra = struct.unpack_from("<I", data, pos)[0]
+                pos += 4
+            elif kind == K_DATASEC:
+                extra = []
+                for _ in range(vlen):
+                    extra.append(struct.unpack_from("<III", data, pos))
+                    pos += 12
+            elif kind == K_DECL_TAG:
+                extra = struct.unpack_from("<i", data, pos)[0]
+                pos += 4
+            elif kind == K_ENUM64:
+                pos += 12 * vlen
+            self.types[tid] = BtfType(kind, self.s(name_off), size, vlen, kflag, extra)
+            tid += 1
+
+    def s(self, off):
+        end = self.strs.index(b"\0", off)
+        return self.strs[off:end].decode()
+
+    def strip(self, tid):
+        t = self.types[tid]
+        while t.kind in MODIFIERS:
+            tid = t.size
+            t = self.types[tid]
+        return tid
+
+    def datasec(self, name):
+        for t in self.types.values():
+            if t.kind == K_DATASEC and t.name == name:
+                return t
+        return None
+
+    def datasecs(self):
+        return [t for t in self.types.values() if t.kind == K_DATASEC]
+
+
+class RustTypes:
+    """BTF type -> Rust type text; the struct/union definitions it needed,
+    in dependency order, in `defs`."""
+
+    def __init__(self, btf):
+        self.btf = btf
+        self.defs, self.done = [], set()
+
+    def rust(self, tid):
+        btf = self.btf
+        tid = btf.strip(tid)
+        t = btf.types[tid]
+        if t.kind == K_INT:
+            enc = t.extra
+            flags, offset, bits = (enc >> 24) & 0xF, (enc >> 16) & 0xFF, enc & 0xFF
+            if offset or bits != t.size * 8:
+                raise Unsupported(f"bitfield int {t.name!r}")
+            if flags & 4:
+                return "bool"
+            return ("i" if flags & 1 else "u") + str(t.size * 8)
+        if t.kind == K_FLOAT:
+            return {4: "f32", 8: "f64"}.get(t.size) or self.fail(t)
+        if t.kind == K_PTR:
+            p = btf.types[btf.strip(t.size)]
+            if p.kind in (K_INT, K_ARRAY, K_FLOAT) or (p.kind in (K_STRUCT, K_UNION) and p.name):
+                return "*mut " + self.rust(t.size)
+            return "*mut c_void"
+        if t.kind == K_ARRAY:
+            elem, _idx, n = t.extra
+            return f"[{self.rust(elem)}; {n}]"
+        if t.kind in (K_STRUCT, K_UNION):
+            if not t.name:
+                raise Unsupported("anonymous struct/union as a value type")
+            self.collect(tid)
+            return t.name
+        if t.kind in (K_ENUM, K_ENUM64):
+            return ("i" if t.kflag else "u") + str(t.size * 8)
+        return self.fail(t)
+
+    def fail(self, t):
+        raise Unsupported(f"BTF kind {t.kind} ({t.name!r}) as a value type")
+
+    def size_align(self, tid):
+        """Natural (repr(C)) size and alignment of the Rust rendering."""
+        btf = self.btf
+        t = btf.types[btf.strip(tid)]
+        if t.kind in (K_INT, K_FLOAT, K_ENUM, K_ENUM64):
+            return t.size, t.size
+        if t.kind == K_PTR:
+            return 8, 8
+        if t.kind == K_ARRAY:
+            elem, _idx, n = t.extra
+            s, a = self.size_align(elem)
+            return s * n, a
+        if t.kind in (K_STRUCT, K_UNION):
+            size, align = 0, 1
+            for _name, mtid, off in t.extra:
+                s, a = self.size_align(mtid)
+                align = max(align, a)
+                if t.kind == K_UNION:
+                    size = max(size, s)
+                else:
+                    if off % 8 or (off // 8) % a:
+                        raise Unsupported(f"struct {t.name}: member not naturally aligned")
+                    size = off // 8 + s
+            return (size + align - 1) // align * align, align
+        return self.fail(t)
+
+    def collect(self, tid):
+        if tid in self.done:
+            return
+        self.done.add(tid)
+        t = self.btf.types[tid]
+        if t.kflag:
+            raise Unsupported(f"struct {t.name}: bitfield members")
+        fields = []
+        for name, mtid, off in t.extra:
+            if not name:
+                raise Unsupported(f"struct {t.name}: anonymous member")
+            fields.append(f"    {ident(name)}: {self.rust(mtid)},")
+        size, _align = self.size_align(tid)
+        if size != t.size:
+            raise Unsupported(f"struct {t.name}: C size {t.size}, natural Rust "
+                              f"layout {size} (explicit alignment or padding)")
+        kw = "union" if t.kind == K_UNION else "struct"
+        self.defs.append("#[allow(non_camel_case_types)]\n#[repr(C)]\n"
+                         f"{kw} {t.name} {{\n" + "\n".join(fields) + "\n}")
+
+    def literal(self, tid, data):
+        """A Rust literal of type `tid` holding the bytes `data`."""
+        btf = self.btf
+        t = btf.types[btf.strip(tid)]
+        if t.kind == K_INT:
+            flags = (t.extra >> 24) & 0xF
+            v = int.from_bytes(data[:t.size], "little", signed=bool(flags & 1))
+            if flags & 4:
+                return "true" if v else "false"
+            return str(v)
+        if t.kind in (K_ENUM, K_ENUM64):
+            return str(int.from_bytes(data[:t.size], "little", signed=bool(t.kflag)))
+        if t.kind == K_PTR:
+            if any(data[:8]):
+                raise Unsupported("non-null pointer initializer")
+            return "core::ptr::null_mut()"
+        if t.kind == K_ARRAY:
+            elem, _idx, n = t.extra
+            es = self.size_align(elem)[0]
+            items = [self.literal(elem, data[i * es:(i + 1) * es]) for i in range(n)]
+            if n > 4 and len(set(items)) == 1:
+                return f"[{items[0]}; {n}]"
+            return "[" + ", ".join(items) + "]"
+        if t.kind == K_STRUCT:
+            fields = [f"{ident(name)}: {self.literal(mtid, data[off // 8:])}"
+                      for name, mtid, off in t.extra]
+            return f"{t.name} {{ " + ", ".join(fields) + " }"
+        raise Unsupported(f"initializer of BTF kind {t.kind}")
+
+
+# --- the C object: maps, globals, kfuncs, tags, license ----------------------
+
+class CObject:
+    def __init__(self, path):
+        self.elf = BpfElf(path)
+        sec = self.elf.section_by_name(".BTF")
+        if sec is None:
+            raise Unsupported("C object has no .BTF")
+        self.btf = Btf(sec.data)
+        self.types = RustTypes(self.btf)
+
+    def functions(self):
+        """Defined FUNC symbol name -> section name."""
+        out = {}
+        for s in self.elf.symbols:
+            if s.type == 2 and s.shndx not in (0, 0xFFF1) and s.shndx < len(self.elf.sections):
+                out[s.name] = self.elf.sections[s.shndx].name
+        return out
+
+    def test_tags(self):
+        """Program name -> [decl tag payload, ...] in test_loader order."""
+        btf, out = self.btf, {}
+        for t in btf.types.values():
+            if t.kind != K_DECL_TAG or not t.name.startswith("comment:"):
+                continue
+            target = btf.types[t.size]
+            if target.kind != K_FUNC:
+                continue
+            _c, counter, payload = t.name.split(":", 2)
+            out.setdefault(target.name, []).append((int(counter), payload))
+        return {fn: [p for _c, p in sorted(tl)] for fn, tl in out.items()}
+
+    def ksyms(self):
+        """[(kind, name, type id)] of the .ksyms DATASEC."""
+        ds = self.btf.datasec(".ksyms")
+        if ds is None:
+            return []
+        out = []
+        for tid, _off, _size in ds.extra:
+            t = self.btf.types[tid]
+            out.append((t.kind, t.name, tid))
+        return out
+
+    def var_extent(self, section, name):
+        """(offset, size) of a global variable within its ELF section: the
+        BTF DATASEC entries of an object carry offset 0 (libbpf fills them
+        in from the symbol table at load time)."""
+        sec = self.elf.section_by_name(section)
+        if sec is None:
+            raise Unsupported(f"no section {section} for variable {name}")
+        for s in self.elf.symbols:
+            if s.name == name and s.type == 1 and s.shndx == sec.idx:
+                return s.value, s.size
+        raise Unsupported(f"variable {name} has no symbol in {section}")
+
+    def license(self):
+        sec = self.elf.section_by_name("license")
+        if sec is None:
+            return None, None
+        sym = next((s for s in self.elf.symbols if s.type == 1 and s.shndx == sec.idx), None)
+        text = sec.data.split(b"\0")[0].decode()
+        return (sym.name if sym else "_license"), text
+
+
+# --- generation --------------------------------------------------------------
+
+def rust_str(s):
+    out = []
+    for ch in s:
+        if ch == "\\":
+            out.append("\\\\")
+        elif ch == '"':
+            out.append('\\"')
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\t":
+            out.append("\\t")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ord(ch) < 32 or ord(ch) == 127:
+            out.append(f"\\x{ord(ch):02x}")
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
+
+
+NULLARY_REV = {v: k for k, v in btf_test_tags.NULLARY.items()}
+VALUED_REV = {v: k for k, v in btf_test_tags.VALUED.items()}
+
+
+def tag_macro(payload):
+    if payload in NULLARY_REV:
+        return NULLARY_REV[payload]
+    key, sep, val = payload.partition("=")
+    if sep and key in VALUED_REV:
+        return f"{VALUED_REV[key]}({rust_str(val)})"
+    raise Unsupported(f"test tag {payload!r} has no bpf_misc.h macro in btf_test_tags.py")
+
+
+C_RETURN_TYPES = {
+    "void": "", "int": "i32", "unsigned int": "u32", "unsigned": "u32",
+    "long": "i64", "unsigned long": "u64", "long long": "i64",
+    "unsigned long long": "u64", "__u64": "u64", "__s64": "i64",
+    "__u32": "u32", "__s32": "i32", "__u16": "u16", "__s16": "i16",
+    "__u8": "u8", "__s8": "i8", "char": "i8", "unsigned char": "u8",
+    "short": "i16", "unsigned short": "u16", "bool": "bool", "_Bool": "bool",
+    "void *": "*mut c_void", "void*": "*mut c_void",
+}
+
+
+class Generator:
+    def __init__(self, name):
+        self.name = name
+        self.cpath = os.path.join(C_PROGS, name + ".c")
+        opath = os.path.join(C_OBJS, name + ".bpf.o")
+        if os.path.exists(opath + ".corig"):
+            opath = opath + ".corig"
+        if not os.path.exists(self.cpath):
+            raise Unsupported("no C source")
+        if not os.path.exists(opath):
+            raise Unsupported("no C object")
+        self.obj = CObject(opath)
+        self.errors = []
+        self.funcs = []
+        self.root = None            # the C's __kfunc_btf_root body
+        self.map_names, self.global_names, self.extern_names = [], [], []
+        self.needs_cvoid = False
+        self.stats = {}
+
+    def count(self, key, n=1):
+        self.stats[key] = self.stats.get(key, 0) + n
+
+    # -- C source
+    def parse(self):
+        text = preprocess(self.cpath)
+        for head, body in split_items(text):
+            if body is None:
+                continue
+            f = parse_function(head, body)
+            if f.naked:
+                self.funcs.append(f)
+            elif f.name == "__kfunc_btf_root":
+                self.root = f
+            else:
+                self.errors.append(f"C body: {f.name}")
+        if not self.funcs:
+            self.errors.append("no naked function")
+
+    def resolve(self):
+        entries, per_func = [], {}
+        for f in self.funcs:
+            try:
+                template, ops = parse_asm(f)
+            except Unsupported as e:
+                self.errors.append(str(e))
+                continue
+            try:
+                f.rust_params = self.params(f)
+            except Unsupported as e:
+                self.errors.append(str(e))
+                continue
+            if f.rtype not in C_RETURN_TYPES:
+                self.errors.append(f"{f.name}: return type {f.rtype!r}")
+                continue
+            per_func[f.name] = (template, ops)
+            for opname, constraint, expr in ops:
+                if constraint == "i":
+                    entries.append((f.name, opname, expr))
+                elif constraint != "r":
+                    self.errors.append(f"{f.name}: operand constraint {constraint!r}")
+        if self.errors:
+            return
+        values = probe_operands(self.cpath, entries)
+        resolved = {(fn, op): v for (fn, op, _e), v in zip(entries, values)}
+        funcs = {f.name for f in self.funcs}
+        for f in self.funcs:
+            template, ops = per_func[f.name]
+            bindings, kinds = {}, {}
+            for opname, constraint, expr in ops:
+                if constraint == "i":
+                    kind, value = resolved[(f.name, opname)]
+                    if kind == "imm":
+                        kinds[opname] = ("imm", str(value))
+                        self.count("imm")
+                    else:
+                        kinds[opname] = ("sym", "{" + opname + "}")
+                        bindings[opname] = f"sym {value}"
+                        self.count("sym")
+                else:
+                    m = re.fullmatch(r"&\s*([A-Za-z_]\w*)", expr)
+                    if not m:
+                        self.errors.append(f"{f.name}: register operand {expr!r}")
+                        continue
+                    target = m.group(1)
+                    kinds[opname] = ("reg", "{" + opname + "}")
+                    if target in funcs:
+                        bindings[opname] = f"in(reg) {target} as usize"
+                    else:
+                        bindings[opname] = f"in(reg) core::ptr::addr_of!({target})"
+                    self.count("reg")
+            try:
+                stmts = self.statements(f, template, kinds)
+            except Unsupported as e:
+                self.errors.append(str(e))
+                continue
+            # a function named in the asm text (`call subprog;`, `goto
+            # subprog;`) is referenced through a sym operand, which is what
+            # keeps a `__used` static alive through internalize/globaldce
+            for i, s in enumerate(stmts):
+                m = re.fullmatch(r"(call|goto|gotol|callx) ([A-Za-z_]\w*);", s)
+                if m and m.group(2) in funcs:
+                    target = m.group(2)
+                    if target not in bindings:
+                        bindings[target] = f"sym {target}"
+                    stmts[i] = f"{m.group(1)} {{{target}}};"
+                    self.count("text-sym")
+            f.stmts = stmts
+            f.operands = sorted(bindings.items())
+            self.count("programs" if f.section else "subprogs")
+
+    def params(self, f):
+        """A naked function's parameters, which its asm cannot name, as
+        unused Rust parameters of the C types (a pointer as `*mut c_void`),
+        so the BTF prototype keeps the C's parameter count."""
+        out = []
+        for p in split_top(f.params, ","):
+            p = re.sub(r"\s+", " ", p).strip()
+            if not p:
+                continue
+            m = re.fullmatch(r"(.*?)\s*\b([A-Za-z_]\w*)", p)
+            if not m:
+                raise Unsupported(f"{f.name}: parameter {p!r}")
+            ctype, pname = m.group(1).strip(), m.group(2)
+            if ctype.endswith("*"):
+                rtype = "*mut c_void"
+                self.needs_cvoid = True
+            elif ctype in C_RETURN_TYPES and C_RETURN_TYPES[ctype]:
+                rtype = C_RETURN_TYPES[ctype]
+            else:
+                raise Unsupported(f"{f.name}: parameter type {ctype!r}")
+            out.append(f"_{pname}: {rtype}")
+        return out
+
+    def statements(self, f, template, kinds):
+        t = re.sub(r"/\*.*?\*/", " ", template, flags=re.S)
+        if "{" in t or "}" in t or "$" in t:
+            raise Unsupported(f"{f.name}: brace or dollar in asm text")
+        t = t.replace("%%", "\x01").replace("%=", f.name)
+
+        def sub(m):
+            if m.group(1) not in kinds:
+                raise Unsupported(f"{f.name}: %[{m.group(1)}] is not an operand")
+            return kinds[m.group(1)][1]
+        t = re.sub(r"%\[(\w+)\]", sub, t)
+        if "%" in t:
+            raise Unsupported(f"{f.name}: unhandled % in asm text")
+        t = t.replace("\x01", "%")
+        out = []
+        for piece in t.split(";"):
+            piece = re.sub(r"\s+", " ", piece).strip()
+            while True:
+                m = re.match(r"([A-Za-z_]\w*):\s*(.*)$", piece)
+                if not m:
+                    break
+                out.append(m.group(1) + ":")
+                piece = m.group(2)
+            if piece:
+                out.append(piece + ";")
+        return out
+
+    # -- maps / globals / externs from the C object
+    def maps(self):
+        btf, types, out = self.obj.btf, self.obj.types, []
+        ds = btf.datasec(".maps")
+        if ds is None:
+            return out
+        sec = self.obj.elf.section_by_name(".maps")
+        rels = self.obj.elf.relocs.get(sec.idx, {}) if sec else {}
+        for vtid, _voff, _vsize in ds.extra:
+            var = btf.types[vtid]
+            voff, vsize = self.obj.var_extent(".maps", var.name)
+            slots = {off: r for off, r in rels.items() if voff <= off < voff + vsize}
+            st = btf.types[btf.strip(var.size)]
+            members, plain = [], True
+            for mname, mtid, moff in st.extra:
+                mt = btf.types[mtid]
+                if mname == "values":
+                    plain = False
+                    if mt.kind != K_ARRAY or mt.extra[2] != 0:
+                        raise Unsupported(f"map {var.name}: values is not a zero-length array")
+                    et = btf.types[btf.strip(mt.extra[0])]
+                    if et.kind != K_PTR:
+                        raise Unsupported(f"map {var.name}: values element is not a pointer")
+                    pt = btf.types[btf.strip(et.size)]
+                    if pt.kind == K_FUNC_PROTO and slots:
+                        # `.values = { [i] = (void *)&prog }`: the C object's
+                        # storage holds one pointer per slot up to the last
+                        # initialized one, relocated against the programs;
+                        # scripts/btf_map_slots.py turns the Rust array
+                        # back into libbpf's zero-length BTF array
+                        n = (vsize - moff // 8) // 8
+                        init = ["core::ptr::null()"] * n
+                        for off, r in slots.items():
+                            i = (off - voff - moff // 8) // 8
+                            target = r.sym
+                            if target.type == STT_SECTION:
+                                imm = struct.unpack_from("<q", sec.data, off)[0]
+                                target = self.obj.elf.named_symbol_at(target.shndx, imm)
+                            if target is None or not target.name or i < 0 or i >= n:
+                                raise Unsupported(f"map {var.name}: slot relocation")
+                            init[i] = f"{target.name} as {self.fn_type(target.name)} as *const c_void"
+                            self.count("slots")
+                        self.needs_cvoid = True
+                        members.append((mname, f"[*const c_void; {n}]", "[" + ", ".join(init) + "]"))
+                    elif pt.kind == K_STRUCT and slots:
+                        # `.values = { &inner_map }`: the element type is
+                        # the inner map's own definition (access_map_in_map.rs)
+                        n = (vsize - moff // 8) // 8
+                        init, inner = ["core::ptr::null()"] * n, None
+                        for off, r in slots.items():
+                            i = (off - voff - moff // 8) // 8
+                            target = r.sym
+                            if target.type == STT_SECTION:
+                                imm = struct.unpack_from("<q", sec.data, off)[0]
+                                target = self.obj.elf.named_symbol_at(target.shndx, imm)
+                            if target is None or not target.name or i < 0 or i >= n:
+                                raise Unsupported(f"map {var.name}: slot relocation")
+                            if inner is None:
+                                inner = target.name
+                            elif inner != target.name:
+                                raise Unsupported(f"map {var.name}: slots of different maps")
+                            init[i] = f"&{target.name}"
+                            self.count("slots")
+                        if self.map_shape(pt) != self.map_shape(self.map_struct(inner)):
+                            raise Unsupported(f"map {var.name}: inner definition differs from {inner}'s")
+                        members.append((mname, f"[*const {inner}; {n}]", "[" + ", ".join(init) + "]"))
+                    elif slots:
+                        raise Unsupported(f"map {var.name}: statically initialized slots")
+                    elif pt.kind == K_FUNC_PROTO:
+                        members.append((mname, f"[{self.fn_proto(et.size)}; 0]", "[]"))
+                    elif pt.kind == K_STRUCT:
+                        inner = self.inner_def(var.name, et.size)
+                        members.append((mname, f"[*const {inner}; 0]", "[]"))
+                    else:
+                        raise Unsupported(f"map {var.name}: values element kind {pt.kind}")
+                    continue
+                if mt.kind != K_PTR:
+                    raise Unsupported(f"map {var.name}: member {mname} of BTF kind {mt.kind}")
+                pointee = btf.types[btf.strip(mt.size)]
+                if mname in ("key", "value"):
+                    members.append((mname, f"*const {types.rust(mt.size)}", "core::ptr::null()"))
+                elif pointee.kind == K_ARRAY and btf.types[btf.strip(pointee.extra[0])].kind == K_INT:
+                    members.append((mname, f"*const [i32; {pointee.extra[2]}]", "core::ptr::null()"))
+                else:
+                    raise Unsupported(f"map {var.name}: member {mname} is not __uint/__type encoded")
+            self.map_names.append(var.name)
+            self.count("maps")
+            if plain:
+                body = "\n".join(f"        {ident(m)}: {ty}," for m, ty, _i in members)
+                out.append(f"bpf_map! {{\n    {var.name} {{\n{body}\n    }}\n}}")
+            else:
+                decl = "\n".join(f"    {ident(m)}: {ty}," for m, ty, _i in members)
+                init = "\n".join(f"    {ident(m)}: {i}," for m, _ty, i in members)
+                out.append("#[allow(non_camel_case_types)]\n#[repr(C)]\n"
+                           f"struct {var.name} {{\n{decl}\n}}\n"
+                           f"unsafe impl Sync for {var.name} {{}}\n\n"
+                           f'#[link_section = ".maps"]\n#[no_mangle]\n'
+                           f"static {var.name}: {var.name} = {var.name} {{\n{init}\n}};")
+        return out
+
+    def map_struct(self, name):
+        """The definition struct of the .maps variable `name`."""
+        btf = self.obj.btf
+        for vtid, _off, _size in btf.datasec(".maps").extra:
+            var = btf.types[vtid]
+            if var.name == name:
+                return btf.types[btf.strip(var.size)]
+        raise Unsupported(f"no map {name}")
+
+    def map_shape(self, st):
+        """(member name, pointee kind, array length) of a definition
+        struct's __uint/__type members, the shape libbpf compares."""
+        btf, out = self.obj.btf, []
+        for mname, mtid, _off in st.extra:
+            mt = btf.types[mtid]
+            if mt.kind != K_PTR:
+                continue
+            pointee = btf.types[btf.strip(mt.size)]
+            n = pointee.extra[2] if pointee.kind == K_ARRAY and mname not in ("key", "value") else None
+            size = btf.types[btf.strip(mt.size)].size if mname in ("key", "value") else None
+            out.append((mname, n, size))
+        return out
+
+    def fn_type(self, name):
+        """The Rust fn type of one of the file's functions, for a cast."""
+        f = next((f for f in self.funcs if f.name == name), None)
+        if f is None:
+            raise Unsupported(f"map slot names {name}, not a function of the source")
+        ret = C_RETURN_TYPES[f.rtype]
+        params = ", ".join(p.split(": ", 1)[1] for p in f.rust_params)
+        return f'extern "C" fn({params})' + (f" -> {ret}" if ret else "")
+
+    def inner_def(self, outer, ptr_tid):
+        """The Rust struct for a map-in-map's inner definition."""
+        btf, types = self.obj.btf, self.obj.types
+        st = btf.types[btf.strip(ptr_tid)]
+        name = f"{outer}__inner"
+        fields = []
+        for mname, mtid, _off in st.extra:
+            mt = btf.types[mtid]
+            if mt.kind != K_PTR:
+                raise Unsupported(f"map {outer}: inner member {mname} of BTF kind {mt.kind}")
+            pointee = btf.types[btf.strip(mt.size)]
+            if mname in ("key", "value"):
+                fields.append(f"    {ident(mname)}: *const {types.rust(mt.size)},")
+            elif pointee.kind == K_ARRAY:
+                fields.append(f"    {ident(mname)}: *const [i32; {pointee.extra[2]}],")
+            else:
+                raise Unsupported(f"map {outer}: inner member {mname}")
+        self.obj.types.defs.append("#[allow(non_camel_case_types)]\n#[repr(C)]\n"
+                                   f"struct {name} {{\n" + "\n".join(fields) + "\n}")
+        return name
+
+    def fn_proto(self, proto_tid):
+        btf, types = self.obj.btf, self.obj.types
+        t = btf.types[btf.strip(proto_tid)]
+        params = ", ".join(self.param_type(p) for _n, p in t.extra)
+        ret = "" if btf.strip(t.size) == 0 else " -> " + types.rust(t.size)
+        return f'extern "C" fn({params}){ret}'
+
+    def param_type(self, tid):
+        btf, types = self.obj.btf, self.obj.types
+        t = btf.types[btf.strip(tid)]
+        if t.kind == K_PTR:
+            self.needs_cvoid = True
+            return "*mut c_void"
+        return types.rust(tid)
+
+    def globals(self):
+        btf, types, elf, out = self.obj.btf, self.obj.types, self.obj.elf, []
+        for ds in btf.datasecs():
+            if ds.name in (".maps", ".ksyms", ".kconfig", "license") or ds.name.startswith(".arena"):
+                continue
+            if not re.match(r"^\.(data|bss|rodata)(\.|$)", ds.name):
+                raise Unsupported(f"DATASEC {ds.name}")
+            sec = elf.section_by_name(ds.name)
+            for vtid, _voff, _vsize in ds.extra:
+                var = btf.types[vtid]
+                voff, vsize = self.obj.var_extent(ds.name, var.name)
+                data = sec.data[voff:voff + vsize] if sec and sec.data else b""
+                data = data + b"\0" * (vsize - len(data))
+                ty = types.rust(var.size)
+                lit = types.literal(var.size, data)
+                attrs = []
+                zero = not any(data)
+                if ds.name not in (".data", ".bss", ".rodata") or (ds.name == ".data" and zero):
+                    attrs.append(f'#[link_section = "{ds.name}"]')
+                attrs.append("#[no_mangle]")
+                mut = "" if ds.name.startswith(".rodata") else "mut "
+                out.append("\n".join(attrs) + f"\nstatic {mut}{var.name}: {ty} = {lit};")
+                self.global_names.append(var.name)
+                self.count("globals")
+        return out
+
+    def externs(self):
+        btf, types, out = self.obj.btf, self.obj.types, []
+        for kind, name, tid in self.obj.ksyms():
+            if kind != K_FUNC:
+                raise Unsupported(f"ksym variable {name}")
+            proto = btf.types[btf.types[tid].size]
+            params = ", ".join(f"{ident(n) if n else f'a{i}'}: {self.param_type(p)}"
+                               for i, (n, p) in enumerate(proto.extra))
+            ret = "" if btf.strip(proto.size) == 0 else " -> " + self.param_type(proto.size)
+            out.append(f"    fn {name}({params}){ret};")
+            self.extern_names.append((name, proto))
+            self.count("kfuncs")
+        return out
+
+    def kfunc_root(self):
+        """The C's __kfunc_btf_root: plain calls of each kfunc with literal
+        arguments, whose only purpose is a BTF prototype for the kfuncs the
+        asm calls (llc emits one only for a real call)."""
+        if self.root is None:
+            return None
+        btf = self.obj.btf
+        protos = dict(self.extern_names)
+        calls = []
+        for stmt in split_top(self.root.body, ";"):
+            stmt = stmt.strip()
+            if not stmt:
+                continue
+            m = re.fullmatch(r'(?:__asm__|asm)\s*(?:volatile|__volatile__)?\s*\(\s*""\s*:\s*:(.*)\)', stmt, re.S)
+            if m:
+                refs = []
+                for item in split_top(m.group(1), ","):
+                    mm = re.fullmatch(r'\s*"r"\s*\(\s*&\s*([A-Za-z_]\w*)\s*\)\s*', item)
+                    if not mm or mm.group(1) not in protos:
+                        raise Unsupported(f"__kfunc_btf_root: asm operand {item.strip()[:40]!r}")
+                    refs.append(f"in(reg) {mm.group(1)} as usize")
+                calls.append('        core::arch::asm!("", ' + ", ".join(refs)
+                             + ", options(nostack, preserves_flags));")
+                self.count("root-refs", len(refs))
+                continue
+            m = re.fullmatch(r"([A-Za-z_]\w*)\s*\((.*)\)", stmt, re.S)
+            if not m or m.group(1) not in protos:
+                raise Unsupported(f"__kfunc_btf_root: statement {stmt[:40]!r}")
+            args = []
+            for i, (arg, (_n, ptid)) in enumerate(zip(split_top(m.group(2), ","), protos[m.group(1)].extra)):
+                arg = re.sub(r"\s+", "", arg)
+                if not re.fullmatch(r"\(*(?:\(void\*\))?0x?[0-9a-fA-F]*\)*", arg):
+                    raise Unsupported(f"__kfunc_btf_root: argument {arg!r}")
+                if btf.types[btf.strip(ptid)].kind == K_PTR:
+                    args.append("core::ptr::null_mut()")
+                else:
+                    args.append(re.sub(r"[()]", "", arg))
+            calls.append(f"        {m.group(1)}({', '.join(args)});")
+        self.count("root-calls", len(calls))
+        return ("#[no_mangle]\nextern \"C\" fn __kfunc_btf_root() {\n    unsafe {\n"
+                + "\n".join(calls) + "\n    }\n}")
+
+    # -- the file
+    def generate(self):
+        self.parse()
+        if not self.errors:
+            self.resolve()
+        if self.errors:
+            raise Unsupported("; ".join(self.errors))
+        c_funcs = self.obj.functions()
+        for f in self.funcs:
+            if f.name not in c_funcs:
+                raise Unsupported(f"{f.name}: not a function of the C object")
+        ours = {f.name for f in self.funcs} | ({"__kfunc_btf_root"} if self.root else set())
+        missing = sorted(set(c_funcs) - ours)
+        if missing:
+            raise Unsupported(f"C object functions not in the source: {', '.join(missing)}")
+
+        maps = self.maps()
+        globs = self.globals()
+        externs = self.externs()
+        root = self.kfunc_root()
+        tags = self.obj.test_tags()
+        known = set(self.map_names) | set(self.global_names) | {n for n, _p in self.extern_names} | ours
+        for f in self.funcs:
+            for _op, binding in f.operands:
+                target = re.sub(r"^(sym |in\(reg\) core::ptr::addr_of!\(|in\(reg\) )", "", binding)
+                target = re.sub(r"[) ].*$", "", target)
+                if target not in known:
+                    raise Unsupported(f"{f.name}: operand refers to unknown symbol {target}")
+        lic_sym, lic = self.obj.license()
+
+        out = ["// SPDX-License-Identifier: GPL-2.0", "#![no_std]", "#![no_main]",
+               "#![feature(asm_experimental_arch)]", "#![allow(named_asm_labels)]"]
+        if any("as usize" in b for f in self.funcs for _o, b in f.operands) or (root and "as usize" in root):
+            out.append("#![allow(function_casts_as_integer)]")
+        out.append("")
+        out.append(f"// Translation of tools/testing/selftests/bpf/progs/{self.name}.c, GENERATED")
+        out += ["// by scripts/naked_gen.py (bpf-rs-core idiom): every function in the C",
+                "// source is `__naked` hand-written BPF asm, carried here verbatim as",
+                "// `// BPF_NAKED:` raw asm (scripts/naked_abi.py) with bpf_misc.h's operands",
+                "// resolved the way clang resolves them (helper ids and constants as",
+                "// literals; maps, subprograms and kfuncs as `sym`), the `%=` labels",
+                "// suffixed with the function's name, and the test_loader decl tags",
+                "// mirrored verbatim from the C object. Regenerate with",
+                f"// `scripts/naked_gen.py {self.name}` rather than editing by hand;",
+                "// scripts/translint.py's naked-verbatim check compares the built object",
+                "// with the C object instruction by instruction.", ""]
+        uses = ["bpf_object"] if lic_sym == "_license" else []
+        if any(m.startswith("bpf_map!") for m in maps):
+            uses.append("bpf_map")
+        if tags:
+            uses.append("test_tags")
+        # rustc emits functions sorted by name; keep the C's source order
+        # within the program sections (scripts/program_order.py)
+        programs = [f.name for f in self.funcs if f.section]
+        if len(programs) > 1:
+            out.append("// BPF_PROGRAM_ORDER: " + " ".join(programs))
+            out.append("")
+        if uses:
+            out.append("use bpf_rs_core::{" + ", ".join(sorted(uses)) + "};")
+        if self.needs_cvoid or any("c_void" in d for d in self.obj.types.defs) \
+                or any("c_void" in m for m in maps) or any("c_void" in g for g in globs):
+            out.append("use core::ffi::c_void;")
+        out.append("")
+
+        if tags:
+            out.append("test_tags! {")
+            for f in self.funcs:
+                if f.name in tags:
+                    macros = [tag_macro(p) for p in tags.pop(f.name)]
+                    out.append(f"    {f.name}:")
+                    out.append("        " + ",\n        ".join(macros) + ";")
+            if tags:
+                raise Unsupported(f"tags on functions not in the source: {', '.join(tags)}")
+            out.append("}")
+            out.append("")
+        if self.obj.types.defs:
+            out += ["// Map key/value types, shaped like the C object's BTF (the kernel",
+                    "// checks some of them member by member, so no explicit padding).",
+                    "// translint: allow(padding)"]
+        for d in self.obj.types.defs:
+            out.append(d)
+            out.append("")
+        for m in maps:
+            out.append(m)
+            out.append("")
+        for g in globs:
+            out.append(g)
+            out.append("")
+        if externs:
+            out.append('extern "C" {')
+            out += externs
+            out.append("}")
+            out.append("")
+        if root:
+            out.append(root)
+            out.append("")
+        for f in self.funcs:
+            out.append(self.emit_function(f))
+            out.append("")
+        if lic_sym == "_license":
+            out.append(f'bpf_object!("{lic}");')
+        elif lic_sym is None:
+            out += ["// The C source declares no license.", "#[panic_handler]",
+                    "fn panic(_: &core::panic::PanicInfo) -> ! {", "    loop {}", "}"]
+        else:
+            out += ["// The C source names its license global `" + lic_sym + "`; the symbol",
+                    "// name must match for the keep-list, so bpf_object! is written out.",
+                    '#[link_section = "license"]', "#[no_mangle]",
+                    f"static {lic_sym}: [u8; {len(lic) + 1}] = *b\"{lic}\\0\";", "",
+                    "#[panic_handler]", "fn panic(_: &core::panic::PanicInfo) -> ! {",
+                    "    loop {}", "}"]
+        return "\n".join(out) + "\n"
+
+    def emit_function(self, f):
+        lines = []
+        if f.section:
+            lines.append(f'#[link_section = "{f.section}"]')
+        lines.append("#[no_mangle]")
+        if not f.section:
+            lines.append("#[inline(never)]")
+        lines.append(f"// BPF_NAKED: {f.name}")
+        ret = C_RETURN_TYPES[f.rtype]
+        if "c_void" in ret:
+            self.needs_cvoid = True
+        params = ", ".join(f.rust_params)
+        lines.append(f'extern "C" fn {f.name}({params}){" -> " + ret if ret else ""} {{')
+        lines.append("    unsafe {")
+        lines.append("        core::arch::asm!(")
+        for s in f.stmts:
+            lines.append(f"            {rust_str(s)},")
+        for op, binding in f.operands:
+            lines.append(f"            {op} = {binding},")
+        lines.append("            options(noreturn)")
+        lines += ["        );", "    }", "}"]
+        return "\n".join(lines)
+
+
+def survey(names):
+    rows, ok = [], 0
+    for name in names:
+        try:
+            g = Generator(name)
+            g.generate()
+            ok += 1
+            st = ", ".join(f"{k} {v}" for k, v in sorted(g.stats.items()))
+            rows.append((name, "ok", st))
+        except Unsupported as e:
+            rows.append((name, "unsupported", str(e)))
+    width = max(len(r[0]) for r in rows) if rows else 0
+    for name, verdict, detail in rows:
+        print(f"{name:<{width}}  {verdict:<11}  {detail}")
+    print(f"\n{ok} of {len(rows)} generatable")
+    reasons = {}
+    for _n, verdict, detail in rows:
+        if verdict != "ok":
+            for part in detail.split("; "):
+                key = re.sub(r"^[A-Za-z_0-9]+: ", "", part)
+                key = re.sub(r"\b(map|struct) \w+:", r"\1 <x>:", key)
+                reasons[key] = reasons.get(key, 0) + 1
+    for key, n in sorted(reasons.items(), key=lambda kv: -kv[1]):
+        print(f"  {n:4d}  {key}")
+    return 0
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("names", nargs="*")
+    ap.add_argument("--survey", action="store_true")
+    ap.add_argument("--stdout", action="store_true")
+    args = ap.parse_args(argv[1:])
+    names = args.names
+    if args.survey:
+        if not names:
+            names = sorted(f[:-2] for f in os.listdir(C_PROGS)
+                           if f.startswith("verifier_") and f.endswith(".c"))
+        return survey(names)
+    if not names:
+        ap.error("a selftest name is required")
+    rc = 0
+    for name in names:
+        try:
+            text = Generator(name).generate()
+        except Unsupported as e:
+            print(f"[naked_gen] {name}: unsupported: {e}", file=sys.stderr)
+            rc = 1
+            continue
+        if args.stdout:
+            sys.stdout.write(text)
+        else:
+            path = os.path.join(REPO, "progs", name + ".rs")
+            with open(path, "w") as fh:
+                fh.write(text)
+            print(f"[naked_gen] wrote {os.path.relpath(path, REPO)}")
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

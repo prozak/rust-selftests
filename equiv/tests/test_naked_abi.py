@@ -62,9 +62,17 @@ def test_generated_instructions_are_never_discarded(extra):
         lower(ir, '// BPF_NAKED: p\n')
 
 
-def test_missing_definition_and_real_arguments_are_rejected():
+def test_missing_definition_and_used_arguments_are_rejected():
     with pytest.raises(ValueError, match='one LLVM definition'):
         lower('', '// BPF_NAKED: p\n')
-    ir = 'define i32 @p(i64 %a) !dbg !1 {\n  call void asm sideeffect "exit;", ""()\n  ret i32 0\n}\n'
-    with pytest.raises(ValueError, match='no arguments'):
+    ir = 'define i32 @p(i64 %a) !dbg !1 {\n  call void asm sideeffect "r0 = $0; exit;", "r"(i64 %a)\n  ret i32 0\n}\n'
+    with pytest.raises(ValueError, match='uses parameter %a'):
         lower(ir, '// BPF_NAKED: p\n')
+
+
+def test_unused_parameters_keep_the_signature():
+    # a `__naked void prog(void *ctx)`: the asm cannot name ctx, the BTF
+    # prototype keeps it
+    ir = 'define void @p(ptr %ctx) #0 section "tc" !dbg !1 {\n  call void asm sideeffect "exit;", ""()\n  ret void\n}\n'
+    out = lower(ir, '// BPF_NAKED: p\n')
+    assert 'define void @p(ptr %ctx) naked section "tc" !dbg !1' in out

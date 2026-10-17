@@ -98,6 +98,9 @@ VALUED = {
     "__caps_unpriv": "test_caps_unpriv",
     # bpf-next 2026-08: the loader skips the program, printing the reason
     "__skip": "test_skip",
+    "__btf_path": "test_btf_path",
+    "__btf_func_path": "test_btf_func_path",
+    "__linear_size": "test_linear_size",
 }
 
 

@@ -387,7 +387,27 @@ Rust's unused hidden aggregate-return parameter, and emits LLVM's naked
 form. It rejects bodies containing generated instructions or real arguments.
 The assembly must include its own `exit` and supply every return register.
 Use `sym` operands for calls so definitions survive optimization and receive
-relocations. `aggregate_ret_target.rs` is the minimal example.
+relocations. `aggregate_ret_target.rs` is the minimal example. A naked
+function may declare the C's parameters (the BTF prototype keeps them)
+as long as the asm never names them.
+
+### Generated verifier_* translations
+
+Most `verifier_*.c` selftests are nothing but `__naked` functions, so
+`scripts/naked_gen.py <name>` writes the whole translation: it preprocesses
+the C file with the selftests' own clang flags, resolves every `"i"`
+operand the way clang does (by compiling a probe: a helper id becomes
+`call 1`, a map, subprogram or kfunc address `sym`, a constant or an
+encoded instruction its value), suffixes the `%=` labels with the
+function name, and takes maps, globals, kfunc externs, the license and
+the test_tags! from the C object's BTF and ELF, verbatim. Regenerate
+such a file rather than editing it; `scripts/naked_gen.py --survey` says
+which files the generator cannot do (a C body, a kfunc variable, ...)
+and why. The `naked-verbatim` class of `scripts/translint.py`
+(`scripts/naked_verbatim.py`) then checks every `// BPF_NAKED:` function
+of the built object against the C object instruction by instruction,
+relocation symbols included, which is the real assertion for a verbatim
+translation: the prover only sees the programs that load.
 
 C's `__kptr` (and `__kptr_untrusted`, `__percpu_kptr`, `__uptr`) is a BTF
 type tag on a pointer, which rustc cannot emit. Declare the field as a

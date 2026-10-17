@@ -101,6 +101,7 @@ come from rust-bpf. This repo adds:
 | [`codegen/`](codegen) | a comparison of what rustc and clang emit for the proved-equivalent pairs |
 | [`collections/`](collections) | Rust `alloc` collections running in BPF on an arena allocator |
 | [`scripts/translint.py`](scripts/translint.py) | a linter for known translation mistakes |
+| [`scripts/naked_gen.py`](scripts/naked_gen.py) | generates the translation of a `verifier_*` selftest written as `__naked` BPF asm, verbatim |
 
 The prover and the runtime gate catch different bugs, and neither replaces
 the other. The prover compares program behaviour and has found integer

@@ -25,6 +25,11 @@ Classes checked (suppress per file with `// translint: allow(<class>)`):
                  `exception_callback:` change what the kernel accepts, so a
                  missing one is an ERROR; `arg:*` and free-form tags are a
                  WARN. Rust emits them with rust-bpf's #[btf_tag].
+  naked-verbatim [ERROR] a `// BPF_NAKED:` function (raw asm carried over
+                 from a `__naked` C program, scripts/naked_abi.py) must
+                 compile to the C object's instruction stream in the C
+                 object's section: the same bytes, with relocations
+                 against the same symbols (scripts/naked_verbatim.py).
   private-layout [ERROR] a C `private(X)` section (`.data.X` / `.bss.X`,
                  __hidden statics) must hold the same variables at the same
                  offsets in the Rust object. The verifier names a lock by
@@ -72,6 +77,7 @@ C_OBJ_DIR = paths.SELFTESTS_OUTPUT
 sys.path.insert(0, os.path.join(REPO, "scripts"))
 from bpfelf import BpfElf, SHF_EXECINSTR
 import btf_test_tags
+import naked_verbatim
 
 SIZES = {"u8": 1, "i8": 1, "u16": 2, "i16": 2, "u32": 4, "i32": 4,
          "u64": 8, "i64": 8, "usize": 8, "isize": 8, "bool": 1, "f32": 4,
@@ -427,6 +433,25 @@ def check_private_layout(name):
                             f"another size, or more aligned than C's)")
 
 
+def check_naked_verbatim(name, rs_raw):
+    names = re.findall(r"^// BPF_NAKED: ([A-Za-z_][A-Za-z_0-9]*)\s*$", rs_raw, re.M)
+    if not names:
+        return
+    c_obj = os.path.join(C_OBJ_DIR, f"{name}.bpf.o")
+    if os.path.exists(c_obj + ".corig"):
+        c_obj = c_obj + ".corig"
+    r_obj = os.path.join(REPO, "bld", f"{name}.bpf.o")
+    if not os.path.exists(c_obj) or not os.path.exists(r_obj):
+        return
+    try:
+        c_elf, r_elf = BpfElf(c_obj), BpfElf(r_obj)
+    except Exception:
+        return
+    for fn in names:
+        for d in naked_verbatim.compare(c_elf, r_elf, fn):
+            yield "ERROR", d
+
+
 def lint(name):
     rs_path = os.path.join(REPO, "progs", f"{name}.rs")
     c_path = os.path.join(C_PROGS, f"{name}.c")
@@ -452,6 +477,8 @@ def lint(name):
         emit(level, "decl-tags", text)
     for level, text in check_private_layout(name):
         emit(level, "private-layout", text)
+    for level, text in check_naked_verbatim(name, rs_raw):
+        emit(level, "naked-verbatim", text)
 
     # bool-global: only an error when the BPF side BRANCHES on it (reads);
     # write-only status flags (data.skip = true) store 1 identically in
@@ -477,6 +504,8 @@ def lint(name):
         ctx = rs.splitlines()[line - 1].strip()
         if re.search(r":\s*u(32|64)\b|as u(32|64)\b|wrapping_", ctx):
             continue
+        if rs[rs.rfind("\n", 0, m.start()) + 1:m.start()].count('"') % 2:
+            continue                      # inside a string: raw asm text
         emit("WARN", "big-hex",
              f"line {line}: literal {m.group(0)} doesn't fit i32 — C types "
              f"it UNSIGNED int; arithmetic wraps at 32 bits ({ctx[:60]})")

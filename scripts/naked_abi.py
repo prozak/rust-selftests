@@ -26,7 +26,7 @@ def lower(ir, source):
                         and not line.lstrip().startswith('#dbg_')]
         if len(instructions) != 2 or 'asm sideeffect' not in instructions[0] or not re.match(r'(ret |unreachable)', instructions[1]):
             raise ValueError(f'{name}: raw body must contain only asm and a terminator: {instructions}')
-        # No operand may use the sret pointer. A raw function has no Rust args.
+        # No operand may use the sret pointer (a raw function cannot name it).
         # The dropped sret type becomes the LLVM return type: since LLVM 23
         # (29b36a16f111) BTF voids the prototype's return when the IR function
         # returns void, and the debug signature's aggregate return is the ABI
@@ -35,8 +35,12 @@ def lower(ir, source):
         if sret:
             header = header[:sret.start()] + '@' + name + '()' + header[sret.end():]
             header = header.replace('void @' + name + '(', sret.group(1) + ' @' + name + '(', 1)
-        if not re.search(r'@' + name + r'\(\)', header):
-            raise ValueError(f'{name}: raw function must have no arguments')
+        # Parameters stay in the signature (the BTF prototype mirrors the
+        # C's), but the asm cannot name them: no operand may use one.
+        params = re.search(r'@' + name + r'\((.*?)\)', header).group(1)
+        for p in re.findall(r'%[\w.]+', params):
+            if re.search(re.escape(p) + r'\b', instructions[0]):
+                raise ValueError(f'{name}: raw body uses parameter {p}')
         header = re.sub(r'\s+#\d+', '', header)
         header = re.sub(r'\s+(section|!dbg)', r' naked \1', header, count=1)
         # Remove debug intrinsics referencing the eliminated sret argument.

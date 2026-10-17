@@ -22,8 +22,8 @@
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::ctx::__sk_buff;
 use bpf_rs_core::helpers::{
-    self, bpf_copy_from_user, bpf_map_lookup_elem, bpf_spin_lock, bpf_spin_unlock,
-    bpf_this_cpu_ptr, bpf_trace_printk,
+    self, bpf_copy_from_user, bpf_for_each_map_elem, bpf_map_lookup_elem, bpf_spin_lock,
+    bpf_spin_unlock, bpf_this_cpu_ptr, bpf_trace_printk,
 };
 use bpf_rs_core::maps::{self, BpfMap};
 use bpf_rs_core::vload;
@@ -47,6 +47,9 @@ type ArrayMap = BpfMap<i32, foo, { maps::ARRAY }, 1>;
 #[link_section = ".maps"]
 #[no_mangle]
 static array_map: ArrayMap = BpfMap::new();
+#[link_section = ".maps"]
+#[no_mangle]
+static array_map_b: ArrayMap = BpfMap::new();
 
 // enum bpf_map_type: BPF_MAP_TYPE_ARRAY_OF_MAPS (not exported by
 // bpf_rs_core::maps, which only covers the constants its existing
@@ -57,10 +60,10 @@ const ARRAY_OF_MAPS: usize = 12;
 #[repr(C)]
 struct map_of_maps_def {
     r#type: *const [i32; ARRAY_OF_MAPS],
-    max_entries: *const [i32; 1],
+    max_entries: *const [i32; 2],
     key: *const i32,
     value: *const i32,
-    values: [*const ArrayMap; 1],
+    values: [*const ArrayMap; 2],
 }
 unsafe impl Sync for map_of_maps_def {}
 
@@ -71,8 +74,17 @@ static map_of_maps: map_of_maps_def = map_of_maps_def {
     max_entries: core::ptr::null(),
     key: core::ptr::null(),
     value: core::ptr::null(),
-    values: [&array_map],
+    values: [&array_map, &array_map_b],
 };
+
+#[link_section = ".maps"]
+#[no_mangle]
+static callback_array_map: BpfMap<i32, foo, { maps::ARRAY }, 2> = BpfMap::new();
+
+#[repr(C)]
+struct callback_ctx {
+    value: *mut foo,
+}
 
 // C: `static struct bpf_spin_lock lockA/lockB SEC(".data.A"/".data.B");` --
 // file-scope `static`, never exported. Per
@@ -119,6 +131,80 @@ fn new_foo() -> *mut foo {
     let mut p = core::ptr::addr_of!(FOO_LAYOUT_PROBE) as *mut foo;
     helpers::sink(&mut p);
     f
+}
+
+extern "C" fn lock_different_value(
+    _map: *mut BpfMap<i32, foo, { maps::ARRAY }, 2>,
+    _key: *mut i32,
+    value: *mut foo,
+    ctx: *mut callback_ctx,
+) -> i64 {
+    unsafe {
+        bpf_spin_lock(&mut (*value).lock as *mut bpf_spin_lock as *mut c_void);
+        bpf_spin_unlock(&mut (*(*ctx).value).lock as *mut bpf_spin_lock as *mut c_void);
+    }
+    0
+}
+
+extern "C" fn nest_lock_different_value(
+    _map: *mut BpfMap<i32, foo, { maps::ARRAY }, 2>,
+    _key: *mut i32,
+    value: *mut foo,
+    _data: *mut c_void,
+) -> i64 {
+    let mut ctx = callback_ctx { value };
+    bpf_for_each_map_elem(&callback_array_map, lock_different_value, &mut ctx, 0);
+    0
+}
+
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn callback_value_lock_identity(_ctx: *mut c_void) -> i32 {
+    bpf_for_each_map_elem(
+        &callback_array_map,
+        nest_lock_different_value,
+        core::ptr::null_mut::<c_void>(),
+        0,
+    );
+    0
+}
+
+extern "C" fn nest_lock_different_inner_value(
+    _map: *mut BpfMap<i32, foo, { maps::ARRAY }, 2>,
+    _key: *mut i32,
+    value: *mut foo,
+    _data: *mut c_void,
+) -> i64 {
+    let mut ctx = callback_ctx { value };
+    let inner_key: i32 = 1;
+    let inner_map = bpf_map_lookup_elem(&map_of_maps, &inner_key);
+    if inner_map.is_null() {
+        return 0;
+    }
+    bpf_for_each_map_elem(
+        inner_map as *const BpfMap<i32, foo, { maps::ARRAY }, 2>,
+        lock_different_value,
+        &mut ctx,
+        0,
+    );
+    0
+}
+
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn callback_inner_map_value_lock_identity(_ctx: *mut c_void) -> i32 {
+    let inner_key: i32 = 0;
+    let inner_map = bpf_map_lookup_elem(&map_of_maps, &inner_key);
+    if inner_map.is_null() {
+        return 0;
+    }
+    bpf_for_each_map_elem(
+        inner_map as *const BpfMap<i32, foo, { maps::ARRAY }, 2>,
+        nest_lock_different_inner_value,
+        core::ptr::null_mut::<c_void>(),
+        0,
+    );
+    0
 }
 
 #[link_section = "?tc"]

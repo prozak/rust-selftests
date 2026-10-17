@@ -110,40 +110,51 @@ its own.
 
 ## Status
 
-From `make ci-nightly` on 2026-10-16 (the sources of commit `0894132`), on
-bpf-next `645f5fcf7a55` with no patches, pahole v1.32. The per-object tables
-are [`qemu/gate/baseline.tsv`](qemu/gate/baseline.tsv) and
-[`equiv/results/baseline.tsv`](equiv/results/baseline.tsv); every verdict of
-the run matches them.
+From `make ci-nightly` on 2026-10-17 (`nightly/20261017-llvm23`, the sources
+of the LLVM 23 move) on bpf-next `645f5fcf7a55` with no patches, pahole
+v1.32, LLVM 23.1.4 (release/23.x plus `patches/llvm/`) and rustc 1.99.1;
+the gate numbers are from the full gate run right after it, when the last
+harness fix had landed. The per-object tables are
+[`qemu/gate/baseline.tsv`](qemu/gate/baseline.tsv) and
+[`equiv/results/baseline.tsv`](equiv/results/baseline.tsv).
 
-**Runtime gate** (637 objects, eight 4-CPU KVM guests at a time, 27 minutes):
+**Runtime gate** (638 objects, eight 4-CPU KVM guests at a time, 27 minutes):
 
 | | objects |
 |---|---:|
-| PASS | 627 |
+| PASS | 628 |
 | FAIL | 0 |
 | NO-ORACLE | 10 |
 
 The ten NO-ORACLE objects have no `prog_tests` consumer, or only one listed
 in [`scripts/known-bad-tests`](scripts/known-bad-tests) (`fs_kfuncs`, whose
-xattr subtests fail with the C objects on this virtiofs root).
+xattr subtests fail with the C objects on this virtiofs root). Three more
+entries there name tests that fail with the pristine C objects of a clang 23
+build at this pin (`verifier_stack_arg`, a `stack_arg_precision` subtest, an
+`exceptions` subtest); the list now also reaches test_progs as its `-d`
+denylist.
 
-**Proof sweep** (same 637 objects, 180 s each):
+**Proof sweep** (same 638 objects, 180 s each):
 
 | | objects |
 |---|---:|
-| EQUIV — every program proved equivalent to its C original | 449 |
-| BAIL — the checker met something it does not model | 119 |
+| EQUIV — every program proved equivalent to its C original | 447 |
+| BAIL — the checker met something it does not model | 122 |
 | TIMEOUT | 39 |
 | UNKNOWN | 16 |
 | NOPROGS — the object has no programs | 13 |
 | INEQUIV | 1 |
 
-This is the first full run on the `645f5fcf` pin (bpf-next as of
-2026-10-16, up from `3ccdb078` of 2026-09-04): 32 translations followed
-their changed C sources, and the counts match the last run on the old pin
-([docs/history/bpf-next-bump-plan-2026-10-16.md](docs/history/bpf-next-bump-plan-2026-10-16.md)
-has the drift, the method and the findings).
+This is the first run on LLVM 23 (from LLVM 22.1.8 / rustc 1.96.1). The C
+oracle moved with it (the selftests are built with the same clang), which
+switched on the `#if __clang_major__ >= 23` programs: stack arguments,
+aggregate kfunc returns, the real `stack_arg` tests. Against the last run
+on LLVM 22 the verdicts differ in four objects: `type_cast` is new (PASS,
+EQUIV), and `aggregate_ret_kfunc_arena`, `stack_arg`, `stack_arg_kfunc` went
+from EQUIV to BAIL because their programs are real now and the checker
+models neither aggregate returns in R0:R2 nor the `r11` stack-argument
+area. [docs/history/llvm23-move-2026-10-17.md](docs/history/llvm23-move-2026-10-17.md)
+has what the move broke and how each piece was fixed.
 
 The INEQUIV is `cpumask_success`. Its kfuncs return `bool`, and on x86-64
 only the low byte of that return is defined. clang masks the result to one
@@ -155,11 +166,6 @@ are not called directly (the source says where). The kernel's
 `bpf_list_empty()` does not return a clean value, so `refcounted_kptr.rs`
 masks its three list predicates by hand (its header explains). Until the
 build masks these returns, `make ci-local` fails on this object.
-
-Three of the EQUIV rows (`getsockname_unix_prog`, `getpeername_unix_prog`,
-`recvmsg_unix_prog`) prove only with a waiver: their C calls
-`bpf_core_cast` and the translations do not yet, because the faithful
-translation crashes LLVM (#49).
 
 ## Reproducing it
 

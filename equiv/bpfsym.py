@@ -2184,6 +2184,12 @@ class Executor:
                 cls = op & 7
                 what = f"{cursec}@{pc}"
 
+                if dst > 10 or src > 10:
+                    # r11: the stack-argument area of LLVM 23's >5-argument
+                    # calls (caller stores at r11-8k, callee loads at
+                    # r11+8k); not a register this executor models yet.
+                    raise Bail(f"stack-argument register r11 in {what}")
+
                 if op == 0x18:  # ld_imm64
                     if src not in (0,):
                         # pseudo-src set at .o stage is unusual; relocs carry meaning

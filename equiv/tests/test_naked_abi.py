@@ -20,12 +20,25 @@ start:
 !15 = !DIBasicType(name: "u128", size: 128, encoding: DW_ATE_unsigned)
 '''
     out = lower(ir, '// BPF_NAKED: pair\n')
-    assert 'define void @pair() naked !dbg !12' in out
+    # the dropped sret type is the LLVM return type: since LLVM 23 a void IR
+    # function gets a void BTF prototype whatever the debug signature says
+    assert 'define [16 x i8] @pair() naked !dbg !12' in out
     assert 'r0 = 1; r2 = 2; exit;' in out
     assert 'sret(' not in out
     assert 'ret void' not in out
     assert 'unreachable' in out
     assert out[out.index('!12 ='):] == ir[ir.index('!12 ='):]
+
+
+def test_internal_pair_return_keeps_linkage():
+    ir = '''define internal void @spair(ptr noalias sret([16 x i8]) align 16 %_0) #0 !dbg !12 {
+start:
+  call void asm sideeffect "r0 = 1; r2 = 2; exit;", ""()
+  ret void
+}
+'''
+    out = lower(ir, '// BPF_NAKED: spair\n')
+    assert 'define internal [16 x i8] @spair() naked !dbg !12' in out
 
 
 def test_section_and_unmarked_function_survive():

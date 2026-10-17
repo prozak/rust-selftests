@@ -27,7 +27,14 @@ def lower(ir, source):
         if len(instructions) != 2 or 'asm sideeffect' not in instructions[0] or not re.match(r'(ret |unreachable)', instructions[1]):
             raise ValueError(f'{name}: raw body must contain only asm and a terminator: {instructions}')
         # No operand may use the sret pointer. A raw function has no Rust args.
-        header = re.sub(r'@' + name + r'\(ptr [^\n]*?sret\([^)]*\)[^\n]*? %\w+\)', '@' + name + '()', header)
+        # The dropped sret type becomes the LLVM return type: since LLVM 23
+        # (29b36a16f111) BTF voids the prototype's return when the IR function
+        # returns void, and the debug signature's aggregate return is the ABI
+        # the asm implements.
+        sret = re.search(r'@' + name + r'\(ptr [^\n]*?sret\(([^)]*)\)[^\n]*? %\w+\)', header)
+        if sret:
+            header = header[:sret.start()] + '@' + name + '()' + header[sret.end():]
+            header = header.replace('void @' + name + '(', sret.group(1) + ' @' + name + '(', 1)
         if not re.search(r'@' + name + r'\(\)', header):
             raise ValueError(f'{name}: raw function must have no arguments')
         header = re.sub(r'\s+#\d+', '', header)

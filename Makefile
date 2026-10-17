@@ -240,9 +240,11 @@ $(RUSTBPF)/btf_tags.py:
 ORDER_SRCS := $(shell grep -l '^// BPF_PROGRAM_ORDER:' progs/*.rs)
 $(patsubst progs/%.rs,$(BLDDIR)/%.bpf.o,$(ORDER_SRCS)): scripts/program_order.py
 $(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc scripts/naked_abi.py scripts/btf_graph_types.py scripts/private_sections.py \
-		scripts/maps_section.py scripts/btf_rename.py scripts/btf_map_slots.py scripts/btf_fn_ptrs.py scripts/btf_test_tags.py scripts/btf_type_tags.py
+		scripts/maps_section.py scripts/btf_rename.py scripts/btf_map_slots.py scripts/btf_fn_ptrs.py scripts/btf_test_tags.py scripts/btf_type_tags.py \
+		scripts/stack_args.py
 	$(LLVM_DIS) $< -o $@.abi.ll
 	python3 scripts/naked_abi.py $@.abi.ll progs/$*.rs
+	python3 scripts/stack_args.py $@.abi.ll
 	python3 scripts/btf_graph_types.py $@.abi.ll
 	python3 scripts/private_sections.py $@.abi.ll $(SELFTESTS_OUTPUT)/$*.bpf.o
 	@if grep -q '^// BPF_PROGRAM_ORDER:' progs/$*.rs; then python3 scripts/program_order.py $@.abi.ll progs/$*.rs; fi

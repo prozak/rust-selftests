@@ -7,6 +7,7 @@
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::{
+    sink,
     bpf_ktime_get_ns, bpf_map_lookup_elem, bpf_map_update_elem, bpf_xdp_adjust_head,
 };
 use bpf_rs_core::maps::{self, BpfMap};
@@ -761,6 +762,13 @@ fn encap_v6(
     dst: &RealDefinition,
     pkt_bytes: u16,
 ) -> bool {
+    // Keep `pckt` a pointer argument: LLVM's argument promotion would split
+    // it into its two loaded fields, making six IR parameters. The sixth
+    // then travels as an LLVM 23 stack argument (r11) while the BTF
+    // prototype still says five, and the verifier rejects the r11 read.
+    let mut pckt_ptr = pckt as *const PacketDescription as *mut PacketDescription;
+    sink(&mut pckt_ptr);
+    let pckt: &PacketDescription = unsafe { &*pckt_ptr };
     if bpf_xdp_adjust_head(xdp as *mut xdp_md, -(core::mem::size_of::<Ipv6Hdr>() as i32)) != 0 {
         return false;
     }
@@ -826,6 +834,13 @@ fn encap_v4(
     dst: &RealDefinition,
     pkt_bytes: u16,
 ) -> bool {
+    // Keep `pckt` a pointer argument: LLVM's argument promotion would split
+    // it into its two loaded fields, making six IR parameters. The sixth
+    // then travels as an LLVM 23 stack argument (r11) while the BTF
+    // prototype still says five, and the verifier rejects the r11 read.
+    let mut pckt_ptr = pckt as *const PacketDescription as *mut PacketDescription;
+    sink(&mut pckt_ptr);
+    let pckt: &PacketDescription = unsafe { &*pckt_ptr };
     let mut ip_suffix = u16::from_be(unsafe { pckt.flow.ports.port16[0] }) as u32;
     ip_suffix <<= 15;
     ip_suffix ^= unsafe { pckt.flow.src.src };

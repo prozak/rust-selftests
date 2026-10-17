@@ -18,9 +18,11 @@
 
 // BTF_TYPE_ID: node_acquire_id local struct node_acquire
 // BTF_TYPE_ID: node_refcounted_id local struct node_refcounted
+// BTF_TYPE_ID: node_refcount_only_id local struct node_refcount_only
 
-use bpf_rs_core::helpers::{bpf_spin_lock, bpf_spin_unlock};
-use bpf_rs_core::{bpf_object, test_tags};
+use bpf_rs_core::helpers::{bpf_map_lookup_elem, bpf_spin_lock, bpf_spin_unlock};
+use bpf_rs_core::maps::{self, BpfMap};
+use bpf_rs_core::{bpf_object, btf_type_tags, test_tags};
 use btf_macros::btf_tag;
 use core::ffi::c_void;
 use core::ptr::addr_of_mut;
@@ -78,6 +80,60 @@ struct node_refcounted {
     refcount: bpf_refcount,
 }
 
+#[allow(non_camel_case_types)]
+#[repr(C)]
+struct node_refcount_only {
+    key: i64,
+    refcount: bpf_refcount,
+}
+
+#[allow(non_camel_case_types)]
+#[repr(C)]
+struct map_value_refcount_only {
+    node: *mut node_refcount_only,
+}
+
+#[allow(non_camel_case_types)]
+#[repr(C)]
+struct rcu_graph_node {
+    node: bpf_rb_node,
+    data: i64,
+}
+
+// struct rcu_graph_node *just_here_because_btf_bug;
+#[allow(non_upper_case_globals)]
+#[no_mangle]
+static mut just_here_because_btf_bug: *mut rcu_graph_node = core::ptr::null_mut();
+
+#[allow(non_camel_case_types)]
+#[repr(C)]
+struct map_value_rcu_graph {
+    node: *mut rcu_graph_node,
+}
+
+#[allow(non_upper_case_globals)]
+#[link_section = ".data.C"]
+static mut graph_lock: bpf_spin_lock = bpf_spin_lock { val: 0 };
+
+#[allow(non_upper_case_globals)]
+#[btf_tag(decl_tag = "contains:rcu_graph_node:node")]
+#[link_section = ".data.C"]
+static mut graph_root: bpf_rb_root = bpf_rb_root { __opaque: [0; 2] };
+
+#[link_section = ".maps"]
+#[no_mangle]
+static stashed_refcount_only: BpfMap<i32, map_value_refcount_only, { maps::ARRAY }, 1> =
+    BpfMap::new();
+
+#[link_section = ".maps"]
+#[no_mangle]
+static stashed_rcu_graph: BpfMap<i32, map_value_rcu_graph, { maps::ARRAY }, 1> = BpfMap::new();
+
+btf_type_tags! {
+    map_value_refcount_only.node: kptr;
+    map_value_rcu_graph.node: kptr;
+}
+
 #[allow(non_upper_case_globals)]
 #[link_section = ".data.A"]
 static mut glock: bpf_spin_lock = bpf_spin_lock { val: 0 };
@@ -99,6 +155,7 @@ static mut head: bpf_list_head = bpf_list_head { __opaque: [0; 2] };
 extern "C" {
     fn node_acquire_id() -> u64;
     fn node_refcounted_id() -> u64;
+    fn node_refcount_only_id() -> u64;
     fn bpf_obj_new(local_type_id: u64) -> *mut c_void;
     fn bpf_obj_drop(obj: *mut c_void);
     fn bpf_refcount_acquire(obj: *mut c_void) -> *mut c_void;
@@ -109,6 +166,7 @@ extern "C" {
     ) -> i32;
     fn bpf_list_push_front(head: *mut bpf_list_head, node: *mut bpf_list_node) -> i32;
     fn bpf_list_pop_front(head: *mut bpf_list_head) -> *mut bpf_list_node;
+    fn bpf_rbtree_remove(root: *mut bpf_rb_root, node: *mut bpf_rb_node) -> *mut bpf_rb_node;
     fn bpf_rcu_read_lock();
     fn bpf_rcu_read_unlock();
 }
@@ -256,13 +314,129 @@ extern "C" fn rbtree_fail_sleepable_lock_across_rcu(_ctx: *const c_void) -> i32 
     }
 }
 
+#[link_section = "?syscall"]
+#[no_mangle]
+extern "C" fn refcount_acquire_rcu_map_kptr_unchecked_drop(_ctx: *const c_void) -> i64 {
+    let idx: i32 = 0;
+    unsafe {
+        /* Force Clang to emit complete BTF for struct node_refcount_only. */
+        let tmp = bpf_obj_new(node_refcount_only_id()) as *mut node_refcount_only;
+        if tmp.is_null() {
+            return 3;
+        }
+        bpf_obj_drop(tmp.cast());
+
+        let mapval = bpf_map_lookup_elem(&stashed_refcount_only, &idx)
+            as *mut map_value_refcount_only;
+        if mapval.is_null() {
+            return 1;
+        }
+
+        bpf_rcu_read_lock();
+        let n = (*mapval).node;
+        if n.is_null() {
+            bpf_rcu_read_unlock();
+            return 2;
+        }
+        let m = bpf_refcount_acquire(n.cast()) as *mut node_refcount_only;
+        bpf_rcu_read_unlock();
+
+        bpf_obj_drop(m.cast());
+    }
+    0
+}
+
+#[link_section = "?syscall"]
+#[no_mangle]
+extern "C" fn rbtree_remove_after_rcu_unlock(_ctx: *const c_void) -> i64 {
+    let idx: i32 = 0;
+    unsafe {
+        let mapval = bpf_map_lookup_elem(&stashed_rcu_graph, &idx) as *mut map_value_rcu_graph;
+        if mapval.is_null() {
+            return 0;
+        }
+
+        bpf_rcu_read_lock();
+        let node = (*mapval).node;
+        if node.is_null() {
+            bpf_rcu_read_unlock();
+            return 0;
+        }
+        bpf_rcu_read_unlock();
+
+        bpf_spin_lock(addr_of_mut!(graph_lock));
+        let rb_node = bpf_rbtree_remove(addr_of_mut!(graph_root), addr_of_mut!((*node).node));
+        bpf_spin_unlock(addr_of_mut!(graph_lock));
+        if !rb_node.is_null() {
+            // container_of(rb_node, struct rcu_graph_node, node)
+            bpf_obj_drop(
+                (rb_node as *mut u8).sub(core::mem::offset_of!(rcu_graph_node, node)).cast(),
+            );
+        }
+    }
+    0
+}
+
+#[link_section = "?syscall"]
+#[no_mangle]
+extern "C" fn refcount_acquire_after_rcu_unlock(_ctx: *const c_void) -> i64 {
+    let idx: i32 = 0;
+    unsafe {
+        let mapval = bpf_map_lookup_elem(&stashed_refcount_only, &idx)
+            as *mut map_value_refcount_only;
+        if mapval.is_null() {
+            return 0;
+        }
+
+        bpf_rcu_read_lock();
+        let node = (*mapval).node;
+        if node.is_null() {
+            bpf_rcu_read_unlock();
+            return 0;
+        }
+        bpf_rcu_read_unlock();
+
+        let r#ref = bpf_refcount_acquire(node.cast()) as *mut node_refcount_only;
+        if !r#ref.is_null() {
+            bpf_obj_drop(r#ref.cast());
+        }
+    }
+    0
+}
+
+#[link_section = "?syscall"]
+#[no_mangle]
+extern "C" fn graph_kptr_after_spin_unlock(_ctx: *const c_void) -> i64 {
+    let idx: i32 = 0;
+    unsafe {
+        let mapval = bpf_map_lookup_elem(&stashed_rcu_graph, &idx) as *mut map_value_rcu_graph;
+        if mapval.is_null() {
+            return 0;
+        }
+
+        bpf_spin_lock(addr_of_mut!(graph_lock));
+        let node = (*mapval).node;
+        if node.is_null() {
+            bpf_spin_unlock(addr_of_mut!(graph_lock));
+            return 0;
+        }
+        bpf_spin_unlock(addr_of_mut!(graph_lock));
+
+        (*node).data
+    }
+}
+
 test_tags! {
     rbtree_refcounted_node_ref_escapes: __failure, __msg("Unreleased reference id=4 alloc_insn={{[0-9]+}}");
     refcount_acquire_maybe_null: __failure, __msg("Possibly NULL pointer passed to trusted R1"), __msg("requires a non-NULL value of type (void *)");
-    refcount_acquire_non_object: __failure, __msg("R1 is neither owning or non-owning ref"), __msg("expects a pointer to a BPF-managed refcounted object, but R1 is a context pointer");
+    refcount_acquire_non_object: __failure, __msg("R1 type=ctx expected=ptr_, rcu_ptr_, ptr_, rcu_ptr_"), __msg("type ctx, but this argument accepts ptr_, rcu_ptr_, ptr_, rcu_ptr_");
     rbtree_refcounted_node_ref_escapes_owning_input: __failure, __msg("Unreleased reference id=3 alloc_insn={{[0-9]+}}");
     refcount_acquire_list_node_offset: __failure, __msg("dereference of modified ptr_ ptr R1");
     rbtree_fail_sleepable_lock_across_rcu: __failure, __msg("function calls are not allowed while holding a lock");
+    refcount_acquire_rcu_map_kptr_unchecked_drop: __failure, __msg("Possibly NULL pointer passed to trusted R1");
+    rbtree_remove_after_rcu_unlock: __failure, __msg("R2 type=untrusted_ptr_ expected=ptr_, rcu_ptr_, ptr_, rcu_ptr_");
+    refcount_acquire_after_rcu_unlock: __failure, __msg("R1 type=untrusted_ptr_ expected=ptr_, rcu_ptr_, ptr_, rcu_ptr_");
+    graph_kptr_after_spin_unlock: __failure, __msg("invalid mem access 'scalar'");
 }
 
 bpf_object!("GPL");

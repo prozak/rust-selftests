@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #![no_std]
 #![no_main]
+#![feature(asm_experimental_arch)]
 
 // Direct translation of tools/testing/selftests/bpf/progs/timer.c,
 // bpf-rs-core idiom.
@@ -124,6 +125,17 @@ static abs_timer_pinned: ArrayMap1 = BpfMap::new();
 #[link_section = ".maps"]
 #[no_mangle]
 static race_array: ArrayMap1 = BpfMap::new();
+#[link_section = ".maps"]
+#[no_mangle]
+static loop_array: ArrayMap1 = BpfMap::new();
+
+#[no_mangle]
+static mut loop_sum: u64 = 0;
+/// number of times loop_cb() re-arms itself
+#[no_mangle]
+static mut loop_rearm: i32 = 0;
+#[no_mangle]
+static mut zero: u64 = 0;
 
 #[no_mangle]
 static mut bss_data: u64 = 0;
@@ -213,6 +225,79 @@ extern "C" fn timer_cb1(map: *mut ArrayMap2, key: *mut i32, timer: *mut bpf_time
         }
         unsafe { ok |= 1 };
     }
+    0
+}
+
+/// bpf_may_goto.h's `can_loop`: a real `may_goto` (BPF_JMP|BPF_JCOND,
+/// opcode 0xe5) instruction, hand-encoded as in arena_strsearch.rs's
+/// `should_break`; false once the verifier's loop budget runs out.
+#[inline(always)]
+unsafe fn can_loop() -> bool {
+    let mut r: u64 = 0;
+    core::arch::asm!(
+        "1:",
+        ".byte 0xe5",
+        ".byte 0",
+        ".long ((2f - 1b - 8) / 8) & 0xffff",
+        ".short 0",
+        "goto 3f",
+        "2:",
+        "{r} = 1",
+        "3:",
+        r = inout(reg) r,
+        options(nostack, preserves_flags),
+    );
+    r == 0
+}
+
+/// Static and not inlined, so the loop is walked in a frame below the
+/// callback's rather than in a separately verified global subprog.
+#[inline(never)]
+fn sum_to(n: u64) -> i32 {
+    let mut sum: u64 = 0;
+    let mut i = unsafe { zero };
+    while i < n && unsafe { can_loop() } {
+        sum = sum.wrapping_add(i);
+        i += 1;
+    }
+    sum as i32
+}
+
+/// Re-arms from a frame below the callback's, where the caller frame
+/// carries no async_entry_cnt of its own.
+#[inline(never)]
+fn rearm(val: *mut elem) {
+    unsafe {
+        if loop_rearm > 0 {
+            loop_rearm -= 1;
+            // set_callback is what starts another async callback entry
+            bpf_timer_set_callback(core::ptr::addr_of_mut!((*val).t), loop_cb);
+            bpf_timer_start(core::ptr::addr_of_mut!((*val).t), 0, 0);
+        }
+    }
+}
+
+/// Re-arms itself and reaches a bounded loop through a call.
+extern "C" fn loop_cb(_map: *mut ArrayMap1, _key: *mut i32, val: *mut elem) -> i64 {
+    unsafe { loop_sum = loop_sum.wrapping_add(sum_to(16) as i64 as u64) };
+    rearm(val);
+    0
+}
+
+/// BPF_PROG2(test_loop_rearm, int, a)
+#[link_section = "fentry/bpf_fentry_test1"]
+#[no_mangle]
+extern "C" fn test_loop_rearm(_ctx: *const u64) -> i32 {
+    let key: i32 = 0;
+
+    let timer = bpf_map_lookup_elem(&loop_array, &key) as *mut bpf_timer;
+    if timer.is_null() {
+        return 0;
+    }
+
+    bpf_timer_init(timer, &loop_array, CLOCK_MONOTONIC);
+    bpf_timer_set_callback(timer, loop_cb);
+    bpf_timer_start(timer, 0, 0);
     0
 }
 

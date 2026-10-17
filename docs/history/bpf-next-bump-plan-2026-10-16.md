@@ -265,3 +265,8 @@ Findings along the way:
 - Rust inline asm with explicit `r0`/`r1` operands and `.byte`-encoded
   `BPF_ATOMIC | BPF_FETCH` instructions reproduces the C's hand-written
   fetch_r0 instruction for instruction (arena_atomics).
+
+`make ci-nightly` on 0894132 (nightly/20261016-bump-645f5fcf, 51 min: proof
+1287 s, gate 1612 s with eight workers): the same histograms as above, no
+verdict change against the committed baselines; its status is FAIL on the
+cpumask_success INEQUIV, as every run since 2026-10-12.

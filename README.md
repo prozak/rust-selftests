@@ -110,39 +110,40 @@ its own.
 
 ## Status
 
-From `make ci-nightly` on 2026-10-16 (the sources of commit `e84698e`), on
-bpf-next `3ccdb0781382` with no patches. The per-object tables are
-[`qemu/gate/baseline.tsv`](qemu/gate/baseline.tsv) and
-[`equiv/results/baseline.tsv`](equiv/results/baseline.tsv).
+From `make ci-nightly` on 2026-10-16 (the sources of commit `0894132`), on
+bpf-next `645f5fcf7a55` with no patches, pahole v1.32. The per-object tables
+are [`qemu/gate/baseline.tsv`](qemu/gate/baseline.tsv) and
+[`equiv/results/baseline.tsv`](equiv/results/baseline.tsv); every verdict of
+the run matches them.
 
-**Runtime gate** (610 objects, eight 4-CPU KVM guests at a time, 31 minutes):
+**Runtime gate** (637 objects, eight 4-CPU KVM guests at a time, 27 minutes):
 
 | | objects |
 |---|---:|
-| PASS | 602 |
+| PASS | 627 |
 | FAIL | 0 |
-| NO-ORACLE | 8 |
+| NO-ORACLE | 10 |
 
-Nothing was re-run. 52 of the passing rows include skipped subtests. Every
-verdict matches the previous full run (earlier on 2026-10-16, four guests,
-58 minutes); the 13 new objects are the `__contains` family of #53
-(`rbtree`, `linked_list`, `refcounted_kptr` and their negatives).
+The ten NO-ORACLE objects have no `prog_tests` consumer, or only one listed
+in [`scripts/known-bad-tests`](scripts/known-bad-tests) (`fs_kfuncs`, whose
+xattr subtests fail with the C objects on this virtiofs root).
 
-**Proof sweep** (same 610 objects, 180 s each):
+**Proof sweep** (same 637 objects, 180 s each):
 
 | | objects |
 |---|---:|
-| EQUIV — every program proved equivalent to its C original | 430 |
-| BAIL — the checker met something it does not model (the 13 new objects all bail on the graph kfuncs) | 117 |
-| TIMEOUT | 36 |
-| UNKNOWN | 13 |
+| EQUIV — every program proved equivalent to its C original | 449 |
+| BAIL — the checker met something it does not model | 119 |
+| TIMEOUT | 39 |
+| UNKNOWN | 16 |
 | NOPROGS — the object has no programs | 13 |
 | INEQUIV | 1 |
 
-Five of the EQUIV rows are new since the checker fills `__kconfig` externs
-(`CONFIG_HZ`, `CONFIG_NR_CPUS`, ...) from the pinned kernel's `.config` as
-libbpf does; two objects that used to bail on them (`arena_spin_lock`,
-`bpf_cubic`) now time out instead.
+This is the first full run on the `645f5fcf` pin (bpf-next as of
+2026-10-16, up from `3ccdb078` of 2026-09-04): 32 translations followed
+their changed C sources, and the counts match the last run on the old pin
+([docs/history/bpf-next-bump-plan-2026-10-16.md](docs/history/bpf-next-bump-plan-2026-10-16.md)
+has the drift, the method and the findings).
 
 The INEQUIV is `cpumask_success`. Its kfuncs return `bool`, and on x86-64
 only the low byte of that return is defined. clang masks the result to one

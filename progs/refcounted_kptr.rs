@@ -31,6 +31,7 @@
 
 // BTF_TYPE_ID: node_data_id local struct node_data
 // BTF_TYPE_ID: node_acquire_id local struct node_acquire
+// BTF_TYPE_ID: node_refcount_only_id local struct node_refcount_only
 
 use bpf_rs_core::helpers::{
     bpf_kptr_xchg, bpf_map_lookup_elem, bpf_map_lookup_percpu_elem, bpf_probe_read_kernel,
@@ -100,6 +101,24 @@ static stashed_nodes: BpfMap<i32, map_value, { maps::ARRAY }, 2> = BpfMap::new()
 
 #[allow(non_camel_case_types)]
 #[repr(C)]
+struct node_refcount_only {
+    key: i64,
+    refcount: bpf_refcount,
+}
+
+#[allow(non_camel_case_types)]
+#[repr(C)]
+struct map_value_refcount_only {
+    node: *mut node_refcount_only,
+}
+
+#[link_section = ".maps"]
+#[no_mangle]
+static stashed_refcount_only: BpfMap<i32, map_value_refcount_only, { maps::ARRAY }, 1> =
+    BpfMap::new();
+
+#[allow(non_camel_case_types)]
+#[repr(C)]
 struct node_acquire {
     key: i64,
     data: i64,
@@ -146,6 +165,7 @@ static mut broot: bpf_rb_root = bpf_rb_root { __opaque: [0; 2] };
 extern "C" {
     fn node_data_id() -> u64;
     fn node_acquire_id() -> u64;
+    fn node_refcount_only_id() -> u64;
     fn bpf_obj_new(local_type_id: u64) -> *mut c_void;
     fn bpf_obj_drop(obj: *mut c_void);
     fn bpf_refcount_acquire(obj: *mut c_void) -> *mut c_void;
@@ -1280,6 +1300,51 @@ extern "C" fn check_percpu_hash_refcount(_ctx: *const c_void) -> i32 {
 
 btf_type_tags! {
     map_value.node: kptr;
+    map_value_refcount_only.node: kptr;
+}
+
+#[link_section = "tc"]
+#[no_mangle]
+extern "C" fn refcount_acquire_owning_input_no_null_check(_ctx: *const c_void) -> i64 {
+    unsafe {
+        let n = bpf_obj_new(node_refcount_only_id()) as *mut node_refcount_only;
+        if n.is_null() {
+            return 1;
+        }
+
+        let m = bpf_refcount_acquire(n.cast()) as *mut node_refcount_only;
+        bpf_obj_drop(m.cast());
+        bpf_obj_drop(n.cast());
+    }
+    0
+}
+
+#[link_section = "?syscall"]
+#[no_mangle]
+extern "C" fn refcount_acquire_rcu_map_kptr_null_checked(_ctx: *const c_void) -> i64 {
+    let idx: i32 = 0;
+    let mapval =
+        bpf_map_lookup_elem(&stashed_refcount_only, &idx) as *mut map_value_refcount_only;
+    if mapval.is_null() {
+        return 1;
+    }
+
+    unsafe {
+        bpf_rcu_read_lock();
+        let n = (*mapval).node;
+        if n.is_null() {
+            bpf_rcu_read_unlock();
+            return 2;
+        }
+        let m = bpf_refcount_acquire(n.cast()) as *mut node_refcount_only;
+        bpf_rcu_read_unlock();
+
+        if m.is_null() {
+            return 3;
+        }
+        bpf_obj_drop(m.cast());
+    }
+    0
 }
 
 test_tags! {
@@ -1311,6 +1376,8 @@ test_tags! {
     rbtree_refcounted_node_ref_escapes_owning_input: __success;
     rbtree_sleepable_rcu: __success;
     rbtree_sleepable_rcu_no_explicit_rcu_lock: __success;
+    refcount_acquire_owning_input_no_null_check: __success;
+    refcount_acquire_rcu_map_kptr_null_checked: __success;
 }
 
 bpf_object!("GPL");

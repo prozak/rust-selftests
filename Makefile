@@ -153,9 +153,13 @@ $(BLDDIR)/libbpf_rs_core.rlib: $(wildcard bpf-rs-core/src/*.rs) $(DEPDIR)/libbtf
 # --- Rust -> LLVM bitcode ---
 $(BLDDIR)/ksock_lsm.bc $(BLDDIR)/ksock_wq.bc: progs/common/ksock.rs
 $(BLDDIR)/arena_kfunc.bc $(BLDDIR)/arena_kfunc_jit.bc $(BLDDIR)/struct_ops_arena.bc: progs/common/arena.rs
+# `// RUSTC_OPT_LEVEL: <0-3|s|z>` in a translation overrides OPT_LEVEL for
+# that one object (the later -C opt-level wins): for a loop whose verifier
+# cost depends on the exact code shape (pyperf600_nounroll).
 $(BLDDIR)/%.bc: progs/%.rs $(BLDDIR)/libbpf_rs_core.rlib
 	@mkdir -p $(BLDDIR)
 	$(RUSTFLAGS_ENV) $(RUSTC) --edition 2021 --crate-type rlib $(RUSTC_COMMON) \
+		$$(sed -n 's|^// RUSTC_OPT_LEVEL: \([0-3sz]\)\s*$$|-C opt-level=\1|p' progs/$*.rs) \
 		--sysroot=/dev/null -L$(DEPDIR) \
 		--extern btf=$(DEPDIR)/libbtf.rlib \
 		--extern btf_macros=$(BTF_MACROS) \

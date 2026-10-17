@@ -145,11 +145,18 @@ for t in "${TESTS[@]}"; do
 done
 # Subtract tests known to fail with pristine C objects (kernel limits /
 # environment) so bundled always-broken tests can't fail a translation.
-DENY="$(dirname "${BASH_SOURCE[0]}")/known-bad-tests"
-if [ -f "${DENY}" ]; then
+# known-bad-tests: exact test names leave the -t list (an object whose every
+# consumer is denied has no oracle), and every entry - a test name or
+# test/subtest - also goes to test_progs as its -d glob denylist, which
+# matches whole names: a -t name is a substring match and can pull a denied
+# test back in (stack_arg selects verifier_stack_arg).
+DENY_FILE="$(dirname "${BASH_SOURCE[0]}")/known-bad-tests"
+DENY=""
+if [ -f "${DENY_FILE}" ]; then
+    DENY="$(grep -v '^#' "${DENY_FILE}" | grep -v '^[[:space:]]*$' | paste -sd, -)"
     KEPT=()
     for n in "${EXPANDED[@]}"; do
-        grep -qxF "${n}" <(grep -v '^#' "${DENY}") || KEPT+=("${n}")
+        grep -qxF "${n}" <(grep -v '^#' "${DENY_FILE}") || KEPT+=("${n}")
     done
     [ "${#KEPT[@]}" -lt "${#EXPANDED[@]}" ] && \
         echo "[swap] denylisted: $(( ${#EXPANDED[@]} - ${#KEPT[@]} )) test(s)"
@@ -169,4 +176,4 @@ FILTER="$(IFS=,; echo "${TESTS[*]}")"
 TEST_PROGS="${OUT}/test_progs" \
 SELFTESTS_OUTPUT="${OUT}" \
 UML_INSTALL_DIR="${UML_INSTALL_DIR:-}" \
-    "${TEST_RUNNER}" -t "${FILTER}"
+    "${TEST_RUNNER}" -t "${FILTER}" ${DENY:+-d "${DENY}"}

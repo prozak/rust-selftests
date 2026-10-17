@@ -1,5 +1,5 @@
 #!/bin/bash
-# qemu-test-progs -t <comma-separated-tests>
+# qemu-test-progs -t <comma-separated-tests> [-d <comma-separated-denylist>]
 #
 # Test runner of the QEMU flavor (counterpart of uml-veristat's
 # uml-test-progs, which serves FLAVOR=uml): run the
@@ -27,10 +27,12 @@
 set -uo pipefail
 
 FILTER=""
-while getopts "t:" opt; do
+DENY=""
+while getopts "t:d:" opt; do
     case "$opt" in
         t) FILTER="$OPTARG" ;;
-        *) echo "usage: $0 -t <tests>" >&2; exit 2 ;;
+        d) DENY="$OPTARG" ;;
+        *) echo "usage: $0 -t <tests> [-d <denylist>]" >&2; exit 2 ;;
     esac
 done
 
@@ -69,11 +71,20 @@ exec 3<&-
 # the shared, writable guest cwd.
 # Under GATE_UPPER the file goes into the worker's layer: the shared tree is
 # read-only to the gate.
-TEST_ARG="-t '${FILTER}'"
-if [ "${#FILTER}" -gt 512 ]; then
-    tr ',' '\n' <<< "${FILTER}" > "${GATE_UPPER:-${OUT}}/.test-filter"
-    TEST_ARG="-t @.test-filter"
-    echo "[qemu] filter is ${#FILTER} chars — passed via .test-filter" >&2
+# Always a file: the gate's overlay prelude, vng's init path and the -d
+# argument leave only a few hundred bytes of the 2048-byte command line,
+# and a 200-char filter still truncated it (timer, timer_interrupt,
+# xdp_dummy lost their init path and panicked).
+tr ',' '\n' <<< "${FILTER}" > "${GATE_UPPER:-${OUT}}/.test-filter"
+TEST_ARG="-t @.test-filter"
+# -d is test_progs's glob denylist: whole-name matches (test or
+# test/subtest), unlike -t's substring matches, so a denied test stays out
+# even when a -t name is a substring of it (stack_arg vs verifier_stack_arg).
+# Always a file: subtest names carry spaces and '>' that do not survive the
+# kernel command line (the guest panics on a mangled init path).
+if [ -n "${DENY}" ]; then
+    tr ',' '\n' <<< "${DENY}" > "${GATE_UPPER:-${OUT}}/.test-deny"
+    TEST_ARG="${TEST_ARG} -d @.test-deny"
 fi
 
 # GATE_UPPER: rebuild the worker's view in the guest before running. 9p

@@ -56,6 +56,7 @@ unshare -Urm bash -c '
 [ -s "${W}/filter" ] || { echo "gate-overlay: no test filter recorded" >&2; exit 1; }
 
 # 2. run the guest on the same two-layer view
-FILTER="$(cat "${W}/filter")"
+FILTER="$(sed -n 1p "${W}/filter")"
+DENY="$(sed -n 2p "${W}/filter")"
 GATE_UPPER="${W}/upper" SELFTESTS_OUTPUT="${OUT}" \
-    "${HERE}/scripts/qemu-test-progs" -t "${FILTER}"
+    "${HERE}/scripts/qemu-test-progs" -t "${FILTER}" ${DENY:+-d "${DENY}"}

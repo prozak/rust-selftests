@@ -1,8 +1,10 @@
 # Registered test names that fail with PRISTINE C objects in this
 # harness (kernel limits or environment), independent of any translation.
 # swap-and-test.sh subtracts these from the -t filter so bundled
-# always-broken tests cannot fail otherwise-correct translations.
-# One name per line; '#' comments.
+# always-broken tests cannot fail otherwise-correct translations, and
+# passes every entry to test_progs -d (whole-name glob match, so a -t
+# substring cannot pull a denied test back in). One entry per line, a test
+# name or test/subtest; '#' comments.
 
 # E2BIG / jump-sequence-too-complex at verification in the pinned kernel,
 # both UML and QEMU flavors (checked with the unmodified C object).
@@ -13,3 +15,26 @@ verif_scale_pyperf600
 # which has no security xattrs, so getxattr returns -1 for the pristine C
 # object as well (test_fsverity, test_get_xattr, test_set_remove_xattr).
 fs_kfuncs
+
+# verifier_stack_arg exists only in a clang >= 23 build of the selftests
+# (__BPF_FEATURE_STACK_ARGUMENT). At kernel pin 645f5fcf its subtest
+# "stack_arg: pruning with different stack arg types" fails on the pristine
+# C object: the verifier explores the branches in the other order, so the
+# log says "arg JOIN insn 8 -> 10 ... _ + fp0-8" where the test expects
+# "insn 9 -> 10 ... fp0-8 + _". The test is bundled into prog_tests/
+# verifier.c, which consumes many translated objects.
+verifier_stack_arg
+
+# stack_arg_precision (clang >= 23 only, selected by substring from the
+# stack_arg* translations): at pin 645f5fcf the pristine C object's
+# "precision backtracking across bpf2bpf call for kfunc" subtest expects
+# "mark_precise: frame0: parent state regs= stack=:  R1=1 R2=2 R3=3 R4=4
+# R5=5 R10=fp0", which this verifier does not print.
+stack_arg_precision/stack_arg: precision backtracking across bpf2bpf call for kfunc
+
+# exceptions: with the clang 23 oracle, attaching exceptions_ext's
+# `extension` to exceptions.bpf.o's global_subprog fails on the pristine C
+# objects ("subprog() is not a global function": the kernel at 645f5fcf
+# resolves the attach target to the static subprog of that object). Both
+# subtests of this name go (the first, which expects -EINVAL, passes).
+exceptions/non-throwing extension -> non-throwing subprog

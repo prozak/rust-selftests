@@ -1,10 +1,20 @@
 #!/bin/bash
-# gate-record-filter -t <tests>
+# gate-record-filter -t <tests> [-d <denylist>]
 #
 # TEST_RUNNER for the build half of gate-overlay.sh: instead of booting a
 # guest (impossible inside the user namespace), write the -t filter that
-# swap-and-test.sh computed to $GATE_FILTER_OUT.
+# swap-and-test.sh computed to $GATE_FILTER_OUT (line 1) and its -d
+# denylist (line 2, possibly empty).
 set -euo pipefail
 : "${GATE_FILTER_OUT:?}"
-[ "${1:-}" = -t ] && [ -n "${2:-}" ] || { echo "usage: $0 -t <tests>" >&2; exit 2; }
-printf '%s\n' "$2" > "${GATE_FILTER_OUT}"
+FILTER=""
+DENY=""
+while getopts "t:d:" opt; do
+    case "$opt" in
+        t) FILTER="$OPTARG" ;;
+        d) DENY="$OPTARG" ;;
+        *) echo "usage: $0 -t <tests> [-d <denylist>]" >&2; exit 2 ;;
+    esac
+done
+[ -n "${FILTER}" ] || { echo "usage: $0 -t <tests> [-d <denylist>]" >&2; exit 2; }
+printf '%s\n%s\n' "${FILTER}" "${DENY}" > "${GATE_FILTER_OUT}"

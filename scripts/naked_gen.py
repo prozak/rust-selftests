@@ -539,6 +539,7 @@ class RustTypes:
     def __init__(self, btf):
         self.btf = btf
         self.defs, self.done, self.failed, self.packed = [], set(), {}, set()
+        self.opaque = set()
 
     def rust(self, tid):
         btf = self.btf
@@ -556,7 +557,23 @@ class RustTypes:
             return {4: "f32", 8: "f64"}.get(t.size) or self.fail(t)
         if t.kind == K_PTR:
             p = btf.types[btf.strip(t.size)]
-            if p.kind in (K_INT, K_ARRAY, K_FLOAT) or (p.kind in (K_STRUCT, K_UNION) and p.name):
+            if p.kind in (K_STRUCT, K_UNION) and p.name:
+                try:
+                    return "*mut " + self.rust(t.size)
+                except Unsupported:
+                    # a kernel struct the Rust cannot spell: an opaque stand-in
+                    # of the same name (a kptr is classified by that name)
+                    if p.name not in self.opaque:
+                        self.opaque.add(p.name)
+                        kw = "union" if p.kind == K_UNION else "struct"
+                        # a #[btf] (CO-RE) view, as lru_bug.rs / bpf_iter_tcp4.rs
+                        # declare theirs: a plain struct only pointed at
+                        # reaches BTF as a FWD, which a kptr may not be
+                        self.defs.append("/// An opaque stand-in for the kernel's: only pointed at.\n"
+                                         "#[allow(non_camel_case_types)]\n#[btf]\n"
+                                         f"{kw} {p.name} {{}}")
+                    return "*mut " + p.name
+            if p.kind in (K_INT, K_ARRAY, K_FLOAT):
                 return "*mut " + self.rust(t.size)
             if p.kind == K_FUNC_PROTO:
                 return self.fn_pointer(btf.strip(t.size))
@@ -1497,7 +1514,7 @@ class Generator:
             uses.append("test_tags")
         if self.obj.arg_tags():
             uses.append("arg_tags")
-        if any(st in {d.split("\n")[3].split()[1] for d in self.obj.types.defs}
+        if any(st in {re.search(r"^(?:struct|union|enum) (\w+)", d, re.M).group(1) for d in self.obj.types.defs}
                for st, _m, _t in self.obj.type_tags()):
             uses.append("btf_type_tags")
         # rustc emits functions sorted by name; keep the C's source order
@@ -1525,6 +1542,8 @@ class Generator:
         if hand and not (self.needs_cvoid or any("c_void" in m for m in maps)
                          or any("c_void" in d for d in self.obj.types.defs)):
             out.append("#[allow(unused_imports)]")   # for the hand file's sake
+        if any("#[btf]" in d for d in self.obj.types.defs):
+            out.append("use btf_macros::btf;")
         if self.needs_cvoid or hand or any("c_void" in d for d in self.obj.types.defs) \
                 or any("c_void" in m for m in maps) or any("c_void" in g for g in globs):
             out.append("use core::ffi::c_void;")
@@ -1547,7 +1566,7 @@ class Generator:
                     "// translint: allow(padding)"]
         # `__kptr` and friends on struct members: btf_type_tags!
         # (scripts/btf_type_tags.py), for the types this file defines
-        defined = {d.split("\n")[3].split()[1] for d in self.obj.types.defs}
+        defined = {re.search(r"^(?:struct|union|enum) (\w+)", d, re.M).group(1) for d in self.obj.types.defs}
         type_tags = [(st, m, tag) for st, m, tag in self.obj.type_tags() if st in defined]
         if type_tags:
             out.append("btf_type_tags! {")
@@ -1564,7 +1583,12 @@ class Generator:
                 out.append(f"    {fn}: " + ", ".join(f'{i}: {rust_str(tag)}' for i, tag in sorted(tags)) + ";")
             out.append("}")
             out.append("")
+        # `// GEN_SKIP_TYPE: name` in the hand file: the hand file defines
+        # that type itself (a CO-RE view of a kernel struct, say)
+        skip = set(re.findall(r"^// GEN_SKIP_TYPE: (\w+)$", hand_text, re.M))
         for d in self.obj.types.defs:
+            if re.search(r"^(?:struct|union|enum) (\w+)", d, re.M).group(1) in skip:
+                continue
             out.append(d)
             out.append("")
         for m in maps:

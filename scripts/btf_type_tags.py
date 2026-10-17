@@ -55,6 +55,7 @@ BTF_KIND_PTR = 2
 BTF_KIND_ARRAY = 3
 BTF_KIND_STRUCT = 4
 BTF_KIND_UNION = 5
+BTF_KIND_FWD = 7
 BTF_KIND_VAR = 14
 BTF_KIND_TYPE_TAG = 18
 MODIFIERS = {8, 9, 10, 11, 18}   # VOLATILE CONST RESTRICT (TYPEDEF) TYPE_TAG
@@ -233,6 +234,16 @@ def inject(path, entries):
                 raise TagError(f"{obj}: {what} already carries a "
                                f"type tag {get_str(types[t - 1][2])!r}")
             t = types[t - 1][3]
+        if tag != "arena" and t and types[t - 1][1] == BTF_KIND_FWD:
+            # LLVM visits the pointee of an unannotated pointer only as a
+            # FWD (the C's __kptr annotation is what makes it chase the
+            # struct). The kernel wants a STRUCT and looks the kernel's up
+            # by name and kind, so an empty one of that name is enough:
+            # the FWD is rewritten in place, same size, kind STRUCT.
+            fpos, _fkind, fname, _fsz, _fv = types[t - 1]
+            info = struct.unpack_from("<I", head, fpos + 4)[0]
+            struct.pack_into("<I", head, fpos + 4, (info & 0x00FFFFFF) | (BTF_KIND_STRUCT << 24))
+            types[t - 1] = (fpos, BTF_KIND_STRUCT, fname, 0, 0)
         if tag != "arena" and (not t or types[t - 1][1] not in (BTF_KIND_STRUCT, BTF_KIND_UNION)):
             raise TagError(f"{obj}: {what} does not point at a "
                            "struct; the kernel only classifies struct kptrs")

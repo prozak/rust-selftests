@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #![no_std]
 #![no_main]
+#![feature(asm_experimental_arch)]
 
 // Direct translation of tools/testing/selftests/bpf/progs/rbtree_fail.c
 // (bpf-rs-core idiom).
@@ -65,6 +66,19 @@ static mut glock: bpf_spin_lock = bpf_spin_lock { val: 0 };
 #[link_section = ".data.A"]
 static mut groot2: bpf_rb_root = bpf_rb_root { __opaque: [0; 2] };
 
+// struct bpf_res_spin_lock { u32 val; } (asm-generic/rqspinlock.h), matched
+// by BTF struct name like bpf_spin_lock.
+#[allow(non_camel_case_types)]
+#[repr(C)]
+struct bpf_res_spin_lock {
+    val: u32,
+}
+
+// private(B) struct bpf_res_spin_lock res_glock;
+#[allow(non_upper_case_globals)]
+#[link_section = ".data.B"]
+static mut res_glock: bpf_res_spin_lock = bpf_res_spin_lock { val: 0 };
+
 type LessFn = extern "C" fn(*mut bpf_rb_node, *const bpf_rb_node) -> bool;
 
 extern "C" {
@@ -74,6 +88,8 @@ extern "C" {
     fn bpf_rbtree_add(root: *mut bpf_rb_root, node: *mut bpf_rb_node, less: LessFn) -> i32;
     fn bpf_rbtree_first(root: *mut bpf_rb_root) -> *mut bpf_rb_node;
     fn bpf_rbtree_remove(root: *mut bpf_rb_root, node: *mut bpf_rb_node) -> *mut bpf_rb_node;
+    fn bpf_res_spin_lock(lock: *mut bpf_res_spin_lock) -> i32;
+    fn bpf_res_spin_unlock(lock: *mut bpf_res_spin_lock);
 }
 
 // container_of(ptr, struct node_data, node)
@@ -356,6 +372,84 @@ extern "C" fn rbtree_api_add_bad_cb_bad_fn_call_first_unlock_after(_ctx: *const 
     unsafe { add_with_cb(less__bad_fn_call_first_unlock_after) }
 }
 
+extern "C" fn less__bad_res_spin_unlock(_a: *mut bpf_rb_node, _b: *const bpf_rb_node) -> bool {
+    unsafe { bpf_res_spin_unlock(addr_of_mut!(res_glock)) };
+    false
+}
+
+#[inline(never)]
+fn rbtree_cb_unlock_relock() {
+    unsafe {
+        bpf_spin_unlock(addr_of_mut!(glock));
+        bpf_spin_lock(addr_of_mut!(glock));
+    }
+}
+
+#[inline(never)]
+fn rbtree_cb_nested_unlock() {
+    rbtree_cb_unlock_relock();
+    unsafe { core::arch::asm!("", options(nostack, preserves_flags)) };
+}
+
+extern "C" fn less__bad_subprog_unlock(a: *mut bpf_rb_node, b: *const bpf_rb_node) -> bool {
+    unsafe {
+        let node_a = entry(a);
+        let node_b = entry(b as *mut bpf_rb_node);
+        rbtree_cb_nested_unlock();
+
+        (*node_a).key < (*node_b).key
+    }
+}
+
+#[inline(never)]
+fn rbtree_cb_noop() {
+    unsafe { core::arch::asm!("", options(nostack, preserves_flags)) };
+}
+
+extern "C" fn less__subprog_allowed(a: *mut bpf_rb_node, b: *const bpf_rb_node) -> bool {
+    unsafe {
+        let node_a = entry(a);
+        let node_b = entry(b as *mut bpf_rb_node);
+        rbtree_cb_noop();
+
+        (*node_a).key < (*node_b).key
+    }
+}
+
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn rbtree_api_add_bad_cb_res_spin_unlock(_ctx: *const c_void) -> i64 {
+    unsafe {
+        let n = bpf_obj_new(node_data_id()) as *mut node_data;
+        if n.is_null() {
+            return 1;
+        }
+
+        bpf_spin_lock(addr_of_mut!(glock));
+        if bpf_res_spin_lock(addr_of_mut!(res_glock)) != 0 {
+            bpf_spin_unlock(addr_of_mut!(glock));
+            bpf_obj_drop(n.cast());
+            return 1;
+        }
+        bpf_rbtree_add(addr_of_mut!(groot), addr_of_mut!((*n).node), less__bad_res_spin_unlock);
+        bpf_res_spin_unlock(addr_of_mut!(res_glock));
+        bpf_spin_unlock(addr_of_mut!(glock));
+        0
+    }
+}
+
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn rbtree_api_add_bad_cb_subprog_unlock(_ctx: *const c_void) -> i64 {
+    unsafe { add_with_cb(less__bad_subprog_unlock) }
+}
+
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn rbtree_api_add_cb_subprog_allowed(_ctx: *const c_void) -> i64 {
+    unsafe { add_with_cb(less__subprog_allowed) }
+}
+
 test_tags! {
     rbtree_api_nolock_add: __failure, __msg("bpf_spin_lock at off=16 must be held for bpf_rb_root");
     rbtree_api_nolock_remove: __failure, __msg("bpf_spin_lock at off=16 must be held for bpf_rb_root");
@@ -364,11 +458,14 @@ test_tags! {
     rbtree_api_remove_no_drop: __failure, __msg("Unreleased reference id=3 alloc_insn={{[0-9]+}}");
     rbtree_api_add_to_multiple_trees: __failure, __msg("R2 expected pointer to allocated object");
     rbtree_api_use_unchecked_remove_retval: __failure, __msg("Possibly NULL pointer passed to trusted R2");
-    rbtree_api_add_release_unlock_escape: __failure, __msg("bpf_rbtree_remove can only take non-owning or refcounted bpf_rb_node pointer");
-    rbtree_api_first_release_unlock_escape: __failure, __msg("bpf_rbtree_remove can only take non-owning or refcounted bpf_rb_node pointer");
+    rbtree_api_add_release_unlock_escape: __failure, __msg("R2 type=scalar expected=ptr_, rcu_ptr_, ptr_, rcu_ptr_");
+    rbtree_api_first_release_unlock_escape: __failure, __msg("R2 type=scalar expected=ptr_, rcu_ptr_, ptr_, rcu_ptr_");
     rbtree_api_add_bad_cb_bad_fn_call_add: __failure, __msg("R2 expected pointer to allocated object");
     rbtree_api_add_bad_cb_bad_fn_call_remove: __failure, __msg("rbtree_remove not allowed in rbtree cb");
     rbtree_api_add_bad_cb_bad_fn_call_first_unlock_after: __failure, __msg("can't spin_{lock,unlock} in rbtree cb");
+    rbtree_api_add_bad_cb_res_spin_unlock: __failure, __msg("can't res_spin_{lock,unlock} in rbtree cb");
+    rbtree_api_add_bad_cb_subprog_unlock: __failure, __msg("can't spin_{lock,unlock} in rbtree cb");
+    rbtree_api_add_cb_subprog_allowed: __success;
 }
 
 bpf_object!("GPL");

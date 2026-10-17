@@ -137,6 +137,6 @@ bpf_rs_core::test_tags! {
     arena_arg_mixed: __arch_x86_64, __arch_arm64, __success, __retval("0");
     arena_arg_unpopulated: __arch_x86_64, __arch_arm64, __success, __retval("0");
     arena_arg_no_arena: __arch_x86_64, __arch_arm64, __failure, __msg("arena pointer requires a program with an associated arena");
-    arena_arg_bad_reg: __arch_x86_64, __arch_arm64, __failure, __msg("is not a pointer to arena or scalar");
+    arena_arg_bad_reg: __arch_x86_64, __arch_arm64, __failure, __msg("R1 type=fp expected=arena, scalar");
     dummy_test: __arch_x86_64, __arch_arm64, __description("arena_arg_stack: not supported, dummy test"), __skip("arena_arg_stack: not supported"), __success;
 }

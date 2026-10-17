@@ -617,17 +617,24 @@ class RustTypes:
         if t.kflag:
             raise Unsupported(f"struct {t.name}: bitfield members")
         fields = []
-        for name, mtid, off in t.extra:
+        for i, (name, mtid, off) in enumerate(t.extra):
             if not name:
-                raise Unsupported(f"struct {t.name}: anonymous member")
+                # an anonymous struct/union member: named here (Rust has
+                # no anonymous members), its type after the enclosing one
+                inner = self.btf.types[self.btf.strip(mtid)]
+                if inner.kind not in (K_STRUCT, K_UNION) or inner.name:
+                    raise Unsupported(f"struct {t.name}: anonymous member of kind {inner.kind}")
+                inner.name = f"{t.name}__anon{i}"
+                name = f"__anon{i}"
             fields.append(f"    {ident(name)}: {self.rust(mtid)},")
         size, _align = self.size_align(tid)
         if size != t.size:
             raise Unsupported(f"struct {t.name}: C size {t.size}, natural Rust "
                               f"layout {size} (explicit alignment or padding)")
         kw = "union" if t.kind == K_UNION else "struct"
-        self.defs.append("#[allow(non_camel_case_types)]\n#[repr(C)]\n"
-                         f"{kw} {t.name} {{\n" + "\n".join(fields) + "\n}")
+        # plain data, Copy: a union's members must be
+        self.defs.append("#[allow(non_camel_case_types, non_snake_case)]\n#[repr(C)]\n#[derive(Clone, Copy)]\n"
+                         + f"{kw} {t.name} {{\n" + "\n".join(fields) + "\n}")
 
     def literal(self, tid, data):
         """A Rust literal of type `tid` holding the bytes `data`."""
@@ -814,10 +821,24 @@ class Generator:
         text = preprocess(self.cpath)
         with open(self.cpath) as fh:
             self.raw = fh.read()
-        for head, body in split_items(text):
+        items = split_items(text)
+        # BPF_PROG(name, ...) puts SEC() on a declaration of `name`, ahead
+        # of the definition the macro writes without it
+        declared = {}
+        for head, body in items:
+            if body is None and "section" in head and is_func_header(head):
+                try:
+                    d = parse_function(head, "")
+                except Unsupported:
+                    continue
+                if d.section:
+                    declared[d.name] = d.section
+        for head, body in items:
             if body is None:
                 continue
             f = parse_function(head, body)
+            if f.section is None and f.name in declared:
+                f.section = declared[f.name]
             if f.naked:
                 # AsmPrinter::PrintSpecial bumps its counter once per asm
                 # statement that expands a `%=` (${:uid}), from 0
@@ -1377,6 +1398,12 @@ class Generator:
             out.append(f"// BTF_KSYM: {name}")
         if self.ksym_vars:
             out.append("")
+        # the Makefile reads marker lines from progs/<name>.rs only: carry
+        # the hand file's over
+        markers = re.findall(r"^// (?:BTF_TYPE_ID|BTF_KSYM|BTF_WEAK_KFUNC|BTF_C_CHAR|RUSTC_OPT_LEVEL): .*$",
+                             hand_text, re.M)
+        if markers:
+            out += ["// (from the hand file)"] + markers + [""]
         if uses:
             out.append("use bpf_rs_core::{" + ", ".join(sorted(uses)) + "};")
         if hand and not (self.needs_cvoid or any("c_void" in m for m in maps)

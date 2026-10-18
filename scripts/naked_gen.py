@@ -799,9 +799,11 @@ class CObject:
 
     def type_tags(self):
         """[(struct name, member, tag)] for every struct/union member whose
-        pointer type carries a BTF type tag (`__kptr`, `__uptr`, ...), and
+        pointer type carries a BTF type tag (`__kptr`, `__uptr`, ...),
         [(function, "<index>" or "ret", tag)] for a defined function's
-        parameter or return type that does (`u32 __arena *f(u32 __arena *p)`)."""
+        parameter or return type that does (`u32 __arena *f(u32 __arena *p)`),
+        and [(variable, "", tag)] for a global whose own type does
+        (`struct bin_data __kptr *ptr;`)."""
         btf, out = self.btf, []
 
         def tag_of(tid):
@@ -820,6 +822,10 @@ class CObject:
                     tag = tag_of(mtid) if mtid else None
                     if tag:
                         out.append((t.name, mname, tag))
+            elif t.kind == K_VAR and t.name:
+                tag = tag_of(t.size) if t.size else None
+                if tag:
+                    out.append((t.name, "", tag))
             elif t.kind == K_FUNC and t.name in defined:
                 proto = btf.types[t.size]
                 for i, (_pname, ptid) in enumerate(proto.extra):
@@ -1650,7 +1656,8 @@ class Generator:
             uses.append("arg_tags")
         tag_owners = {re.search(r"^(?:struct|union|enum) (\w+)", d, re.M).group(1) for d in self.obj.types.defs}
         tag_owners |= set(re.findall(r"^(?:pub )?(?:struct|union) (\w+)", hand_text or "", re.M))
-        if any(st in tag_owners or (m == "ret" or m.isdigit()) and st in ours
+        if any((st in self.global_names if m == "" else
+                st in tag_owners or (m == "ret" or m.isdigit()) and st in ours)
                for st, m, _t in self.obj.type_tags()):
             uses.append("btf_type_tags")
         # rustc emits functions sorted by name; keep the C's source order
@@ -1723,16 +1730,18 @@ class Generator:
             out += ["// Map key/value types, shaped like the C object's BTF (the kernel",
                     "// checks some of them member by member, so no explicit padding).",
                     "// translint: allow(padding)"]
-        # `__kptr` and friends on struct members: btf_type_tags!
+        # `__kptr` and friends on struct members, on the prototypes of this
+        # file's functions and on its globals: btf_type_tags!
         # (scripts/btf_type_tags.py), for the types this file defines
         defined = {re.search(r"^(?:struct|union|enum) (\w+)", d, re.M).group(1) for d in self.obj.types.defs}
         defined |= set(re.findall(r"^(?:pub )?(?:struct|union) (\w+)", hand_text or "", re.M))
         type_tags = [(st, m, tag) for st, m, tag in self.obj.type_tags()
-                     if st in defined or (m == "ret" or m.isdigit()) and st in ours]
+                     if (st in self.global_names if m == "" else
+                         st in defined or (m == "ret" or m.isdigit()) and st in ours)]
         if type_tags:
             out.append("btf_type_tags! {")
             for st, m, tag in type_tags:
-                out.append(f"    {st}.{m}: {tag};")
+                out.append(f"    {st}.{m}: {tag};" if m else f"    {st}: {tag};")
             out.append("}")
             out.append("")
         arg_tags = self.obj.arg_tags()

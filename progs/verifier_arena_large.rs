@@ -25,7 +25,7 @@
 // a `*mut c_void` is the C's `void *` in BTF (scripts/btf_rename.py)
 // BTF_C_VOID: c_void
 
-use bpf_rs_core::{bpf_map, bpf_object, test_tags};
+use bpf_rs_core::{bpf_map, bpf_object, btf_type_tags, test_tags};
 use core::ffi::c_void;
 
 test_tags! {
@@ -50,6 +50,10 @@ test_tags! {
     big_alloc4:
         __success,
         __retval("0");
+}
+
+btf_type_tags! {
+    base: arena;
 }
 
 bpf_map! {

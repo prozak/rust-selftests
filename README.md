@@ -168,6 +168,19 @@ are not called directly (the source says where). The kernel's
 masks its three list predicates by hand (its header explains). Until the
 build masks these returns, `make ci-local` fails on this object.
 
+**Since that run** (2026-10-17, the verifier sweep, #25/#27): 140 of the
+143 `verifier_*.c` files are translated, 776 objects in all. The naked
+asm programs (1688 of them) are generated verbatim from the C and the C
+object by `scripts/naked_gen.py` and checked instruction by instruction
+against the C object by translint's `naked-verbatim` class; the C bodies
+are translated by hand in `progs/hand/`. Each step was gated and guarded
+on its own (every new object PASS, no new INEQUIV); the full nightly has
+not been rerun yet, so the tables above are the LLVM 23 run's. Left out:
+`verifier_aggregate_arg` and `verifier_aggregate_ret` (rustc's BPF C ABI
+passes aggregates indirectly where clang flattens them into registers)
+and `verifier_bitfield_write` (a CO-RE bitfield relocation needs bitfield
+members in the object's own BTF, which Rust cannot define).
+
 ## Reproducing it
 
 You need an x86_64 Linux host with KVM (`/dev/kvm` readable and writable

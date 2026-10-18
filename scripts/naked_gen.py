@@ -1671,7 +1671,8 @@ class Generator:
         # say void too (the kernel checks a global subprogram's `void *ctx
         # __arg_ctx`, say), where rustc's debug info names the c_void enum
         if any("c_void" in p for f in self.funcs if not f.naked for p in f.rust_params) \
-                or re.search(r"\w+: \*(?:mut|const) c_void\b", hand_text or "") \
+                or re.search(r'extern "C" fn \w+\([^)]*\*(?:mut|const) c_void\b', hand_text or "") \
+                or re.search(r"^\s+\w+: \*(?:mut|const) c_void,$", hand_text or "", re.M) \
                 or any("c_void" in d for d in self.obj.types.defs) \
                 or any("c_void" in m for m in maps) or any("c_void" in g for g in globs):
             out += ["// a `*mut c_void` is the C's `void *` in BTF (scripts/btf_rename.py)",

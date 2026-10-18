@@ -36,9 +36,10 @@ BASELINE_HEADER = "# name\trust_md5\tc_md5\tenv_md5\tverdict\tseconds\tsummary\n
 # exclusions and the guest size. The selftests output tree itself is not
 # hashed (test_progs is relinked on every swap); the kernel pin and the
 # per-object C hash stand for it, as in the nightly.
-ENV_FILES = ["scripts/swap-and-test.sh", "scripts/qemu-test-progs",
-             "scripts/gate-overlay.sh", "scripts/gate-record-filter",
-             "scripts/known-bad-tests", "scripts/gate-serial"]
+ENV_FILES = ["scripts/swap-and-test.sh", "scripts/affected_tests.py",
+             "scripts/qemu-test-progs", "scripts/gate-overlay.sh",
+             "scripts/gate-record-filter", "scripts/known-bad-tests",
+             "scripts/gate-serial"]
 
 
 def stop_children():

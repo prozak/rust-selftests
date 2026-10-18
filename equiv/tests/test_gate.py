@@ -13,8 +13,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import gate  # noqa: E402
 import qemu_gate  # noqa: E402
 
-ENV_FILES = ["scripts/swap-and-test.sh", "scripts/qemu-test-progs", "scripts/gate-overlay.sh",
-             "scripts/gate-record-filter", "scripts/known-bad-tests"]
+ENV_FILES = ["scripts/swap-and-test.sh", "scripts/affected_tests.py", "scripts/qemu-test-progs",
+             "scripts/gate-overlay.sh", "scripts/gate-record-filter", "scripts/known-bad-tests"]
 
 
 def md5(path):

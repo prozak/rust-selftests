@@ -33,6 +33,19 @@ alarm: a FAIL (a recorded one keeps alarming until the objects change) or
 a PASS that became NO-ORACLE. Logs are `qemu/gate/logs/<name>.log` and
 `<name>.c.log` (the C re-run after a FAIL).
 
+Which tests a swap runs: `scripts/swap-and-test.sh` finds the `prog_tests`
+files whose test object includes the swapped object's skeleton (from the
+`*.test.d` files) or names its `.bpf.o`, and `scripts/affected_tests.py`
+keeps, within each file, the registered test functions that reference the
+object (as a whole identifier, as the `name__` skeleton API, or as the
+`.bpf.o` string), including tests that call such a test. A reference
+outside every test body (a static helper that opens the skeleton for
+several tests) keeps the whole file. `prog_tests/verifier.c` is the reason:
+it registers one test per `verifier_*` object, and before this rule every
+such swap ran all 145 of them. `-t` is a substring match in `test_progs`,
+so a filter can select tests whose names extend it: a superset, never a
+miss.
+
 Each row records the wall seconds its last run took, and the parallel
 queue runs the translations without a record first (new ones) and then
 longest first, so a long object cannot land last and hold the makespan.
@@ -41,8 +54,8 @@ percent (the gate is throughput-bound: 776 objects of 27 s on average);
 the per-object number is what shows where the time goes.
 
 The environment hash covers the kernel image, the test modules' BTF, the
-swap/boot scripts, `known-bad-tests`, `gate-serial` and `QEMU_CPUS` (the
-gate uses 4, as the nightly does). When it changes every row is stale and
+swap/boot scripts, `affected_tests.py`, `known-bad-tests`, `gate-serial`
+and `QEMU_CPUS` (the gate uses 4, as the nightly does). When it changes every row is stale and
 the gate stops with exit 2 instead of starting a 30-minute full run:
 `scripts/gate.py --all` does that run, or `make ci-nightly` followed by
 `scripts/gate.py --reseed nightly/<run>/runtime-after.tsv`, which copies

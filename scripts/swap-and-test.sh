@@ -10,7 +10,9 @@
 #
 # The set of affected tests is discovered from the generated *.test.d
 # dependency files (which record skeleton-header inclusion), so prog-name /
-# test-name mismatches are handled without any hardcoded mapping.
+# test-name mismatches are handled without any hardcoded mapping; within a
+# consuming file, scripts/affected_tests.py keeps the test functions that
+# reference the object (see there).
 #
 # Expects env (exported by the Makefile): KERNEL_SRC SELFTESTS_SRC
 # SELFTESTS_OUTPUT LLVM_PREFIX TEST_RUNNER; FLAVOR=uml adds UML_HARNESS and
@@ -126,22 +128,18 @@ done
 # The names collected above are prog_tests FILE basenames, but the -t
 # filter matches REGISTERED test names (the test_<name>() functions).
 # They coincide for most files but not all (bpf_verif_scale.c registers
-# verif_scale_*, test_xdp_veth.c registers xdp_veth_*, ...) — expand each
-# file to the test names it actually defines, falling back to the
-# basename when extraction finds nothing.
+# verif_scale_*, test_xdp_veth.c registers xdp_veth_*, ...), and a file
+# can hold tests of many objects (verifier.c: one per verifier_* object).
+# scripts/affected_tests.py expands each file to the test functions that
+# reference this object when that set is certainly complete, else to every
+# test the file defines, and to the basename when it defines none. -t is
+# a substring match in test_progs, so a name may select tests whose name
+# extends it: a superset, never a miss.
+SRCS=()
+for t in "${TESTS[@]}"; do SRCS+=("${SELFTESTS_SRC}/prog_tests/${t}.c"); done
 EXPANDED=()
-for t in "${TESTS[@]}"; do
-    src="${SELFTESTS_SRC}/prog_tests/${t}.c"
-    names=""
-    [ -f "${src}" ] && names=$(grep -oE '^void (serial_)?test_[A-Za-z0-9_]+' "${src}" \
-        | sed -E 's/^void (serial_)?test_//' | sort -u)
-    if [ -n "${names}" ]; then
-        for n in ${names}; do
-            case " ${EXPANDED[*]-} " in *" ${n} "*) ;; *) EXPANDED+=("${n}") ;; esac
-        done
-    else
-        EXPANDED+=("${t}")
-    fi
+for n in $(python3 "${HERE}/scripts/affected_tests.py" "${NAME}" "${SRCS[@]}"); do
+    case " ${EXPANDED[*]-} " in *" ${n} "*) ;; *) EXPANDED+=("${n}") ;; esac
 done
 # Subtract tests known to fail with pristine C objects (kernel limits /
 # environment) so bundled always-broken tests can't fail a translation.

@@ -763,6 +763,20 @@ class CObject:
         self.btf = Btf(sec.data)
         self.types = RustTypes(self.btf)
 
+    def hidden_symbols(self):
+        """Names of the ELF symbols with STV_HIDDEN visibility (the C's
+        __hidden), which equiv/bpfelf.py's Symbol does not carry."""
+        symtab, strtab = self.elf.section_by_name(".symtab"), self.elf.section_by_name(".strtab")
+        out = set()
+        if symtab is None or strtab is None:
+            return out
+        for i in range(symtab.size // 24):
+            name_off, _info, other, _shndx, _value, _size = struct.unpack_from("<IBBHQQ", symtab.data, i * 24)
+            if other & 3 == 2:
+                end = strtab.data.index(b"\0", name_off)
+                out.add(strtab.data[name_off:end].decode())
+        return out
+
     def functions(self):
         """Defined FUNC symbol name -> section name."""
         out = {}
@@ -785,22 +799,36 @@ class CObject:
 
     def type_tags(self):
         """[(struct name, member, tag)] for every struct/union member whose
-        pointer type carries a BTF type tag (`__kptr`, `__uptr`, ...)."""
+        pointer type carries a BTF type tag (`__kptr`, `__uptr`, ...), and
+        [(function, "<index>" or "ret", tag)] for a defined function's
+        parameter or return type that does (`u32 __arena *f(u32 __arena *p)`)."""
         btf, out = self.btf, []
+
+        def tag_of(tid):
+            while True:
+                m = btf.types[tid]
+                if m.kind == K_TYPE_TAG:
+                    return m.name
+                if m.kind in (K_PTR,) + MODIFIERS and m.kind != K_TYPE_TAG:
+                    tid = m.size
+                    continue
+                return None
+        defined = self.functions()
         for t in btf.types.values():
-            if t.kind not in (K_STRUCT, K_UNION) or not t.name:
-                continue
-            for mname, mtid, _off in t.extra:
-                tid = mtid
-                while True:
-                    m = btf.types[tid]
-                    if m.kind == K_TYPE_TAG:
-                        out.append((t.name, mname, m.name))
-                        break
-                    if m.kind in (K_PTR,) + MODIFIERS and m.kind != K_TYPE_TAG:
-                        tid = m.size
-                        continue
-                    break
+            if t.kind in (K_STRUCT, K_UNION) and t.name:
+                for mname, mtid, _off in t.extra:
+                    tag = tag_of(mtid) if mtid else None
+                    if tag:
+                        out.append((t.name, mname, tag))
+            elif t.kind == K_FUNC and t.name in defined:
+                proto = btf.types[t.size]
+                for i, (_pname, ptid) in enumerate(proto.extra):
+                    tag = tag_of(ptid) if ptid else None
+                    if tag:
+                        out.append((t.name, str(i), tag))
+                tag = tag_of(proto.size) if proto.size else None
+                if tag:
+                    out.append((t.name, "ret", tag))
         return out
 
     def test_tags(self):
@@ -1458,6 +1486,13 @@ class Generator:
                     if not any(a.startswith("#[link_section") for a in attrs):
                         attrs.insert(0, f'#[link_section = "{ds.name}"]')
                 out.append("\n".join(attrs) + f"\nstatic {mut}{rname}: {ty} = {lit};")
+                if var.name in self.obj.hidden_symbols():
+                    # the C's __hidden (STV_HIDDEN): libbpf then leaves the
+                    # section's map unmapped (a global holding a spin lock
+                    # cannot be mmapped); rustc has no visibility attribute,
+                    # the assembler directive sets it on the symbol
+                    out[-1] += f'\ncore::arch::global_asm!(".hidden {var.name}");'
+                    self.needs_asm = True
                 self.global_names.append(var.name)
                 self.count("globals")
         return out
@@ -1613,8 +1648,10 @@ class Generator:
             uses.append("test_tags")
         if self.obj.arg_tags():
             uses.append("arg_tags")
-        if any(st in {re.search(r"^(?:struct|union|enum) (\w+)", d, re.M).group(1) for d in self.obj.types.defs}
-               for st, _m, _t in self.obj.type_tags()):
+        tag_owners = {re.search(r"^(?:struct|union|enum) (\w+)", d, re.M).group(1) for d in self.obj.types.defs}
+        tag_owners |= set(re.findall(r"^(?:pub )?(?:struct|union) (\w+)", hand_text or "", re.M))
+        if any(st in tag_owners or (m == "ret" or m.isdigit()) and st in ours
+               for st, m, _t in self.obj.type_tags()):
             uses.append("btf_type_tags")
         # rustc emits functions sorted by name; keep the C's source order
         # in every section, .text included (scripts/program_order.py), so
@@ -1641,8 +1678,9 @@ class Generator:
                     "// BTF_C_VOID: c_void", ""]
         # the Makefile reads marker lines from progs/<name>.rs only: carry
         # the hand file's over
-        markers = re.findall(r"^// (?:(?:BTF_TYPE_ID|BTF_KSYM|BTF_WEAK_KFUNC|BTF_C_CHAR|RUSTC_OPT_LEVEL): .*"
+        markers = re.findall(r"^// (?:(?:BTF_TYPE_ID|BTF_KSYM|BTF_WEAK_KFUNC|BTF_C_CHAR|RUSTC_OPT_LEVEL|BPF_NAKED): .*"
                              r"|translint: allow\(.*\))$", hand_text, re.M)
+        markers = list(dict.fromkeys(markers))
         if markers:
             out += ["// (from the hand file)"] + markers + [""]
         if uses:
@@ -1687,7 +1725,9 @@ class Generator:
         # `__kptr` and friends on struct members: btf_type_tags!
         # (scripts/btf_type_tags.py), for the types this file defines
         defined = {re.search(r"^(?:struct|union|enum) (\w+)", d, re.M).group(1) for d in self.obj.types.defs}
-        type_tags = [(st, m, tag) for st, m, tag in self.obj.type_tags() if st in defined]
+        defined |= set(re.findall(r"^(?:pub )?(?:struct|union) (\w+)", hand_text or "", re.M))
+        type_tags = [(st, m, tag) for st, m, tag in self.obj.type_tags()
+                     if st in defined or (m == "ret" or m.isdigit()) and st in ours]
         if type_tags:
             out.append("btf_type_tags! {")
             for st, m, tag in type_tags:
@@ -1706,9 +1746,26 @@ class Generator:
         # `// GEN_SKIP_TYPE: name` in the hand file: the hand file defines
         # that type itself (a CO-RE view of a kernel struct, say)
         skip = set(re.findall(r"^// GEN_SKIP_TYPE: (\w+)$", hand_text, re.M))
-        for d in self.obj.types.defs:
-            if re.search(r"^(?:struct|union|enum) (\w+)", d, re.M).group(1) in skip:
-                continue
+        defs = [d for d in self.obj.types.defs
+                if re.search(r"^(?:struct|union|enum) (\w+)", d, re.M).group(1) not in skip]
+        if skip:
+            # a type reached only through a skipped one (the kernel structs
+            # behind a CO-RE view's pointer) goes with it
+            anchor = "\n".join([hand_text or ""] + maps + globs + externs
+                                + [p for f in self.funcs for p in f.rust_params])
+            while True:
+                names = {re.search(r"^(?:struct|union|enum) (\w+)", d, re.M).group(1) for d in defs}
+                text = anchor + "\n".join(defs)
+                keep = []
+                for d in defs:
+                    n = re.search(r"^(?:struct|union|enum) (\w+)", d, re.M).group(1)
+                    rest = text.replace(d, "")
+                    if re.search(r"\b" + re.escape(n) + r"\b", rest):
+                        keep.append(d)
+                if len(keep) == len(defs):
+                    break
+                defs = keep
+        for d in defs:
             out.append(d)
             out.append("")
         for m in maps:

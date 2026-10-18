@@ -49,6 +49,11 @@ btf_type_tags! {
                                    ("c", "z", "uptr")]
 
 
+def test_a_function_parameter_or_return_is_named_by_index_or_ret(tmp_path):
+    src = write(tmp_path, "btf_type_tags! { f.0: arena; f.ret: arena; g.1: arena; }")
+    assert T.parse_source(src) == [("f", "0", "arena"), ("f", "ret", "arena"), ("g", "1", "arena")]
+
+
 def test_an_entry_without_a_struct_names_a_global(tmp_path):
     src = write(tmp_path, "btf_type_tags! { global_mask: kptr; s.m: kptr; }")
     assert T.parse_source(src) == [(None, "global_mask", "kptr"), ("s", "m", "kptr")]

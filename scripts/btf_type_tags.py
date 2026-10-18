@@ -23,6 +23,13 @@ built object's .BTF:
         rcu_node_stash.node: kptr;
     }
 
+A function's parameter or return type is named by index or `ret` (C's
+`u32 __arena *f(u32 __arena *p)`, the arena annotation the verifier reads
+on a global subprogram's arguments and aggregate returns):
+    btf_type_tags! {
+        f.0: arena;
+        f.ret: arena;
+    }
 A member that is an array of pointers (any depth) is tagged the same way:
 the array types are cloned over the new PTR. A global variable is named
 without a struct, which is how C's `static struct bpf_cpumask __kptr *g;`
@@ -57,6 +64,8 @@ BTF_KIND_STRUCT = 4
 BTF_KIND_UNION = 5
 BTF_KIND_FWD = 7
 BTF_KIND_VAR = 14
+BTF_KIND_FUNC = 12
+BTF_KIND_FUNC_PROTO = 13
 BTF_KIND_TYPE_TAG = 18
 MODIFIERS = {8, 9, 10, 11, 18}   # VOLATILE CONST RESTRICT (TYPEDEF) TYPE_TAG
 
@@ -110,11 +119,12 @@ def parse_source(path):
         if not stmt.strip():
             continue
         m = re.fullmatch(
-            r"\s*(?:([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*)?([A-Za-z_][A-Za-z0-9_]*)"
+            r"\s*(?:([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*)?([A-Za-z_][A-Za-z0-9_]*|\d+)"
             r"\s*:\s*([A-Za-z_][A-Za-z0-9_]*)\s*", stmt)
-        if not m:
+        if not m or (m.group(2).isdigit() and not m.group(1)):
             raise TagError(f"{path}: unparsable entry {stmt.strip()!r} "
-                           "(expected `struct.member: tag` or `global: tag`)")
+                           "(expected `struct.member: tag`, `global: tag`, "
+                           "`fn.<index>: tag` or `fn.ret: tag`)")
         sname, mname, tag = m.groups()
         if tag not in KNOWN_TAGS:
             raise TagError(f"{path}: unknown type tag {tag!r} on "
@@ -185,6 +195,15 @@ def inject(path, entries):
             raise TagError(f"{obj}: {len(hits)} BTF structs named {name!r}")
         return hits[0]
 
+    def find_func(name):
+        hits = [tid for tid, (_p, kind, name_off, _t, _v) in enumerate(types, 1)
+                if kind == BTF_KIND_FUNC and get_str(name_off) == name]
+        if not hits:
+            raise TagError(f"{obj}: no BTF function named {name!r}")
+        if len(hits) > 1:
+            raise TagError(f"{obj}: {len(hits)} BTF functions named {name!r}")
+        return hits[0]
+
     def find_var(name):
         hits = [tid for tid, (_p, kind, name_off, _t, _v) in enumerate(types, 1)
                 if kind == BTF_KIND_VAR
@@ -205,6 +224,20 @@ def inject(path, entries):
         if sname is None:
             pos, _kind, _n, ptr_id, _v = types[find_var(mname) - 1]
             slot = pos + 8
+        elif mname == "ret" or mname.isdigit():
+            # a function's return type or parameter: the FUNC's prototype
+            proto = types[find_func(sname) - 1][3]
+            pos, kind, _n, ret_id, vlen = types[proto - 1]
+            if kind != BTF_KIND_FUNC_PROTO:
+                raise TagError(f"{obj}: {sname} has no function prototype")
+            if mname == "ret":
+                slot, ptr_id = pos + 8, ret_id
+            else:
+                k = int(mname)
+                if k >= vlen:
+                    raise TagError(f"{obj}: {sname} has {vlen} parameter(s), no #{k}")
+                slot = pos + 12 + k * 8 + 4
+                ptr_id = struct.unpack_from("<I", data, slot)[0]
         else:
             sid = find_struct(sname)
             pos, _kind, _n, _sz, vlen = types[sid - 1]

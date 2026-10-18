@@ -416,8 +416,12 @@ one program's test_tags! entry (the C object was built for one BPF CPU
 version, and a test whose messages count instructions carries
 `#if __BPF_CPU_VERSION__` branches), with the matching
 `// translint: allow(test-tags:name)`; `// BTF_TYPE_ID:` and the other
-marker lines, and `// translint: allow(...)` lines, are carried over to
-the generated file, which is the one the scripts read. A `.struct_ops`
+marker lines, `// BPF_NAKED: name` (a hand file may carry a function
+verbatim, like a subprogram returning an aggregate in R0:R2 that no Rust
+call can consume; verifier_arena's arena_word_pair) and
+`// translint: allow(...)` lines, are carried over to the generated file,
+which is the one the scripts read; a type reached only through a skipped
+one (the kernel structs behind a CO-RE view's pointer) is left out with it. A `.struct_ops`
 map in the C becomes the Rust struct of the kernel type's name whose set
 members carry the program's fn type and the unset ones are null
 `*const c_void`, plus a `static mut` in that section. The `naked-verbatim` class of `scripts/translint.py`
@@ -430,8 +434,12 @@ C's `__kptr` (and `__kptr_untrusted`, `__percpu_kptr`, `__uptr`) is a BTF
 type tag on a pointer, which rustc cannot emit. Declare the field as a
 plain pointer and list it in `btf_type_tags!`; `scripts/btf_type_tags.py`
 adds the tag to the built object. A struct member is named
-`struct.member`, a global variable by its name alone, and an array of
-pointers (of any depth) is tagged like a single pointer:
+`struct.member`, a global variable by its name alone, a function's
+parameter or return type `fn.<index>` or `fn.ret` (C's
+`u32 __arena *f(u32 __arena *p)`, the arena annotation the verifier reads
+on a global subprogram's arguments and aggregate returns; the generator
+writes these from the C object), and an array of pointers (of any depth)
+is tagged like a single pointer:
 
 ```rust
 btf_type_tags! {

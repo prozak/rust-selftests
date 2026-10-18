@@ -116,5 +116,5 @@ macro_rules! arg_tags {
 /// named without a struct (`global_mask: kptr;`).
 #[macro_export]
 macro_rules! btf_type_tags {
-    ($($ty:ident $(. $field:ident)? : $tag:ident);+ $(;)?) => {};
+    ($($ty:ident $(. $field:tt)? : $tag:ident);+ $(;)?) => {};
 }

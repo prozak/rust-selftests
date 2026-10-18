@@ -466,7 +466,11 @@ aligned than C's. A plain section can be laid out the C way too, with
 symbol name, and data_in_arena's harness compares the skeleton's `struct
 data` with the section (`bpf_map__initial_value()`'s size against
 `sizeof(*skel->data)`), which needs clang's order and a section that ends
-8-byte aligned; translint then compares those sections as well. With the tags
+8-byte aligned; translint then compares those sections as well. `.rodata`
+works the same (strncmp_test: the verifier accepts a bpf_strncmp target
+only when a NUL follows it before the end of .rodata, so the target
+without one must be last, as in the C object), for statics placed by
+their kind and for ones that already say `#[link_section = ".rodata"]`. With the tags
 in place, `bpf_kptr_xchg` into the field loads as it does for the C
 object, so translate the kptr round trip as written; do not replace it
 with a release of the local pointer. `cpumask_success.rs` has every form.

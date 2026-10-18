@@ -25,12 +25,16 @@ by source line and aligned to at least 8. scripts/translint.py's
 private-layout check compares the resulting objects.
 
 A translation can ask for the same treatment of a plain section with
-`// C_LAYOUT: .data .bss` (the Makefile passes `--layout=.data --layout=.bss`):
-rustc orders the statics of .data/.bss by symbol name, clang by declaration,
-and a harness that compares the skeleton's struct with the section
-(data_in_arena: `bpf_map__initial_value()`'s size against
-`sizeof(*skel->data)`, a section that must end 8-byte aligned) needs the
-C object's layout. The statics then get an explicit `section` attribute.
+`// C_LAYOUT: .data .bss` (the Makefile passes `--layout=.data --layout=.bss`;
+`.rodata` works the same): rustc orders the statics of a section by symbol
+name, clang by declaration, and a harness that compares the skeleton's
+struct with the section (data_in_arena: `bpf_map__initial_value()`'s size
+against `sizeof(*skel->data)`, a section that must end 8-byte aligned)
+needs the C object's layout, as does a verifier check that reads past a
+variable to the end of its section (strncmp_test: the bpf_strncmp target
+without a NUL must be the last thing in .rodata to be rejected). Statics
+placed by their kind get an explicit `section` attribute; statics that
+already name the section (`#[link_section = ".rodata"]`) are laid out too.
 
 Usage: private_sections.py <module.ll> [<c object>] [--layout=<section>]...
 (a `.corig` backup of the C object is preferred when present)
@@ -42,6 +46,8 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'equiv'))
 
 GLOBAL = re.compile(r'^@(\S+) = (.*?)section "(\.(?:data|bss)\.[^"]+)"(.*?), align (\d+)(.*?!dbg !(\d+).*)$')
+# a definition with an explicit plain section (`#[link_section = ".rodata"]`)
+EXPLICIT = re.compile(r'^@(\S+) = (.*?)section "(\.(?:data|bss|rodata))"(.*?), align (\d+)(.*?!dbg !(\d+).*)$')
 # a definition without a section attribute: LLVM places it by its kind
 IMPLICIT = re.compile(r'^@(\S+) = ((?:[a-z_]+ )*?)(global|constant) (.*?), align (\d+)(.*?!dbg !(\d+).*)$')
 PRIVATE_SECTION = re.compile(r'^\.(data|bss)\.[A-Za-z_][A-Za-z0-9_]*$')
@@ -69,7 +75,15 @@ class Global:
         if m:
             return cls(m.group(1), m.group(2), m.group(3), m.group(4), int(m.group(5)),
                        m.group(6), m.group(7))
-        if not extra or 'section "' in line:
+        if not extra:
+            return None
+        m = EXPLICIT.match(line)
+        if m:
+            if m.group(3) not in extra:
+                return None
+            return cls(m.group(1), m.group(2), m.group(3), m.group(4), int(m.group(5)),
+                       m.group(6), m.group(7))
+        if 'section "' in line:
             return None
         m = IMPLICIT.match(line)
         if not m or 'external ' in m.group(2):

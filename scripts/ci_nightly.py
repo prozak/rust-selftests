@@ -162,7 +162,8 @@ def main(argv=None):
     old_runtime = git("show", "HEAD:qemu/gate/baseline.tsv").decode()
     (out / "runtime-before.tsv").write_text(old_runtime)
     (out / "known-bad-tests").write_bytes((REPO / "scripts/known-bad-tests").read_bytes())
-    old_gate = {name: row["verdict"] for name, row in qemu_gate.parse_baseline(old_runtime).items()}
+    old_rows = qemu_gate.parse_baseline(old_runtime)
+    old_gate = {name: row["verdict"] for name, row in old_rows.items()}
     make = ["make", "--no-print-directory"]
     failed = False
     runtime_failed = False
@@ -267,7 +268,7 @@ def main(argv=None):
         serial = qemu_gate.read_serial(REPO / "scripts/gate-serial")
         print(f"nightly: QEMU verifier/runtime gate, {len(workers)} worker(s)", flush=True)
         start = time.monotonic()
-        gate.run_all(names, workers, serial)
+        gate.run_all(names, workers, serial, qemu_gate.recorded_seconds(old_rows))
         failed |= runtime_failed
         report["stages"].append(dict(name="qemu-verifier-runtime", exit=int(runtime_failed), seconds=round(time.monotonic() - start, 1)))
         report["runtime_changes"] = [dict(name=n, before=old_gate.get(n), after=r["verdict"])

@@ -33,6 +33,13 @@ alarm: a FAIL (a recorded one keeps alarming until the objects change) or
 a PASS that became NO-ORACLE. Logs are `qemu/gate/logs/<name>.log` and
 `<name>.c.log` (the C re-run after a FAIL).
 
+Each row records the wall seconds its last run took, and the parallel
+queue runs the translations without a record first (new ones) and then
+longest first, so a long object cannot land last and hold the makespan.
+With the corpus at its 2026-10-17 shape the order is worth about one
+percent (the gate is throughput-bound: 776 objects of 27 s on average);
+the per-object number is what shows where the time goes.
+
 The environment hash covers the kernel image, the test modules' BTF, the
 swap/boot scripts, `known-bad-tests`, `gate-serial` and `QEMU_CPUS` (the
 gate uses 4, as the nightly does). When it changes every row is stale and

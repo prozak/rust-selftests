@@ -220,7 +220,7 @@ def main(argv=None):
                 workers = [env]
             serial = qemu_gate.read_serial(REPO / "scripts/gate-serial")
             start = time.monotonic()
-            gate.run_all(work, workers, serial)
+            gate.run_all(work, workers, serial, qemu_gate.recorded_seconds(baseline))
             print(f"gated {state['done']} object(s) in {round(time.monotonic() - start)}s "
                   f"with {len(workers)} worker(s)")
         alarms = state["alarms"] + alarms_cached

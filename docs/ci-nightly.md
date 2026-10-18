@@ -73,9 +73,10 @@ The driver sequences every stage even if the outer make uses `-j`:
    missing-consumer results. Successful Rust runs restore C and rebuild
    derived skeletons/test binaries without a second guest boot. The
    verdicts are also written as `runtime-after.tsv`, in the gate
-   baseline's format with this run's object and environment hashes
-   (the machinery is `scripts/qemu_gate.py`, shared with the incremental
-   `scripts/gate.py`).
+   baseline's format with this run's object and environment hashes and
+   each object's wall seconds (the machinery is `scripts/qemu_gate.py`,
+   shared with the incremental `scripts/gate.py`; the gate queue runs the
+   objects the committed baseline recorded as longest first).
 7. Restore C again, verify object hashes still match the proof inputs,
    and generate codegen results using this run's fresh proof baseline.
 8. Restore C on exit, including failures and SIGINT/SIGTERM. An interrupted

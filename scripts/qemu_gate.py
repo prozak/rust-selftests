@@ -21,6 +21,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "equiv"))
@@ -29,7 +30,7 @@ import guard  # noqa: E402
 CHILDREN = set()
 CHILD_LOCK = threading.RLock()
 CANCELLED = threading.Event()
-BASELINE_HEADER = "# name\trust_md5\tc_md5\tenv_md5\tverdict\tsummary\n"
+BASELINE_HEADER = "# name\trust_md5\tc_md5\tenv_md5\tverdict\tseconds\tsummary\n"
 # Everything besides the two objects that decides a gate verdict: the
 # kernel and its modules, the scripts that swap, build and boot, the test
 # exclusions and the guest size. The selftests output tree itself is not
@@ -168,14 +169,20 @@ def overlay_envs(env, gate_root, n):
 
 
 def parse_baseline(text):
+    """Rows keyed by name. A row is name, Rust md5, C md5, env md5, verdict,
+    the wall seconds its last run took (empty when unknown; files from
+    before the column have six fields) and the test summary."""
     rows = {}
     for line in text.splitlines():
         if not line.strip() or line.startswith("#"):
             continue
-        name, r, c, e, verdict, summary = line.split("\t", 5)
+        fields = line.split("\t", 6)
+        if len(fields) == 6:
+            fields.insert(5, "")
+        name, r, c, e, verdict, seconds, summary = fields
         if name in rows:
             raise ValueError(f"duplicate baseline row: {name}")
-        rows[name] = dict(r=r, c=c, e=e, verdict=verdict, summary=summary)
+        rows[name] = dict(r=r, c=c, e=e, verdict=verdict, seconds=seconds, summary=summary)
     return rows
 
 
@@ -193,8 +200,26 @@ def save_baseline(path, rows):
         for name in sorted(rows):
             row = rows[name]
             summary = row["summary"].replace("\t", " ").replace("\n", " ")
-            f.write(f"{name}\t{row['r']}\t{row['c']}\t{row['e']}\t{row['verdict']}\t{summary}\n")
+            f.write(f"{name}\t{row['r']}\t{row['c']}\t{row['e']}\t{row['verdict']}\t"
+                    f"{row.get('seconds', '')}\t{summary}\n")
     temporary.replace(path)
+
+
+def recorded_seconds(rows):
+    """name -> seconds from baseline rows that carry a number."""
+    seconds = {}
+    for name, row in rows.items():
+        try:
+            seconds[name] = float(row.get("seconds") or "")
+        except ValueError:
+            pass
+    return seconds
+
+
+def longest_first(names, seconds):
+    """Unknown durations first (in the given order), then longest first;
+    ties keep the given order."""
+    return sorted(names, key=lambda n: (n in seconds, -seconds.get(n, 0.0)))
 
 
 def baseline_row(rust_md5, c_md5, env_md5, result):
@@ -205,7 +230,8 @@ def baseline_row(rust_md5, c_md5, env_md5, result):
     if result["verdict"] == "FAIL":
         oracle = {"PASS": "C-PASS", "NO-ORACLE": "C-NOCONSUMER"}.get(result["c_verdict"], "C-FAIL")
         summary = f"{summary}; {oracle}"
-    return dict(r=rust_md5, c=c_md5, e=env_md5, verdict=result["verdict"], summary=summary)
+    return dict(r=rust_md5, c=c_md5, e=env_md5, verdict=result["verdict"],
+                seconds=str(result.get("seconds", "")), summary=summary)
 
 
 def env_hash(repo, kernel, c_dir, env):
@@ -264,6 +290,14 @@ class Gate:
         return row
 
     def gate_one(self, name, wenv):
+        """The verdict dict, with `seconds`: the wall time the worker spent on
+        the object (the C re-run after a FAIL included)."""
+        start = time.monotonic()
+        result = self._gate_one(name, wenv)
+        result["seconds"] = round(time.monotonic() - start)
+        return result
+
+    def _gate_one(self, name, wenv):
         if "GATE_DIR" in wenv:
             return self.gate_overlay(name, wenv)
         log = self.log_dir / f"{name}.log"
@@ -297,16 +331,19 @@ class Gate:
                 self.on_row(name, result)
                 self.active_by_worker.pop(k, None)
 
-    def run_all(self, names, workers, serial):
+    def run_all(self, names, workers, serial, seconds=None):
         """Every name once: the non-serial ones over `workers`, then the
         serial ones alone in the shared tree. One worker means the shared
-        tree for everything."""
+        tree for everything. `seconds` (name -> the last recorded run time)
+        orders the parallel queue longest first, the standard greedy
+        against a long object landing last; names without a record (new
+        translations) go first."""
         self.workers = list(workers)
         if len(self.workers) == 1:
             self.worker_loop(0, list(names))
             return
         with ThreadPoolExecutor(max_workers=len(self.workers)) as pool:
-            queue = [n for n in names if n not in serial]
+            queue = longest_first([n for n in names if n not in serial], seconds or {})
             for future in [pool.submit(self.worker_loop, k, queue)
                            for k in range(len(self.workers))]:
                 future.result()

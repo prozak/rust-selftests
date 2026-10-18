@@ -94,7 +94,7 @@ def current_env_hash(repo, c_dir):
 
 def seed(repo, c_dir, verdict="PASS", summary="Summary: 1/0 PASSED", **override):
     row = dict(r=md5(repo / "bld/a.bpf.o"), c=md5(c_dir / "a.bpf.o"),
-               e=current_env_hash(repo, c_dir), verdict=verdict, summary=summary)
+               e=current_env_hash(repo, c_dir), verdict=verdict, seconds="", summary=summary)
     row.update(override)
     qemu_gate.save_baseline(repo / gate.BASELINE, {"a": row})
     return row
@@ -218,7 +218,8 @@ def test_reseed_from_nightly_tsv_checks_hashes(stack, capsys):
     nightly = repo / "nightly/run"
     nightly.mkdir(parents=True)
     row = dict(r=md5(repo / "bld/a.bpf.o"), c=md5(c_dir / "a.bpf.o"),
-               e=current_env_hash(repo, c_dir), verdict="PASS", summary="Summary: 1/0 PASSED")
+               e=current_env_hash(repo, c_dir), verdict="PASS", seconds="21",
+               summary="Summary: 1/0 PASSED")
     qemu_gate.save_baseline(nightly / "runtime-after.tsv", {"a": row})
     assert gate.main(["--reseed", str(nightly / "runtime-after.tsv")]) == 0
     assert baseline(repo)["a"] == row and gate_runs(calls) == []
@@ -317,3 +318,48 @@ def test_unknown_name_is_a_usage_error(stack):
     with pytest.raises(SystemExit) as error:
         gate.main(["nonexistent"])
     assert error.value.code == 2
+
+
+def test_baseline_round_trips_seconds_and_reads_legacy_rows(tmp_path):
+    path = tmp_path / "baseline.tsv"
+    qemu_gate.save_baseline(path, {"a": dict(r="r", c="c", e="e", verdict="PASS", seconds="17",
+                                             summary="Summary: 1/0 PASSED"),
+                                   "b": dict(r="r", c="c", e="e", verdict="PASS",
+                                             summary="no seconds yet")})
+    rows = qemu_gate.parse_baseline(path.read_text())
+    assert rows["a"]["seconds"] == "17" and rows["b"]["seconds"] == ""
+    assert rows["a"]["summary"] == "Summary: 1/0 PASSED"
+    legacy = qemu_gate.parse_baseline("x\tr\tc\te\tFAIL\tSummary: 0/1 PASSED; C-PASS\n")
+    assert legacy["x"] == dict(r="r", c="c", e="e", verdict="FAIL", seconds="",
+                               summary="Summary: 0/1 PASSED; C-PASS")
+    assert qemu_gate.recorded_seconds(rows) == {"a": 17.0}
+
+
+def test_parallel_queue_runs_unknown_then_longest_first():
+    seconds = {"short": 10, "long": 200, "mid": 60}
+    assert qemu_gate.longest_first(["short", "new1", "long", "mid", "new2"], seconds) == [
+        "new1", "new2", "long", "mid", "short"]
+
+
+def test_gate_records_seconds_and_orders_the_queue(stack, monkeypatch):
+    repo, c_dir, calls, _ = stack
+    order = []
+
+    def fake_gate_one(self, name, wenv):
+        order.append(name)
+        return dict(verdict="PASS", exit=0, summary="Summary: 1/0 PASSED", seconds=3,
+                    c_exit=0, c_verdict="NOT-RUN", c_summary="")
+
+    monkeypatch.setattr(qemu_gate.Gate, "gate_one", fake_gate_one)
+    for name in ("b", "c"):
+        (repo / f"progs/{name}.rs").write_text("rust source")
+        (c_dir / f"{name}.bpf.o").write_text("C")
+        (c_dir / f"{name}.bpf.o.corig").write_text("C")
+        (repo / f"bld/{name}.bpf.o").write_text("Rust")
+    env_hash = current_env_hash(repo, c_dir)
+    qemu_gate.save_baseline(repo / gate.BASELINE, {
+        "a": dict(r="stale", c="stale", e=env_hash, verdict="PASS", seconds="10", summary=""),
+        "b": dict(r="stale", c="stale", e=env_hash, verdict="PASS", seconds="40", summary="")})
+    assert gate.main(["--workers", "2"]) == 0
+    assert order == ["c", "b", "a"]  # unknown first, then longest first
+    assert {n: row["seconds"] for n, row in baseline(repo).items()} == {"a": "3", "b": "3", "c": "3"}

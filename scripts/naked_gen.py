@@ -918,13 +918,17 @@ class Generator:
                 except Unsupported:
                     continue
                 if d.section:
-                    declared[d.name] = d.section
+                    declared[d.name] = d
         for head, body in items:
             if body is None:
                 continue
             f = parse_function(head, body)
-            if f.section is None and f.name in declared:
-                f.section = declared[f.name]
+            d = declared.get(f.name)
+            if d is not None:
+                if f.section is None:
+                    f.section = d.section
+                if "typeof(" in f.rtype and d.rtype in C_RETURN_TYPES:
+                    f.rtype = d.rtype      # `int BPF_PROG(name, ...)`
             if f.naked:
                 # AsmPrinter::PrintSpecial bumps its counter once per asm
                 # statement that expands a `%=` (${:uid}), from 0
@@ -1307,10 +1311,65 @@ class Generator:
             return "*mut c_void"
         return types.rust(tid)
 
+    def struct_ops(self, ds):
+        """A struct_ops map: the C's `SEC(".struct_ops") struct T v = {
+        .op = (void *)prog, ... }`. libbpf relocates each set member (which
+        must be a pointer to a function prototype in BTF) to its program and
+        leaves the unset ones NULL; the kernel takes the value's type from
+        its own BTF and only compares member kinds, so a set member carries
+        the program's Rust fn type and an unset one is a null `*const c_void`
+        (a raw pointer: not Sync, hence `static mut`)."""
+        btf, types, elf, out = self.obj.btf, self.obj.types, self.obj.elf, []
+        sec = elf.section_by_name(ds.name)
+        for vtid, _voff, _vsize in ds.extra:
+            var = btf.types[vtid]
+            voff, vsize = self.obj.var_extent(ds.name, var.name)
+            st = btf.types[btf.strip(var.size)]
+            if st.kind != K_STRUCT or not st.name:
+                raise Unsupported(f"{ds.name} {var.name}: not a named struct")
+            data = sec.data[voff:voff + vsize] if sec and sec.data else b""
+            data = data + b"\0" * (vsize - len(data))
+            rels = {}
+            for off, r in elf.relocs.get(sec.idx, {}).items() if sec else []:
+                if voff <= off < voff + vsize:
+                    target = r.sym
+                    if target.type == STT_SECTION:
+                        imm = struct.unpack_from("<q", sec.data, off)[0]
+                        target = elf.named_symbol_at(target.shndx, imm)
+                    if target is None or target.type != 2:
+                        raise Unsupported(f"{var.name}: relocation against a non-function")
+                    rels[off - voff] = target.name
+            fields, inits = [], []
+            for mname, mtid, moff in st.extra:
+                mt, b = btf.types[btf.strip(mtid)], moff // 8
+                if mt.kind == K_PTR and b in rels:
+                    fields.append(f"    {ident(mname)}: {self.fn_type(rels[b])},")
+                    inits.append(f"{ident(mname)}: {rust_fn(rels[b])}")
+                elif mt.kind == K_PTR:
+                    if any(data[b:b + 8]):
+                        raise Unsupported(f"{var.name}.{mname}: non-null pointer without a relocation")
+                    fields.append(f"    {ident(mname)}: *const c_void,")
+                    inits.append(f"{ident(mname)}: core::ptr::null()")
+                    self.needs_cvoid = True
+                else:
+                    fields.append(f"    {ident(mname)}: {types.rust(mtid)},")
+                    inits.append(f"{ident(mname)}: {types.literal(mtid, data[b:])}")
+            types.defs.append("/// The C's struct_ops map value: the kernel's struct of this name.\n"
+                              "#[allow(non_camel_case_types, non_snake_case)]\n#[repr(C)]\n"
+                              f"struct {st.name} {{\n" + "\n".join(fields) + "\n}")
+            out.append(f'#[link_section = "{ds.name}"]\n#[no_mangle]\n#[allow(non_upper_case_globals)]\n'
+                       f"static mut {var.name}: {st.name} = {st.name} {{ " + ", ".join(inits) + " };")
+            self.global_names.append(var.name)
+            self.count("globals")
+        return out
+
     def globals(self):
         btf, types, elf, out = self.obj.btf, self.obj.types, self.obj.elf, []
         for ds in btf.datasecs():
             if ds.name in (".maps", ".ksyms", ".kconfig", "license") or ds.name.startswith(".arena"):
+                continue
+            if ds.name.startswith(".struct_ops"):
+                out += self.struct_ops(ds)
                 continue
             if not re.match(r"^\.(data|bss|rodata|percpu)(\.|$)", ds.name):
                 raise Unsupported(f"DATASEC {ds.name}")
@@ -1531,10 +1590,19 @@ class Generator:
         if any(re.search(r"\b(?:__anon_type\d+|\w+__anon\d+)\b", d) for d in self.obj.types.defs):
             out += ["// the C's anonymous types, named here; scripts/btf_anon.py clears",
                     "// the names in the object's BTF", "// BTF_ANON", ""]
+        # a `*mut c_void` parameter or member is the C's `void *`: BTF must
+        # say void too (the kernel checks a global subprogram's `void *ctx
+        # __arg_ctx`, say), where rustc's debug info names the c_void enum
+        if any("c_void" in p for f in self.funcs if not f.naked for p in f.rust_params) \
+                or re.search(r"\w+: \*(?:mut|const) c_void\b", hand_text or "") \
+                or any("c_void" in d for d in self.obj.types.defs) \
+                or any("c_void" in m for m in maps) or any("c_void" in g for g in globs):
+            out += ["// a `*mut c_void` is the C's `void *` in BTF (scripts/btf_rename.py)",
+                    "// BTF_C_VOID: c_void", ""]
         # the Makefile reads marker lines from progs/<name>.rs only: carry
         # the hand file's over
-        markers = re.findall(r"^// (?:BTF_TYPE_ID|BTF_KSYM|BTF_WEAK_KFUNC|BTF_C_CHAR|RUSTC_OPT_LEVEL): .*$",
-                             hand_text, re.M)
+        markers = re.findall(r"^// (?:(?:BTF_TYPE_ID|BTF_KSYM|BTF_WEAK_KFUNC|BTF_C_CHAR|RUSTC_OPT_LEVEL): .*"
+                             r"|translint: allow\(.*\))$", hand_text, re.M)
         if markers:
             out += ["// (from the hand file)"] + markers + [""]
         if uses:
@@ -1549,11 +1617,23 @@ class Generator:
             out.append("use core::ffi::c_void;")
         out.append("")
 
+        # `// GEN_TAGS: name:` + `//     tag,` lines in the hand file replace
+        # the C object's tags for one program (the hand file also carries the
+        # `// translint: allow(test-tags:name)` that goes with it): the C
+        # object was built for one BPF CPU version, and a test whose messages
+        # count instructions carries `#if __BPF_CPU_VERSION__` branches
+        overrides = {m.group(1): [ln[len("//     "):] for ln in m.group(2).splitlines()]
+                     for m in re.finditer(r"^// GEN_TAGS: (\w+):\n((?://     .*\n)+)", hand_text, re.M)}
         if tags:
             out.append("test_tags! {")
             for f in self.funcs:
                 if f.name in tags:
-                    macros = [tag_macro(p, self.name) for p in tags.pop(f.name)]
+                    payloads = tags.pop(f.name)
+                    if f.name in overrides:
+                        out.append(f"    {f.name}:")      # GEN_TAGS, from the hand file
+                        out += ["        " + ln for ln in overrides[f.name]]
+                        continue
+                    macros = [tag_macro(p, self.name) for p in payloads]
                     out.append(f"    {f.name}:")
                     out.append("        " + ",\n        ".join(macros) + ";")
             if tags:

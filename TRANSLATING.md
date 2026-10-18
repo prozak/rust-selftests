@@ -408,7 +408,19 @@ generated with `--with-c-bodies`: the generated file include!s
 `progs/hand/<name>.rs`, written once with a stub and the C text for each
 such function and never overwritten, where those bodies are translated by
 hand (a function that only references kfuncs for their BTF prototypes,
-`__kfunc_btf_root`, is generated regardless of its name). The `naked-verbatim` class of `scripts/translint.py`
+`__kfunc_btf_root`, is generated regardless of its name). The hand file
+can steer the generated one: `// GEN_SKIP_TYPE: name` keeps the
+generator's copy of a type out (the hand file defines it, as a `#[btf]`
+view, say); `// GEN_TAGS: name:` followed by `//     tag,` lines replaces
+one program's test_tags! entry (the C object was built for one BPF CPU
+version, and a test whose messages count instructions carries
+`#if __BPF_CPU_VERSION__` branches), with the matching
+`// translint: allow(test-tags:name)`; `// BTF_TYPE_ID:` and the other
+marker lines, and `// translint: allow(...)` lines, are carried over to
+the generated file, which is the one the scripts read. A `.struct_ops`
+map in the C becomes the Rust struct of the kernel type's name whose set
+members carry the program's fn type and the unset ones are null
+`*const c_void`, plus a `static mut` in that section. The `naked-verbatim` class of `scripts/translint.py`
 (`scripts/naked_verbatim.py`) then checks every `// BPF_NAKED:` function
 of the built object against the C object instruction by instruction,
 relocation symbols included, which is the real assertion for a verbatim

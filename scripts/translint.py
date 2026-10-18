@@ -4,7 +4,8 @@ equivalence prover has caught in real translations (equiv/README.md's
 "true findings"). Advisory WARN/NOTE lines plus hard ERRORs; exit 1 iff
 any ERROR.
 
-Classes checked (suppress per file with `// translint: allow(<class>)`):
+Classes checked (suppress per file with `// translint: allow(<class>)`, or
+one program's findings with `// translint: allow(<class>:<program>)`):
 
   program-set    [ERROR] the compiled objects must define the same set of
                  programs (GLOBAL FUNC symbols outside .text, i.e. every
@@ -470,8 +471,11 @@ def lint(name):
     msgs = []
 
     def emit(level, cls, text):
-        if cls not in allowed:
-            msgs.append((level, cls, text))
+        # `allow(<class>)` silences a class; `allow(<class>:<name>)` only its
+        # findings about one program/function (`<name>: ...` messages)
+        if cls in allowed or any(a == f"{cls}:{text.split(':', 1)[0]}" for a in allowed):
+            return
+        msgs.append((level, cls, text))
 
     for level, text in check_program_set(name):
         emit(level, "program-set", text)

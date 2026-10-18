@@ -24,8 +24,16 @@ the C object, or for a section it does not have, the statics are ordered
 by source line and aligned to at least 8. scripts/translint.py's
 private-layout check compares the resulting objects.
 
-Usage: private_sections.py <module.ll> [<c object>]  (a `.corig` backup
-of the C object is preferred when present)
+A translation can ask for the same treatment of a plain section with
+`// C_LAYOUT: .data .bss` (the Makefile passes `--layout=.data --layout=.bss`):
+rustc orders the statics of .data/.bss by symbol name, clang by declaration,
+and a harness that compares the skeleton's struct with the section
+(data_in_arena: `bpf_map__initial_value()`'s size against
+`sizeof(*skel->data)`, a section that must end 8-byte aligned) needs the
+C object's layout. The statics then get an explicit `section` attribute.
+
+Usage: private_sections.py <module.ll> [<c object>] [--layout=<section>]...
+(a `.corig` backup of the C object is preferred when present)
 """
 import os
 import re
@@ -34,7 +42,46 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'equiv'))
 
 GLOBAL = re.compile(r'^@(\S+) = (.*?)section "(\.(?:data|bss)\.[^"]+)"(.*?), align (\d+)(.*?!dbg !(\d+).*)$')
+# a definition without a section attribute: LLVM places it by its kind
+IMPLICIT = re.compile(r'^@(\S+) = ((?:[a-z_]+ )*?)(global|constant) (.*?), align (\d+)(.*?!dbg !(\d+).*)$')
 PRIVATE_SECTION = re.compile(r'^\.(data|bss)\.[A-Za-z_][A-Za-z0-9_]*$')
+
+
+def default_section(kind, init):
+    """The section LLVM gives a global without a section attribute."""
+    if kind == 'constant':
+        return '.rodata'
+    return '.bss' if re.search(r'(zeroinitializer|null|\s0)\s*$', init) else '.data'
+
+
+class Global:
+    """One global's definition line, split so that it can be re-emitted
+    with another alignment (and, for an implicit section, with the section
+    made explicit)."""
+
+    def __init__(self, name, head, section, mid, natural, tail, dbg):
+        self.name, self.head, self.section, self.mid = name, head, section, mid
+        self.natural, self.tail, self.dbg = natural, tail, dbg
+
+    @classmethod
+    def parse(cls, line, extra=()):
+        m = GLOBAL.match(line)
+        if m:
+            return cls(m.group(1), m.group(2), m.group(3), m.group(4), int(m.group(5)),
+                       m.group(6), m.group(7))
+        if not extra or 'section "' in line:
+            return None
+        m = IMPLICIT.match(line)
+        if not m or 'external ' in m.group(2):
+            return None
+        section = default_section(m.group(3), m.group(4))
+        if section not in extra:
+            return None
+        return cls(m.group(1), f'{m.group(2)}{m.group(3)} {m.group(4)}, ', section, '',
+                   int(m.group(5)), m.group(6), m.group(7))
+
+    def rebuilt(self, align):
+        return f'@{self.name} = {self.head}section "{self.section}"{self.mid}, align {align}{self.tail}'
 
 
 def var_of(var_expr, index):
@@ -76,9 +123,9 @@ def section_aligns(path):
     return out
 
 
-def c_layout(path):
-    """section name -> CSection for the C object; None when there is no
-    such object."""
+def c_layout(path, extra=()):
+    """section name -> CSection for the C object (its private sections and
+    the `extra` ones); None when there is no such object."""
     if path is None:
         return None
     if os.path.exists(path + '.corig'):
@@ -89,7 +136,7 @@ def c_layout(path):
     elf = BpfElf(path)
     aligns = section_aligns(path)
     out = {s.name: CSection({}, aligns.get(s.name, 0)) for s in elf.sections
-           if PRIVATE_SECTION.match(s.name)}
+           if PRIVATE_SECTION.match(s.name) or s.name in extra}
     for sym in elf.symbols:
         if sym.type != 1 or sym.shndx >= len(elf.sections):
             continue
@@ -110,7 +157,9 @@ def fitting_align(prev_end, offset, natural):
     return max(natural, offset & -offset) if offset else natural
 
 
-def layout(ir, c=None):
+def layout(ir, c=None, extra=()):
+    """`extra`: plain sections (.data, .bss, .rodata) to lay out like the
+    private ones; their globals get the section attribute."""
     lines = ir.split('\n')
     index = {}
     for line in lines:
@@ -119,16 +168,16 @@ def layout(ir, c=None):
             index[m.group(1)] = m.group(2)
     sections = {}
     for i, line in enumerate(lines):
-        m = GLOBAL.match(line)
-        if not m:
+        g = Global.parse(line, extra)
+        if g is None:
             continue
-        name, src = var_of(m.group(7), index)
+        name, src = var_of(g.dbg, index)
         if src is None:
             continue
-        sections.setdefault(m.group(3), []).append((i, src, name, int(m.group(5)), m))
+        sections.setdefault(g.section, []).append((i, src, name, g.natural, g))
 
-    def rebuilt(m, align):
-        return f'@{m.group(1)} = {m.group(2)}section "{m.group(3)}"{m.group(4)}, align {align}{m.group(6)}'
+    def rebuilt(g, align):
+        return g.rebuilt(align)
 
     for section, members in sections.items():
         slots = [i for i, *_ in members]
@@ -156,11 +205,13 @@ def layout(ir, c=None):
 
 
 def main():
-    if len(sys.argv) not in (2, 3):
+    extra = tuple(a[len('--layout='):] for a in sys.argv[1:] if a.startswith('--layout='))
+    args = [a for a in sys.argv[1:] if not a.startswith('--layout=')]
+    if len(args) not in (1, 2):
         sys.exit(__doc__)
-    with open(sys.argv[1]) as f:
+    with open(args[0]) as f:
         ir = f.read()
-    out = layout(ir, c_layout(sys.argv[2] if len(sys.argv) == 3 else None))
+    out = layout(ir, c_layout(args[1] if len(args) == 2 else None, extra), extra)
     if out != ir:
         with open(sys.argv[1], 'w') as f:
             f.write(out)

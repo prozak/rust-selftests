@@ -84,3 +84,38 @@ def test_fitting_align():
     assert fitting_align(4, 8, 4) == 8
     assert fitting_align(4, 4, 4) == 4
     assert fitting_align(12, 16, 4) == 8
+
+
+COUNTER = '@counter = local_unnamed_addr global [4 x i8] c"\\05\\00\\00\\00", align 4, !dbg !60\n'
+PX = '@px = local_unnamed_addr global ptr @x, align 8, !dbg !62\n'
+X = '@x = global [4 x i8] c"*\\00\\00\\00", align 4, !dbg !64\n'
+SUM = '@sum = local_unnamed_addr global [8 x i8] zeroinitializer, align 8, !dbg !66\n'
+DI2 = ('!60 = !DIGlobalVariableExpression(var: !61, expr: !DIExpression())\n'
+       '!61 = distinct !DIGlobalVariable(name: "counter", line: 30, isLocal: false)\n'
+       '!62 = !DIGlobalVariableExpression(var: !63, expr: !DIExpression())\n'
+       '!63 = distinct !DIGlobalVariable(name: "px", line: 40, isLocal: false)\n'
+       '!64 = !DIGlobalVariableExpression(var: !65, expr: !DIExpression())\n'
+       '!65 = distinct !DIGlobalVariable(name: "x", line: 34, isLocal: false)\n'
+       '!66 = !DIGlobalVariableExpression(var: !67, expr: !DIExpression())\n'
+       '!67 = distinct !DIGlobalVariable(name: "sum", line: 36, isLocal: false)\n')
+
+
+def test_plain_sections_are_laid_out_only_when_asked():
+    ir = PX + COUNTER + X + SUM + DI2
+    assert layout(ir, {'.data': {'counter': (0, 4), 'x': (8, 4), 'px': (16, 8)}}) == ir
+    # data_in_arena: rustc's name order ends .data at 44 bytes, clang's
+    # declaration order at 48; the statics get the section attribute
+    c = {'.data': CSection({'counter': (0, 4), 'x': (8, 4), 'px': (16, 8)}, 8)}
+    out = layout(ir, c, ('.data',))
+    assert out.index('@counter') < out.index('@x') < out.index('@px')
+    assert '@counter = local_unnamed_addr global [4 x i8] c"\\05\\00\\00\\00", section ".data", align 8, !dbg !60' in out
+    assert 'section ".data", align 8, !dbg !64' in out  # 8 after 0+4
+    assert 'section ".data", align 8, !dbg !62' in out
+    assert SUM in out                                    # .bss was not asked for
+
+
+def test_a_zero_initialized_global_is_bss():
+    c = {'.bss': CSection({'sum': (0, 8)}, 8)}
+    out = layout(PX + SUM + DI2, c, ('.bss',))
+    assert 'zeroinitializer, section ".bss", align 8, !dbg !66' in out
+    assert PX in out

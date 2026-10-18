@@ -387,9 +387,10 @@ def check_decl_tags(name):
 PRIVATE_SECTION = re.compile(r"^\.(data|bss)\.[A-Za-z_][A-Za-z0-9_]*$")
 
 
-def private_layout(obj_path):
+def private_layout(obj_path, extra=()):
     """Section name -> [(plain variable name, offset, size)] by offset for
-    every `.data.X` / `.bss.X` section of a compiled object. None when the
+    every `.data.X` / `.bss.X` section of a compiled object, and the
+    `extra` sections (the translation's `// C_LAYOUT:`). None when the
     object can't be read."""
     if not os.path.exists(obj_path):
         return None
@@ -399,7 +400,7 @@ def private_layout(obj_path):
         return None
     out = {}
     for sec in elf.sections:
-        if PRIVATE_SECTION.match(sec.name):
+        if PRIVATE_SECTION.match(sec.name) or sec.name in extra:
             out[sec.name] = []
     for sym in elf.symbols:
         if sym.type != 1 or sym.shndx >= len(elf.sections):
@@ -417,8 +418,11 @@ def check_private_layout(name):
     c_obj = os.path.join(C_OBJ_DIR, f"{name}.bpf.o")
     if os.path.exists(c_obj + ".corig"):
         c_obj = c_obj + ".corig"
-    want = private_layout(c_obj)
-    got = private_layout(os.path.join(REPO, "bld", f"{name}.bpf.o"))
+    with open(os.path.join(REPO, "progs", f"{name}.rs"), encoding="utf-8") as f:
+        extra = tuple(w for m in re.finditer(r"^// C_LAYOUT: (.*)$", f.read(), re.M)
+                      for w in m.group(1).split())
+    want = private_layout(c_obj, extra)
+    got = private_layout(os.path.join(REPO, "bld", f"{name}.bpf.o"), extra)
     if want is None or got is None:
         return
 

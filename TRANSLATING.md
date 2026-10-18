@@ -461,7 +461,12 @@ head 0, root 16, lock 32), so declaring them in the C object's order
 pass does not need it. translint's `private-layout` class compares the two
 objects; it fails when a static is missing (rustc drops an unreferenced
 private static, see linked_list.rs's glock2), has another size or is more
-aligned than C's. With the tags
+aligned than C's. A plain section can be laid out the C way too, with
+`// C_LAYOUT: .data .bss` in the translation: rustc orders those statics by
+symbol name, and data_in_arena's harness compares the skeleton's `struct
+data` with the section (`bpf_map__initial_value()`'s size against
+`sizeof(*skel->data)`), which needs clang's order and a section that ends
+8-byte aligned; translint then compares those sections as well. With the tags
 in place, `bpf_kptr_xchg` into the field loads as it does for the C
 object, so translate the kptr round trip as written; do not replace it
 with a release of the local pointer. `cpumask_success.rs` has every form.

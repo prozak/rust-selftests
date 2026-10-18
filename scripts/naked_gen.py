@@ -166,6 +166,25 @@ def preprocess(cpath):
     return "\n".join(out)
 
 
+def preprocess_files(cpath):
+    """{file: its preprocessed text} for the main file and the selftests'
+    own headers (those under tools/testing/selftests/bpf, vmlinux.h
+    excepted): a header can define a function the C object carries
+    (bpf_sockopt_helpers.h's get_set_sk_priority)."""
+    sdir = os.path.dirname(os.path.dirname(os.path.abspath(cpath)))
+    out, cur = {}, None
+    for line in clang(["-E", cpath], "preprocess").split("\n"):
+        m = re.match(r'# \d+ "([^"]*)"', line)
+        if m:
+            f = os.path.abspath(m.group(1))
+            cur = f if f == os.path.abspath(cpath) or \
+                (f.startswith(sdir + os.sep) and os.path.basename(f) != "vmlinux.h") else None
+            continue
+        if cur and not line.startswith("#"):
+            out.setdefault(cur, []).append(line)
+    return {f: "\n".join(ls) for f, ls in out.items()}
+
+
 # --- C parsing (preprocessed text) -----------------------------------------
 
 def split_top(text, sep):
@@ -269,6 +288,7 @@ class Func:
         self.rtype, self.params, self.naked, self.body = rtype, params, naked, body
         self.stmts, self.operands, self.rust_params = [], [], []   # filled by resolve
         self.asm_index, self.clobbers, self.root, self.c_text = 0, [], None, ""
+        self.header = None      # the included header defining it, if any
 
 
 def parse_function(head, body):
@@ -948,6 +968,26 @@ class Generator:
                 self.funcs.append(f)
             else:
                 self.errors.append(f"C body: {f.name}")
+        if self.with_c_bodies:
+            # a function the C object carries from an included header
+            missing = set(self.obj.functions()) - {f.name for f in self.funcs}
+            for path, htext in preprocess_files(self.cpath).items() if missing else []:
+                if os.path.abspath(path) == os.path.abspath(self.cpath):
+                    continue
+                for head, body in split_items(htext):
+                    if body is None or not is_func_header(head):
+                        continue
+                    try:
+                        f = parse_function(head, body)
+                    except Unsupported:
+                        continue
+                    if f.name not in missing or f.naked:
+                        continue
+                    with open(path) as fh:
+                        f.c_text = c_function_text(fh.read(), f.name)
+                    f.header = os.path.basename(path)
+                    self.funcs.insert(0, f)      # included ahead of the source's own
+                    missing.discard(f.name)
         if not any(f.naked for f in self.funcs) and not self.with_c_bodies:
             self.errors.append("no naked function")
 
@@ -1734,7 +1774,8 @@ class Generator:
         ret = C_RETURN_TYPES.get(f.rtype, "")
         if "c_void" in ret:
             self.needs_cvoid = True
-        lines = [f"// HAND: {f.name} -- translate the C below (see the file comment)"]
+        where = f" (from {f.header})" if f.header else ""
+        lines = [f"// HAND: {f.name} -- translate the C below{where} (see the file comment)"]
         lines += [("//   " + ln.replace("\t", "    ")).rstrip() for ln in f.c_text.splitlines()]
         if f.section:
             lines.append(f'#[link_section = "{f.section}"]')

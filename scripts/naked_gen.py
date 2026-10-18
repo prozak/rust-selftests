@@ -1411,7 +1411,7 @@ class Generator:
             if ds.name.startswith(".struct_ops"):
                 out += self.struct_ops(ds)
                 continue
-            if not re.match(r"^\.(data|bss|rodata|percpu)(\.|$)", ds.name):
+            if not re.match(r"^\.(data|bss|rodata|percpu|addr_space\.\d+)(\.|$)", ds.name):
                 raise Unsupported(f"DATASEC {ds.name}")
             sec = elf.section_by_name(ds.name)
             for vtid, _voff, _vsize in ds.extra:

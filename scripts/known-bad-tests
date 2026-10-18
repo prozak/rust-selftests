@@ -38,3 +38,11 @@ stack_arg_precision/stack_arg: precision backtracking across bpf2bpf call for kf
 # resolves the attach target to the static subprog of that object). Both
 # subtests of this name go (the first, which expects -EINVAL, passes).
 exceptions/non-throwing extension -> non-throwing subprog
+# verifier_unpriv's first subtest is unprivileged-only; run alone (the gate
+# runs only the tests that load the swapped object) libbpf probes
+# FEAT_BTF_FUNC with the capabilities dropped, caches the failure for the
+# process, and the next privileged program with a callback then loads
+# without func_info ("missing btf func_info", -EINVAL) with the pristine C
+# object as well. Running all of prog_tests/verifier.c hid this (an earlier
+# privileged test warmed the cache): an upstream test-isolation bug.
+verifier_unpriv/unpriv: pseudo function policy diagnostic

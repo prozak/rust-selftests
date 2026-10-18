@@ -246,9 +246,11 @@ C object or gate environment differ from the committed
 over private overlays of the selftests output, and restores the C objects
 itself; with nothing changed it finishes in seconds. `make ci-local` runs
 it after the proof guard. The whole corpus afresh, with the proof sweep,
-is `make ci-nightly` (see [docs/ci-nightly.md](docs/ci-nightly.md)); its
-gate took 31 minutes in the 2026-10-16 run with eight guests (58 minutes
-with four, 3 hours 27 minutes with one).
+is `make ci-nightly` (see [docs/ci-nightly.md](docs/ci-nightly.md)). A
+swap runs only the `prog_tests` functions that load the swapped object
+(`scripts/affected_tests.py`); the full gate over 776 objects took 1840 s
+with eight guests on 2026-10-18, against 2662 s the day before, when every
+`verifier_*` swap ran all 145 tests of `prog_tests/verifier.c`.
 It needs `pip install -r requirements.txt`, into `.venv/` if you want
 `make` to find it by itself.
 

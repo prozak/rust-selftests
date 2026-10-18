@@ -166,6 +166,21 @@ those objects gate in the overlay workers too, the lane is the two
 (`GATE_WORKERS`, `NIGHTLY_GATE_WORKERS`); the guest count is capped at
 eight.
 
+Where the time goes (2026-10-17 nightly, 776 objects, 21238 worker
+seconds, 2662 s wall): the gate is throughput-bound, 2662 s observed
+against a 2652 s sum/8 lower bound, so ordering the queue longest-first
+is worth about one percent. The 140 `verifier_*` objects took 8370 of
+those seconds because each swap ran all 145 tests of
+`prog_tests/verifier.c`; running only the tests that load the object
+(`scripts/affected_tests.py`, see "Running what changed in QEMU") cut the
+full gate to 1840 s on 2026-10-18 (14570 worker seconds; a `verifier_*`
+object 17 s instead of 60 s). What remains is mostly the guest boot and
+shutdown, about 13 s of a typical 18 s object; batching several objects
+per guest is the next lever (#67). Two rows turned PASS into NO-ORACLE
+with the narrower filter, `verifier_stack_arg` and `pyperf600`: their only
+test is in `known-bad-tests`, and the other tests of their file, which the
+old filter ran, never loaded them.
+
 ## Running a single test
 
 ```sh

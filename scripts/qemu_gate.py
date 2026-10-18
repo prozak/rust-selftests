@@ -85,11 +85,21 @@ def run(argv, log, env, timeout=None, cwd=REPO):
                 CHILDREN.discard(child)
 
 
+# test_progs' exit status when the -t filter selected no test: the consumer
+# defines a test function the selftests Makefile did not register
+# (gen_tests_hdr's sed takes `void test_x(void)` at the start of a line;
+# prog_tests/uretprobe_stack.c prefixes its with `__weak`), so nothing ran,
+# with the C object either. Not a PASS, and not a FAIL of the translation.
+EXIT_NO_TEST = 2
+
+
 def runtime_result(name, rc, text):
     summary = next((line for line in reversed(text.splitlines())
                     if line.startswith("Summary:")), "")
     if rc == 0 and summary:
         return "PASS", summary
+    if rc == EXIT_NO_TEST and summary.startswith("Summary: 0/0 PASSED"):
+        return "NO-ORACLE", "no registered test ran (test_progs EXIT_NO_TEST)"
     if rc != 124 and (f"no prog_tests consume {name}" in text
                       or re.search(r"^\[swap\] affected tests:\s*$", text, re.M)):
         # no consumer at all, or every consumer is in known-bad-tests

@@ -37,7 +37,8 @@ place. The tests, the skeleton generator, libbpf and the kernel are
 unmodified bpf-next: no patches are
 applied ([`patches/kernel/`](patches/kernel) is empty). A passing test can still skip
 subtests, and a test that exercises several objects runs the others from C.
-**NO-ORACLE** means no `prog_tests` test uses the object, so nothing ran.
+**NO-ORACLE** means no `prog_tests` test uses the object, or the test that
+does is not registered with test_progs (uretprobe_stack), so nothing ran.
 
 The kernel is pinned, not tracking: `645f5fcf7a55` is bpf-next as of
 2026-10-16.

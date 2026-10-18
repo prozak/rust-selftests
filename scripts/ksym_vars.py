@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Emit debug declarations for explicitly selected external kernel variables.
+"""Emit debug declarations for explicitly selected external kernel symbols.
 
 Rust emits undefined ELF data symbols without the BTF VAR/.ksyms declarations
 libbpf needs. Each `// BTF_KSYM: symbol` selects an existing Rust extern and
@@ -7,6 +7,15 @@ mirrors its C object's ksym type and weak linkage before LLVM optimization.
 Scalar types retain size/signedness and qualifiers. Named struct/union
 descriptors identify kernel types; field accesses still use Rust's CO-RE.
 No program instructions or definitions are copied from the C oracle.
+
+A `// BTF_KSYM:` name may also be a kfunc the C object declares in .ksyms:
+its FUNC_PROTO is mirrored the same way (empty named structs for struct
+pointees), for the externs whose prototype must be the C declaration's rather
+than the running kernel's, which rust-bpf's add_ksyms.py mirrors by exact
+name: a `___flavor` of a kfunc (libbpf strips the suffix for the lookup and
+then checks the declared prototype against the kernel's, which is what such
+a test is about). The declaration is left for add_ksyms.py to skip (it has a
+section already), so the Rust extern keeps the C's argument list.
 """
 import argparse
 from pathlib import Path
@@ -31,17 +40,25 @@ def declarations(source):
 
 
 def contract(elf, names):
+    """name -> (BTF type id of the C's .ksyms declaration, weak) for a
+    variable, (prototype type id, weak, True) for an extern function."""
     types = elf.btf_types()
     datasecs = [t for t in types.values() if t[0] == 15 and t[1] == ".ksyms"]
     variables = {types[tid][1]: types[tid][2]
                  for sec in datasecs for tid in sec[4] if types[tid][0] == 14}
+    functions = {types[tid][1]: types[tid][2]
+                 for sec in datasecs for tid in sec[4] if types[tid][0] == 12}
     result = {}
     for name in names:
         symbols = [s for s in elf.symbols if s.name == name and s.shndx == 0
                    and s.bind in (1, 2)]
-        if name not in variables or len(symbols) != 1:
-            raise ValueError(f"{name}: C object must declare one undefined .ksyms variable")
-        result[name] = (variables[name], symbols[0].bind == 2)
+        if len(symbols) != 1 or (name not in variables and name not in functions):
+            raise ValueError(f"{name}: C object must declare one undefined .ksyms "
+                             "variable or function")
+        if name in variables:
+            result[name] = (variables[name], symbols[0].bind == 2)
+        else:
+            result[name] = (functions[name], symbols[0].bind == 2, True)
     return result
 
 
@@ -95,14 +112,36 @@ def lower(ir, names, btf, variables):
             extras = ", size: 64" if t.kind == 2 else (
                 f", name: {quoted(t.name)}" if t.kind == 8 else "")
             value = f"!DIDerivedType(tag: DW_TAG_{tags[t.kind]}, baseType: {typ(t.type)}{extras})"
+        elif t.kind == 13:
+            ret, params = t.proto
+            value = ("!DISubroutineType(types: !{" +
+                     ", ".join([typ(ret)] + [typ(p) for p in params]) + "})")
         else:
             raise ValueError(f"unsupported ksym BTF kind {t.kind} for {t.name or tid}")
         emitted[tid] = add(value)
         return emitted[tid]
 
+    def lower_function(ir, name, tid):
+        pattern = r"^declare ([^\n]*?@" + re.escape(name) + r"\([^\n]*)$"
+        matches = list(re.finditer(pattern, ir, re.M))
+        if len(matches) != 1:
+            raise ValueError(f"{name}: expected one Rust function declaration")
+        match = matches[0]
+        if "!dbg" in match[1] or "section " in match[1]:
+            raise ValueError(f"{name}: refusing to overwrite existing section/debug metadata")
+        if btf.types[tid].kind != 13:
+            raise ValueError(f"{name}: the C declaration is not a function prototype")
+        sp = add(f"!DISubprogram(name: {quoted(name)}, scope: {file[1]}, file: {file[1]}, "
+                 f"type: {typ(tid)}, flags: DIFlagPrototyped, spFlags: DISPFlagOptimized)")
+        declaration = f'declare !dbg {sp} {match[1]} section ".ksyms"'
+        return ir[:match.start()] + declaration + ir[match.end():]
+
     expressions = []
     for name in names:
-        tid, weak = variables[name]
+        tid, weak, *is_func = variables[name]
+        if is_func and is_func[0]:
+            ir = lower_function(ir, name, tid)
+            continue
         pattern = r"^@" + re.escape(name) + r" = (external|extern_weak) ([^\n]+)$"
         matches = list(re.finditer(pattern, ir, re.M))
         if len(matches) != 1 or not re.search(r"\b(global|constant)\b", matches[0][2]):

@@ -232,6 +232,15 @@ its kernel metadata and the map holding its head would fail to load. An address-
 typed kernel symbol, as in `test_ksyms_btf_null_check`. `test_ksyms`
 also demonstrates the C oracle's weak, typeless symbol resolving to zero.
 
+A kfunc's prototype is otherwise mirrored from the running kernel's BTF by
+exact name (rust-bpf's add_ksyms.py), which types the pointers of a name
+the kernel lacks `void *`. For a kfunc whose prototype must be the C
+declaration's, a `___flavor` (libbpf strips the suffix for the lookup and
+then checks the declared prototype against the kernel's; whether that
+check passes is what such a test is about), add `// BTF_KSYM: name` for
+the function as well: the C object's extern prototype is mirrored instead.
+`task_kfunc_success.rs` declares its three bpf_task_acquire flavors so.
+
 ## Kernel type IDs and program load order
 
 For C's `bpf_core_type_id_kernel(T)`, declare an `extern "C"` function

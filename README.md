@@ -111,19 +111,18 @@ its own.
 
 ## Status
 
-From `make ci-nightly` on 2026-10-17 (`nightly/20261017-llvm23`, the sources
-of the LLVM 23 move) on bpf-next `645f5fcf7a55` with no patches, pahole
-v1.32, LLVM 23.1.4 (release/23.x plus `patches/llvm/`) and rustc 1.99.1;
-the gate numbers are from the full gate run right after it, when the last
-harness fix had landed. The per-object tables are
+From `make ci-nightly` on 2026-10-17 (`nightly/20261017-verifier-sweep`,
+the sources of commit 88992f1, the end of the verifier sweep) on bpf-next
+`645f5fcf7a55` with no patches, pahole v1.32, LLVM 23.1.4 (release/23.x
+plus `patches/llvm/`) and rustc 1.99.1. The per-object tables are
 [`qemu/gate/baseline.tsv`](qemu/gate/baseline.tsv) and
 [`equiv/results/baseline.tsv`](equiv/results/baseline.tsv).
 
-**Runtime gate** (638 objects, eight 4-CPU KVM guests at a time, 27 minutes):
+**Runtime gate** (776 objects, eight 4-CPU KVM guests at a time, 44 minutes):
 
 | | objects |
 |---|---:|
-| PASS | 628 |
+| PASS | 766 |
 | FAIL | 0 |
 | NO-ORACLE | 10 |
 
@@ -132,29 +131,45 @@ in [`scripts/known-bad-tests`](scripts/known-bad-tests) (`fs_kfuncs`, whose
 xattr subtests fail with the C objects on this virtiofs root). Three more
 entries there name tests that fail with the pristine C objects of a clang 23
 build at this pin (`verifier_stack_arg`, a `stack_arg_precision` subtest, an
-`exceptions` subtest); the list now also reaches test_progs as its `-d`
+`exceptions` subtest); the list also reaches test_progs as its `-d`
 denylist.
 
-**Proof sweep** (same 638 objects, 180 s each):
+**Proof sweep** (same 776 objects, 180 s each, 26 minutes at eight jobs):
 
 | | objects |
 |---|---:|
-| EQUIV — every program proved equivalent to its C original | 447 |
-| BAIL — the checker met something it does not model | 122 |
-| TIMEOUT | 39 |
+| EQUIV — every program proved equivalent to its C original | 505 |
+| BAIL — some program met something the checker does not model | 191 |
+| TIMEOUT | 49 |
 | UNKNOWN | 16 |
 | NOPROGS — the object has no programs | 13 |
 | INEQUIV | 1 |
+| ERROR | 1 |
 
-This is the first run on LLVM 23 (from LLVM 22.1.8 / rustc 1.96.1). The C
-oracle moved with it (the selftests are built with the same clang), which
-switched on the `#if __clang_major__ >= 23` programs: stack arguments,
-aggregate kfunc returns, the real `stack_arg` tests. Against the last run
-on LLVM 22 the verdicts differ in four objects: `type_cast` is new (PASS,
-EQUIV), and `aggregate_ret_kfunc_arena`, `stack_arg`, `stack_arg_kfunc` went
-from EQUIV to BAIL because their programs are real now and the checker
-models neither aggregate returns in R0:R2 nor the `r11` stack-argument
-area. [docs/history/llvm23-move-2026-10-17.md](docs/history/llvm23-move-2026-10-17.md)
+Counted by program rather than by object, 3197 of the 4087 programs in the
+EQUIV and BAIL rows are proved.
+
+**The verifier sweep** (#25, #27; 2026-10-17) is what this run adds: 140 of
+the 143 `verifier_*.c` files, 138 objects more than the LLVM 23 run. The
+naked asm programs, some 2200 functions, are generated verbatim from the C
+source and the C object by `scripts/naked_gen.py`, and translint's
+`naked-verbatim` class compares them with the C object instruction by
+instruction; the 211 C bodies are translated by hand in `progs/hand/`.
+All 140 objects PASS the gate. The checker proves 60 of them whole and
+1675 of their 2101 programs; the 69 BAIL objects are partial proofs (the
+rest of their programs use helpers, kfuncs, stack arguments or expected
+rejections it does not model), 10 time out, and `verifier_arena_scalar` is
+the ERROR: a Z3 type error in the checker's atomic model, a checker defect
+still to fix. No verdict of the 638 earlier objects changed. Left out:
+`verifier_aggregate_arg` and `verifier_aggregate_ret` (rustc's BPF C ABI
+passes aggregates indirectly where clang flattens them into registers) and
+`verifier_bitfield_write` (a CO-RE bitfield relocation needs bitfield
+members in the object's own BTF, which Rust cannot define).
+[docs/history/verifier-sweep-2026-10-17.md](docs/history/verifier-sweep-2026-10-17.md)
+describes the generator and what the hand translations taught.
+
+The run before it, `nightly/20261017-llvm23`, was the first on LLVM 23;
+[docs/history/llvm23-move-2026-10-17.md](docs/history/llvm23-move-2026-10-17.md)
 has what the move broke and how each piece was fixed.
 
 The INEQUIV is `cpumask_success`. Its kfuncs return `bool`, and on x86-64
@@ -167,19 +182,6 @@ are not called directly (the source says where). The kernel's
 `bpf_list_empty()` does not return a clean value, so `refcounted_kptr.rs`
 masks its three list predicates by hand (its header explains). Until the
 build masks these returns, `make ci-local` fails on this object.
-
-**Since that run** (2026-10-17, the verifier sweep, #25/#27): 140 of the
-143 `verifier_*.c` files are translated, 776 objects in all. The naked
-asm programs (1688 of them) are generated verbatim from the C and the C
-object by `scripts/naked_gen.py` and checked instruction by instruction
-against the C object by translint's `naked-verbatim` class; the C bodies
-are translated by hand in `progs/hand/`. Each step was gated and guarded
-on its own (every new object PASS, no new INEQUIV); the full nightly has
-not been rerun yet, so the tables above are the LLVM 23 run's. Left out:
-`verifier_aggregate_arg` and `verifier_aggregate_ret` (rustc's BPF C ABI
-passes aggregates indirectly where clang flattens them into registers)
-and `verifier_bitfield_write` (a CO-RE bitfield relocation needs bitfield
-members in the object's own BTF, which Rust cannot define).
 
 ## Reproducing it
 

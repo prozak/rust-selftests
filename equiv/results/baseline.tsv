@@ -102,7 +102,7 @@ connect_force_port4	c011477f713cf24c301e8257bde39100	b7778fac3f5f43dd3dce6c0398f
 connect_force_port6	9ac23f2ded86fb53f550a638fb6e5c4b	884bb37fe77d881d75e30b2be39b1a89	5fec7b79f78c1deb54d70c5ee2f32aac	EQUIV	connect_force_port6: 3/3 program(s) proved equivalent
 connect_ping	231907ff82682e83d423d3f79ca2b1bd	4b978e0fc470fd22960c3df3215483a2	5fec7b79f78c1deb54d70c5ee2f32aac	EQUIV	connect_ping: 2/2 program(s) proved equivalent
 connect_unix_prog	841e88357868a0f36abbd935aac009d6	c546f8f8bd87b1354b7da63a4dfe6459	5fec7b79f78c1deb54d70c5ee2f32aac	EQUIV	connect_unix_prog: 2/2 program(s) proved equivalent
-cpumask_success	abc368d8a49e070acfb4435cd8c9fbb3	125cfc3a231600a2a62f2fdd3aee21c2	5fec7b79f78c1deb54d70c5ee2f32aac	INEQUIV	INEQUIV  tp_btf/task_newtask:test_alloc_free_cpumask  [observable 'g:err' differs]; INEQUIV  tp_btf/task_newtask:test_first_firstzero_cpu  [observable 'g:err' differs; observable 'trace' differs]; INEQUIV  tp_btf/task_newtask:test_global_mask_array_one_rcu  [observable 'g:err' differs; observable 'trace' differs]
+cpumask_success	abc368d8a49e070acfb4435cd8c9fbb3	125cfc3a231600a2a62f2fdd3aee21c2	5fec7b79f78c1deb54d70c5ee2f32aac	INEQUIV	INEQUIV  tp_btf/task_newtask:test_alloc_free_cpumask  [observable 'g:err' differs]
 csum_diff_test	a8c21978fe43a59105722a85528209f8	a1eeff7cf6f6e34fc08f459cd93586cf	5fec7b79f78c1deb54d70c5ee2f32aac	EQUIV	csum_diff_test: 1/1 program(s) proved equivalent
 decap_sanity	6b314a3680a165d22ff900145bbd1057	0193059d01d83265f52d77c02f8f7293	5fec7b79f78c1deb54d70c5ee2f32aac	EQUIV	decap_sanity: 1/1 program(s) proved equivalent
 dev_cgroup	7c4e635b0753a66fd90abf28ee6fb752	f050824c3c27f42660cb96e40d52b5b9	5fec7b79f78c1deb54d70c5ee2f32aac	EQUIV	dev_cgroup: 1/1 program(s) proved equivalent

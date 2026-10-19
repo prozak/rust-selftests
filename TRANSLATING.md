@@ -342,6 +342,17 @@ a register, keeps dead-arg-elim from dropping a function argument).
 - Negative verifier tests require `test_tags!` to preserve their rejection
   assertions; see "Test-loader expectations" below. Never change the body
   to make a must-fail program load successfully.
+- `bpf_for(i, start, end)` is the open-coded `bpf_iter_num_*` loop whose
+  condition also tests `i >= start && i < end` (that is what bounds the
+  index for the verifier), and the iterator's `cleanup` attribute destroys
+  it exactly once on every exit from the loop's scope: after a plain
+  `break` or the last iteration, and before a `return` or a jump out of an
+  enclosing block. Destroying it before a plain `break` as well is a
+  second destroy, which the verifier rejects as an uninitialized iterator
+  (`dynptr_success.rs` has the macro).
+- A kfunc returning `bool` (`bpf_dynptr_is_null`, `bpf_dynptr_is_rdonly`)
+  is tested on the low bit of its result, as clang does (`w0 &= 1`):
+  declare it `-> u8` and compare `& 1`, not a Rust `bool`.
 
 ## Build & validate
 

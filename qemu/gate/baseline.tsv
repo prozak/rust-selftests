@@ -666,9 +666,14 @@ trace_dummy_st_ops	8cfa3df19ac554ac1bed684b77e8f52b	3b7d9370c10f6f9697ed759d360b
 trace_printk	9b19c42496798a313151f8f79fd1857d	d3f7cab4c5ba350a989af0f8651b13a9	55ee5a3cc498d4f67befead3907ee1f4	PASS	16	Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED
 trace_vprintk	c94ed0e5d155aed93b425f6f7c9e3828	b626d8460a077febce3c3fb2f0182a77	55ee5a3cc498d4f67befead3907ee1f4	PASS	16	Summary: 2/0 PASSED, 0 SKIPPED, 0/0 FAILED
 tracing_failure	9117fd7e374dc1acf764bb505b4b4be1	ca7dc870bc67b552a01541bba21091ca	55ee5a3cc498d4f67befead3907ee1f4	PASS	16	Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED
+tracing_multi_attach	48c3d8f667556d212779947cd28bf2e7	ebbe0554f237f66e40e3cf46f87533f3	55ee5a3cc498d4f67befead3907ee1f4	PASS	33	Summary: 3/17 PASSED, 0 SKIPPED, 0/0 FAILED
+tracing_multi_attach_module	ca7dc0352dc67bda1c62f48fa8644e5c	52fdaf33195b135f3e23ad00132a6d75	55ee5a3cc498d4f67befead3907ee1f4	PASS	33	Summary: 3/17 PASSED, 0 SKIPPED, 0/0 FAILED
 tracing_multi_bench	ca7f723b52033b641777addf4a93cac9	78f642263813dde501a0192a278f27ae	55ee5a3cc498d4f67befead3907ee1f4	PASS	27	Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED
+tracing_multi_check	dc69129d8c2f55734275009fa408c463	c1e2dcd5664e0a6cd628b151a2dd6df7	55ee5a3cc498d4f67befead3907ee1f4	PASS	34	Summary: 3/17 PASSED, 0 SKIPPED, 0/0 FAILED
 tracing_multi_fail	adfb345c0b2be771ca86df40b8c9138e	fc1ba623eebf515503f9746e6b23bfaf	55ee5a3cc498d4f67befead3907ee1f4	PASS	33	Summary: 3/17 PASSED, 0 SKIPPED, 0/0 FAILED
+tracing_multi_intersect_attach	7738975d3cadfb2af1c648cd1caec962	693177ab417f071c9443840e71e55ce8	55ee5a3cc498d4f67befead3907ee1f4	PASS	34	Summary: 3/17 PASSED, 0 SKIPPED, 0/0 FAILED
 tracing_multi_rollback	0892dfbb0e300b113d003ee58d54cc33	12a2e5bc79171d7b97a14e934324e718	55ee5a3cc498d4f67befead3907ee1f4	PASS	33	Summary: 3/17 PASSED, 0 SKIPPED, 0/0 FAILED
+tracing_multi_session_attach	ef7f8a9a8b068b68ce41b97af2f1a00d	f4646b6183a50d325526b2fbfd619596	55ee5a3cc498d4f67befead3907ee1f4	PASS	34	Summary: 3/17 PASSED, 0 SKIPPED, 0/0 FAILED
 tracing_stack_arg_tailcall_tgt	57facb5fe1d76a1ded78aeb6c925933b	79fcaeb628202046fe11af26add08c98	55ee5a3cc498d4f67befead3907ee1f4	PASS	19	Summary: 1/7 PASSED, 0 SKIPPED, 0/0 FAILED
 tracing_stack_arg_tailcall_tracer	ac5c145591b4224afedbeab1a7794c08	c2f7f08680389c1207af3da914bf7f6a	55ee5a3cc498d4f67befead3907ee1f4	PASS	17	Summary: 1/7 PASSED, 0 SKIPPED, 0/0 FAILED
 tracing_struct	b15b98ae3c219ae81e5ccf1d5aee5228	6dd22911c764ec6c52a3e8b8e04a6014	55ee5a3cc498d4f67befead3907ee1f4	PASS	19	Summary: 1/7 PASSED, 0 SKIPPED, 0/0 FAILED

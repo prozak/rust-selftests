@@ -56,6 +56,12 @@ pub fn bpf_get_smp_processor_id() -> u32 {
     thunk!(8, fn() -> u32)()
 }
 
+/// `int bpf_get_numa_node_id(void)`.
+#[inline(always)]
+pub fn bpf_get_numa_node_id() -> i64 {
+    thunk!(42, fn() -> i64)()
+}
+
 #[inline(always)]
 pub fn bpf_rc_keydown(ctx: *const c_void, protocol: u32, scancode: u64, toggle: u32) -> i64 {
     thunk!(78, fn(*const c_void, u32, u64, u32) -> i64)(ctx, protocol, scancode, toggle)

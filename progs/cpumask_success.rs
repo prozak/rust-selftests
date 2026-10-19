@@ -2,10 +2,6 @@
 #![no_std]
 #![no_main]
 
-// translint allow(kconfig): the test_populate* programs, which read
-// CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS, are not translated yet (#51)
-// translint: allow(kconfig)
-
 // Direct translation of tools/testing/selftests/bpf/progs/cpumask_success.c
 // (bpf-next-x86), bpf-rs-core idiom.
 //
@@ -14,9 +10,11 @@
 // BTF_KIND_TYPE_TAG from the btf_type_tags! declaration at the bottom, which
 // scripts/btf_type_tags.py applies to the built object.
 //
-// Two things still differ from the C, both noted where they occur:
-// bpf_cpumask_equal/bpf_cpumask_intersects are not called directly, and
-// test_populate_reject_unaligned cannot read its __kconfig extern.
+// One thing still differs from the C, noted where it occurs:
+// bpf_cpumask_equal/bpf_cpumask_intersects are not called directly.
+// CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS is the C's weak `__kconfig` bool
+// (`// BTF_KCONFIG:` below, scripts/ksym_vars.py mirrors the C object's
+// declaration); clang tests it as `w != 0`, so the Rust compares `!= 0`.
 
 use core::ffi::c_void;
 use core::ptr::addr_of_mut;
@@ -30,6 +28,7 @@ use bpf_rs_core::maps::{self, BpfMap};
 
 const ENOENT: i32 = 2;
 const EACCES: i32 = 13;
+const EINVAL: i32 = 22;
 const EEXIST: i32 = 17;
 const CPUMASK_TEST_MASKLEN: usize = 16; // sizeof(cpumask_t) with the pinned config's NR_CPUS=128
 const CPUMASK_KPTR_FIELDS_MAX: usize = 11;
@@ -1030,19 +1029,44 @@ extern "C" fn test_populate_reject_small_mask(_ctx: *const u64) -> i32 {
     0
 }
 
+// BTF_KCONFIG: CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
+extern "C" {
+    static CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS: u8;
+}
+
 #[link_section = "tp_btf/task_newtask"]
 #[no_mangle]
 extern "C" fn test_populate_reject_unaligned(_ctx: *const u64) -> i32 {
     if !is_test_task() {
         return 0;
     }
-    // CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS=y on this kernel/arch (checked
-    // the .config the harness boots) -- the C original's unaligned-access
-    // rejection path is unreachable here, same as on the real kernel.
-    // rustc emits no BTF for `extern` statics (see TRANSLATING.md /
-    // kconfig-extern-userspace-field-access-unfixable), so the __kconfig
-    // read itself can't be reproduced; mirroring the known-true outcome is
-    // the faithful translation.
+
+    // Skip if unaligned accesses are fine for this arch.
+    if unsafe { CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS } != 0 {
+        return 0;
+    }
+
+    let mask = unsafe { bpf_cpumask_create() };
+    if mask.is_null() {
+        unsafe {
+            err = 1;
+        }
+        return 0;
+    }
+
+    // Misalign the source array by a byte.
+    let src = unsafe { (addr_of_mut!(bits) as *mut u8).add(1) };
+
+    let ret = unsafe { bpf_cpumask_populate(mask, src as *mut c_void, CPUMASK_TEST_MASKLEN) };
+    if ret != -EINVAL {
+        unsafe {
+            err = 2;
+        }
+    }
+
+    unsafe {
+        bpf_cpumask_release(mask);
+    }
     0
 }
 

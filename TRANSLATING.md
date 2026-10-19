@@ -305,13 +305,24 @@ extern "C" {
 
 `scripts/ksym_vars.py` mirrors the C object's extern VAR or FUNC (type,
 weakness, and the DATASEC the C keeps it in: `.maps` for an extern map,
-none for a plain variable or function; an anonymous map definition is
-mirrored with its members so the linker can match it against the
-definition). An extern function goes into the `.extern` section libbpf's
-linker reserves for externs it resolves, which also keeps rust-bpf's
-add_ksyms.py from declaring it a kfunc. Weak definitions (`__weak int x`)
-are `#[linkage = "weak"]` statics (`#![feature(linkage)]`); a weak global
-the C forces into `.data` keeps `#[link_section = ".data"]`.
+`.addr_space.1` for an extern `__arena_global`, none for a plain variable
+or function). The linker matches the extern against the definition it
+resolves it with exactly (aggregates member by member, a map definition's
+key and value types too, a pointer only by its pointee's kind and name),
+so the mirrored types carry their members down to the first pointer,
+including a named key or value struct, which the Rust side then defines
+under the C's name (linked_maps1.rs). An extern function goes into the
+`.extern` section libbpf's linker reserves for externs it resolves, which
+also keeps rust-bpf's add_ksyms.py from declaring it a kfunc; the C's
+`__hidden extern` function (one the kernel could not verify as a global
+function, so libbpf makes it static after linking) adds
+`core::arch::global_asm!(".hidden name")` (tracing_multi_attach.rs,
+linked_funcs1.rs). Weak definitions (`__weak int x`) are
+`#[linkage = "weak"]` statics (`#![feature(linkage)]`), weak functions
+`#[linkage = "weak"]` functions; a weak global the C forces into `.data`
+keeps `#[link_section = ".data"]`. An extern `__arena_global` is
+dereferenced through the hand-encoded `cast_kern` like the object's own
+(linked_arena1.rs).
 
 The build gives a linked object the C object's ELF section flags
 (`scripts/section_flags.py`, for every object in Makefile.skel's deps):

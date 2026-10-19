@@ -277,3 +277,40 @@ def test_extern_map_definitions_are_mirrored_with_their_members():
                      + r', file: !1, baseType: !\d+, size: 64, offset: 0\)', result)
     assert re.search(r'!DIDerivedType\(tag: DW_TAG_member, name: "key", scope: ' + re.escape(anon[1])
                      + r', file: !1, baseType: !\d+, size: 64, offset: 64\)', result)
+
+
+def keyed_map_btf():
+    strings = b"\0int\0type\0key\0my_key\0x\0long\0k\0"
+    types = struct.pack("<IIII", 1, 1 << 24, 4, 0x01000020)  # 1: int
+    types += struct.pack("<III", 0, 2 << 24, 1)  # 2: int *
+    types += struct.pack("<IIII", 23, 1 << 24, 8, 0x01000040)  # 3: long
+    types += struct.pack("<III", 14, (4 << 24) | 1, 8)  # 4: struct my_key { long x; }
+    types += struct.pack("<III", 21, 3, 0)
+    types += struct.pack("<III", 0, 2 << 24, 4)  # 5: struct my_key *
+    # 6: anonymous map definition struct { int *type; struct my_key *key; }
+    types += struct.pack("<III", 0, (4 << 24) | 2, 16)
+    types += struct.pack("<IIIIII", 5, 2, 0, 10, 5, 64)
+    # 7: struct my_key *k, a plain extern pointer to the struct
+    types += struct.pack("<III", 28, (14 << 24), 5)
+    return Btf(struct.pack("<HBBIIIII", 0xeb9f, 1, 0, 24, 0, len(types),
+                           len(types), len(strings)) + types + strings)
+
+
+def test_extern_map_key_types_are_mirrored_with_their_members():
+    # The linker compares an extern map's key/value types exactly (member
+    # by member, through the map definition's pointer), a plain pointer's
+    # pointee only by name: the named struct gets its members in the
+    # first case and stays a descriptor in the second (and for a ksym).
+    ir = IR.replace("@scalar = external global i32", "@map1 = external global [16 x i8]")
+    result = lower(ir, ["map1"], keyed_map_btf(), {"map1": (6, False, False, ".maps")})
+    assert re.search(r'!DICompositeType\(tag: DW_TAG_structure_type, name: "my_key", file: !1, '
+                     r'size: 64, elements: (!\d+)\)', result)
+    assert re.search(r'!DIDerivedType\(tag: DW_TAG_member, name: "x", scope: !\d+, file: !1, '
+                     r'baseType: !\d+, size: 64, offset: 0\)', result)
+    assert '!DIBasicType(name: "long", size: 64, encoding: DW_ATE_signed)' in result
+
+    ir = IR.replace("@scalar = external global i32", "@k = external global ptr")
+    result = lower(ir, ["k"], keyed_map_btf(), {"k": (5, False, False, None)})
+    assert re.search(r'!DICompositeType\(tag: DW_TAG_structure_type, name: "my_key", file: !1, '
+                     r'size: 64, elements: (!\d+)\)', result)
+    assert 'name: "x"' not in result

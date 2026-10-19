@@ -35,9 +35,14 @@ extern VAR or FUNC gives the type, in whatever DATASEC the C keeps it (an
 extern map sits in `.maps`, a plain variable or function in none), and the
 Rust extern is declared the same way; an extern function is put in the
 `.extern` section libbpf's linker reserves for such externs, which also
-keeps rust-bpf's add_ksyms.py from making it a kfunc. An anonymous
-aggregate (a map definition) is mirrored with its members, so the linker
-can match the extern map against the definition.
+keeps rust-bpf's add_ksyms.py from making it a kfunc. The linker matches
+such an extern against the definition it resolves it with exactly
+(linker.c glob_sym_btf_matches: aggregates member by member, a pointer
+only by the pointee's kind and name, a map definition's key and value
+types exactly again), so a cross-object extern's aggregates are mirrored
+with their members down to the first pointer, and a map definition's
+`key`/`value` pointees with theirs; a `.ksyms` declaration keeps the
+empty named descriptors that identify kernel types.
 """
 import argparse
 from pathlib import Path
@@ -144,16 +149,20 @@ def lower(ir, names, btf, variables):
 
     empty = add("!{}")
     cu = reserve()
-    emitted = {0: "null"}
+    emitted = {(0, False): "null", (0, True): "null"}  # void
 
     def quoted(name):
         # LLVM metadata strings use hexadecimal escapes, not JSON escapes.
         return '"' + ''.join(chr(c) if 32 <= c < 127 and c not in (34, 92)
                              else f"\\{c:02X}" for c in name.encode()) + '"'
 
-    def typ(tid):
-        if tid in emitted:
-            return emitted[tid]
+    def typ(tid, full=False):
+        """The DI type of BTF type `tid`; `full` mirrors aggregates with
+        their members (a cross-object extern, which the linker matches
+        exactly), reset behind a pointer, as the linker's comparison is."""
+        key = (tid, full)
+        if key in emitted:
+            return emitted[key]
         t = btf.types[tid]
         if t.kind == 1:
             # clang spells the only BTF_INT_BOOL integer `_Bool`; bpfcore
@@ -170,7 +179,7 @@ def lower(ir, names, btf, variables):
                 raise ValueError(f"unsizeable array type {tid}")
             subrange = add(f"!DISubrange(count: {count})")
             elements = add("!{" + subrange + "}")
-            value = (f"!DICompositeType(tag: DW_TAG_array_type, baseType: {typ(elem)}, "
+            value = (f"!DICompositeType(tag: DW_TAG_array_type, baseType: {typ(elem, full)}, "
                      f"size: {size * 8}, elements: {elements})")
         elif t.kind == 6:
             if not t.name:
@@ -189,42 +198,53 @@ def lower(ir, names, btf, variables):
                      f"size: {t.size * 8}, elements: {elements})")
         elif t.kind in (4, 5):
             tag = "structure" if t.kind == 4 else "union"
-            if not t.name:
-                # The C's anonymous aggregate (a map definition): mirrored
-                # with its members, so the linker can match the extern
-                # against the definition it resolves it with.
+            name = f"name: {quoted(t.name)}, " if t.name else ""
+            if not t.name or full:
+                # The C's anonymous aggregate (a map definition), or any
+                # aggregate of a cross-object extern: mirrored with its
+                # members, so the linker can match the extern against the
+                # definition it resolves it with. A map definition's `key`
+                # and `value` are pointers to the key and value types the
+                # linker compares exactly: those pointees stay full.
                 ref = reserve()
-                emitted[tid] = ref
+                emitted[key] = ref
                 members = []
                 for m in t.members:
                     size = btf.type_size(m.type)
                     if size is None or m.bitfield_size:
-                        raise ValueError(f"unsupported member {m.name} of an anonymous extern aggregate")
+                        raise ValueError(f"unsupported member {m.name} of an extern aggregate")
+                    mt = btf.types[m.type]
+                    if full and m.name in ("key", "value") and mt.kind == 2:
+                        base = add(f"!DIDerivedType(tag: DW_TAG_pointer_type, "
+                                   f"baseType: {typ(mt.type, True)}, size: 64)")
+                    else:
+                        base = typ(m.type, full)
                     members.append(add(
                         f"!DIDerivedType(tag: DW_TAG_member, name: {quoted(m.name)}, "
-                        f"scope: {ref}, file: {file[1]}, baseType: {typ(m.type)}, "
+                        f"scope: {ref}, file: {file[1]}, baseType: {base}, "
                         f"size: {size * 8}, offset: {m.bit_offset})"))
                 elements = add("!{" + ", ".join(members) + "}")
                 metadata.append(f"{ref} = distinct !DICompositeType(tag: DW_TAG_{tag}_type, "
-                                f"file: {file[1]}, size: {t.size * 8}, elements: {elements})")
+                                f"{name}file: {file[1]}, size: {t.size * 8}, elements: {elements})")
                 return ref
             value = (f"distinct !DICompositeType(tag: DW_TAG_{tag}_type, "
-                     f"name: {quoted(t.name)}, file: {file[1]}, "
+                     f"{name}file: {file[1]}, "
                      f"size: {t.size * 8}, elements: {empty})")
         elif t.kind in (2, 8, 9, 10, 11):
             tags = {2: "pointer_type", 8: "typedef", 9: "volatile_type",
                     10: "const_type", 11: "restrict_type"}
             extras = ", size: 64" if t.kind == 2 else (
                 f", name: {quoted(t.name)}" if t.kind == 8 else "")
-            value = f"!DIDerivedType(tag: DW_TAG_{tags[t.kind]}, baseType: {typ(t.type)}{extras})"
+            inner = typ(t.type, full and t.kind != 2)
+            value = f"!DIDerivedType(tag: DW_TAG_{tags[t.kind]}, baseType: {inner}{extras})"
         elif t.kind == 13:
             ret, params = t.proto
             value = ("!DISubroutineType(types: !{" +
-                     ", ".join([typ(ret)] + [typ(p) for p in params]) + "})")
+                     ", ".join([typ(ret, full)] + [typ(p, full) for p in params]) + "})")
         else:
             raise ValueError(f"unsupported ksym BTF kind {t.kind} for {t.name or tid}")
-        emitted[tid] = add(value)
-        return emitted[tid]
+        emitted[key] = add(value)
+        return emitted[key]
 
     def lower_function(ir, name, tid, section):
         pattern = r"^declare ([^\n]*?@" + re.escape(name) + r"\([^\n]*)$"
@@ -237,7 +257,8 @@ def lower(ir, names, btf, variables):
         if btf.types[tid].kind != 13:
             raise ValueError(f"{name}: the C declaration is not a function prototype")
         sp = add(f"!DISubprogram(name: {quoted(name)}, scope: {file[1]}, file: {file[1]}, "
-                 f"type: {typ(tid)}, flags: DIFlagPrototyped, spFlags: DISPFlagOptimized)")
+                 f"type: {typ(tid, section != '.ksyms')}, flags: DIFlagPrototyped, "
+                 "spFlags: DISPFlagOptimized)")
         declaration = f'declare !dbg {sp} {match[1]} section "{section}"'
         return ir[:match.start()] + declaration + ir[match.end():]
 
@@ -274,8 +295,11 @@ def lower(ir, names, btf, variables):
             if (not array or elem.kind != 1 or int(array[1]) != base.array[1]
                     or int(array[2]) != elem.size * 8):
                 raise ValueError(f"{name}: Rust array shape differs from its C {section} declaration")
+        # A cross-object extern is matched exactly by the linker: full types.
+        full = section not in (".ksyms", ".kconfig")
         var = add(f"distinct !DIGlobalVariable(name: {quoted(name)}, scope: {cu}, "
-                  f"file: {file[1]}, type: {typ(tid)}, isLocal: false, isDefinition: false)")
+                  f"file: {file[1]}, type: {typ(tid, full)}, isLocal: false, "
+                  "isDefinition: false)")
         expr = add(f"!DIGlobalVariableExpression(var: {var}, expr: !DIExpression())")
         expressions.append(expr)
         placement = f'section "{section}", ' if section else ""

@@ -186,7 +186,7 @@ $(BLDDIR)/%-reloc.bc: $(BLDDIR)/%-linked.bc
 	$(BPF_POSTPROC) $< $@
 
 # --- Internalize (keep = C object ABI) + optimize ---
-KSYM_VAR_SRCS := $(shell grep -l '^// BTF_KSYM:' progs/*.rs)
+KSYM_VAR_SRCS := $(shell grep -l '^// BTF_KSYM:\|^// BTF_KCONFIG:' progs/*.rs)
 $(patsubst progs/%.rs,$(BLDDIR)/%-opt.bc,$(KSYM_VAR_SRCS)): scripts/ksym_vars.py
 TYPE_ID_SRCS := $(shell grep -l '^// BTF_TYPE_ID:' progs/*.rs)
 $(patsubst progs/%.rs,$(BLDDIR)/%-opt.bc,$(TYPE_ID_SRCS)): scripts/type_id.py
@@ -203,7 +203,7 @@ $(BLDDIR)/uprobe_multi_usdt-opt.bc: PUBLIC_API_EXTRA = --internalize-public-api-
 
 $(BLDDIR)/%-opt.bc: $(BLDDIR)/%-reloc.bc $(BLDDIR)/%.keep
 	@set -e; src=$<; \
-	if grep -q '^// BTF_KSYM:' progs/$*.rs; then \
+	if grep -q '^// BTF_KSYM:\|^// BTF_KCONFIG:' progs/$*.rs; then \
 		$(LLVM_DIS) $$src -o $@.ksyms.ll; \
 		python3 scripts/ksym_vars.py $@.ksyms.ll progs/$*.rs $(SELFTESTS_OUTPUT)/$*.bpf.o; \
 		src=$@.ksyms.ll; \

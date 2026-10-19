@@ -1,5 +1,6 @@
 """External data symbols retain the C oracle's types and weak linkage; so does
-an extern kfunc's prototype when its declaration is selected."""
+an extern kfunc's prototype when its declaration is selected, and a
+`.kconfig` extern its C object's int/bool/char[]/tristate type."""
 from pathlib import Path
 import re
 import struct
@@ -64,7 +65,7 @@ def test_cannot_turn_a_definition_or_other_section_into_a_ksym(replacement):
 
 def test_unselected_objects_are_unchanged():
     assert lower(IR, [], None, {}) == IR
-    assert declarations("// ordinary comment\n") == []
+    assert declarations("// ordinary comment\n") == {}
 
 
 def test_integer_width_mismatch_is_not_hidden_by_c_metadata():
@@ -93,7 +94,7 @@ def test_c_contract_requires_undefined_ksym_data_and_preserves_weakness():
 
 def test_unsupported_types_do_not_get_a_guessed_descriptor():
     btf = fixture_btf()
-    btf.types[1].kind = 3  # Array descriptor support has not been implemented.
+    btf.types[1].kind = 16  # FLOAT descriptor support has not been implemented.
     with pytest.raises(ValueError, match="unsupported ksym BTF kind"):
         lower(IR, ["scalar"], btf, {"scalar": (1, False)})
 
@@ -138,3 +139,82 @@ def test_c_contract_selects_an_extern_function_by_its_prototype():
     elf = SimpleNamespace(btf_types=lambda: types,
                           symbols=[Symbol(1, "acquire", 0, 0, 2, 0, 0)])
     assert contract(elf, ["acquire"]) == {"acquire": (7, True, True)}
+
+
+def kconfig_btf():
+    strings = b"\0int\0_Bool\0bool\0libbpf_tristate\0TRI_NO\0TRI_YES\0TRI_MODULE\0char\0"
+    types = struct.pack("<IIII", 1, 1 << 24, 4, 0x01000020)  # 1: int
+    types += struct.pack("<IIII", 5, 1 << 24, 1, 0x04000008)  # 2: _Bool
+    types += struct.pack("<III", 11, 8 << 24, 2)  # 3: typedef bool
+    types += struct.pack("<III", 16, (6 << 24) | 3, 4)  # 4: enum libbpf_tristate
+    types += struct.pack("<IiIiIi", 32, 0, 39, 1, 47, 2)
+    types += struct.pack("<IIII", 58, 1 << 24, 1, 0x01000008)  # 5: char
+    types += struct.pack("<IIIIII", 0, 3 << 24, 0, 5, 1, 8)  # 6: char[8]
+    return Btf(struct.pack("<HBBIIIII", 0xeb9f, 1, 0, 24, 0, len(types),
+                           len(types), len(strings)) + types + strings)
+
+
+KCONFIG_IR = ('@CONFIG_BOOL = external global i8\n'
+              '@CONFIG_TRI = external global i32\n'
+              '@CONFIG_STR = external global [8 x i8]\n'
+              '@LINUX_KERNEL_VERSION = external global i32\n' + BODY +
+              '!llvm.dbg.cu = !{!0}\n'
+              '!0 = distinct !DICompileUnit(language: DW_LANG_Rust, file: !1, emissionKind: FullDebug)\n'
+              '!1 = !DIFile(filename: "prog.rs", directory: "/tmp")\n')
+KCONFIG_NAMES = {"CONFIG_BOOL": ".kconfig", "CONFIG_TRI": ".kconfig",
+                 "CONFIG_STR": ".kconfig", "LINUX_KERNEL_VERSION": ".kconfig"}
+KCONFIG_VARS = {"CONFIG_BOOL": (3, True), "CONFIG_TRI": (4, True),
+                "CONFIG_STR": (6, True), "LINUX_KERNEL_VERSION": (1, False)}
+
+
+def test_kconfig_externs_mirror_the_c_types_in_the_kconfig_section():
+    result = lower(KCONFIG_IR, KCONFIG_NAMES, kconfig_btf(), KCONFIG_VARS)
+    assert '@CONFIG_BOOL = extern_weak global i8, section ".kconfig", !dbg' in result
+    assert '@LINUX_KERNEL_VERSION = external global i32, section ".kconfig", !dbg' in result
+    assert '@CONFIG_STR = extern_weak global [8 x i8], section ".kconfig", !dbg' in result
+    assert re.search(r'!DIDerivedType\(tag: DW_TAG_typedef, baseType: (!\d+), name: "bool"\)', result)
+    assert '!DIBasicType(name: "_Bool", size: 8, encoding: DW_ATE_boolean)' in result
+    enum = re.search(r'distinct !DICompositeType\(tag: DW_TAG_enumeration_type, name: "libbpf_tristate", '
+                     r'file: !1, baseType: (!\d+), size: 32, elements: (!\d+)\)', result)
+    assert enum
+    assert re.search(re.escape(enum[1]) + r' = !DIBasicType\(name: "unsigned int", size: 32, encoding: DW_ATE_unsigned\)', result)
+    assert '!DIEnumerator(name: "TRI_MODULE", value: 2, isUnsigned: true)' in result
+    array = re.search(r'!DICompositeType\(tag: DW_TAG_array_type, baseType: (!\d+), size: 64, elements: (!\d+)\)', result)
+    assert array
+    assert re.search(re.escape(array[2]) + r" = !\{(!\d+)\}", result)
+    assert "!DISubrange(count: 8)" in result
+    assert result.count("isDefinition: false") == 4
+    assert BODY in result
+
+
+def test_kconfig_externs_keep_libbpf_s_type_restrictions():
+    btf = kconfig_btf()
+    btf.types[4].kind = 4  # a struct is not a kconfig type
+    with pytest.raises(ValueError, match="libbpf allows only"):
+        lower(KCONFIG_IR, {"CONFIG_TRI": ".kconfig"}, btf, {"CONFIG_TRI": (4, True)})
+    with pytest.raises(ValueError, match="array shape differs"):
+        lower(KCONFIG_IR.replace("[8 x i8]", "[4 x i8]"), {"CONFIG_STR": ".kconfig"},
+              kconfig_btf(), {"CONFIG_STR": (6, True)})
+    with pytest.raises(ValueError, match="integer width differs"):
+        lower(KCONFIG_IR.replace("@CONFIG_TRI = external global i32", "@CONFIG_TRI = external global i64"),
+              {"CONFIG_TRI": ".kconfig"}, kconfig_btf(), {"CONFIG_TRI": (4, True)})
+
+
+def test_kconfig_contract_reads_the_kconfig_datasec_only():
+    types = {1: (14, "CONFIG_X", 5, 0, None), 2: (15, ".kconfig", 0, 1, [1]),
+             3: (14, "sym", 6, 0, None), 4: (15, ".ksyms", 0, 1, [3]),
+             5: (12, "kfunc", 7, 2, None), 6: (15, ".ksyms", 0, 1, [5])}
+    elf = SimpleNamespace(btf_types=lambda: types,
+                          symbols=[Symbol(1, "CONFIG_X", 0, 0, 2, 0, 0),
+                                   Symbol(2, "sym", 0, 0, 1, 0, 0),
+                                   Symbol(3, "kfunc", 0, 0, 1, 0, 0)])
+    assert contract(elf, {"CONFIG_X": ".kconfig", "sym": ".ksyms"}) == {
+        "CONFIG_X": (5, True), "sym": (6, False)}
+    with pytest.raises(ValueError, match="undefined .kconfig"):
+        contract(elf, {"sym": ".kconfig"})
+    with pytest.raises(ValueError, match="undefined .ksyms"):
+        contract(elf, {"CONFIG_X": ".ksyms"})
+    assert declarations("// BTF_KCONFIG: CONFIG_X\n// BTF_KSYM: sym\n") == {
+        "CONFIG_X": ".kconfig", "sym": ".ksyms"}
+    with pytest.raises(ValueError, match="invalid or duplicate"):
+        declarations("// BTF_KCONFIG: x\n// BTF_KSYM: x\n")

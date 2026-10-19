@@ -42,6 +42,14 @@ one program's findings with `// translint: allow(<class>:<program>)`):
                  (clang's first-use order, not the declaration order), so
                  a difference means a static is missing, has another size
                  or alignment, or the C object changed.
+  kconfig        [ERROR] the C object's `.kconfig` externs (`extern int
+                 CONFIG_X __kconfig;`, filled by libbpf from the running
+                 kernel's config) must be declared by the translation too,
+                 with the same type and weakness: `// BTF_KCONFIG: NAME`
+                 on a Rust extern static (scripts/ksym_vars.py). A
+                 translation that declares none while the C object does
+                 is a WARN: it stands in with a hardcoded value, which is
+                 right for at most one kernel config.
   printk-count   [ERROR] C and Rust must have the same number of trace-log
                  call sites (bpf_printk / log_err / bpf_trace_printk):
                  dropped logging was 62 real INEQUIV sites.
@@ -79,6 +87,7 @@ C_OBJ_DIR = paths.SELFTESTS_OUTPUT
 
 sys.path.insert(0, os.path.join(REPO, "scripts"))
 from bpfelf import BpfElf, SHF_EXECINSTR
+from bpfcore import Btf
 import btf_test_tags
 import naked_verbatim
 
@@ -384,6 +393,79 @@ def check_decl_tags(name):
                         f"C object does not")
 
 
+def kconfig_externs(obj_path):
+    """name -> (type description, weak) for a compiled object's `.kconfig`
+    externs; None when the object can't be read. The description spells
+    the whole declared chain (typedefs, qualifiers, int name/size/sign,
+    enum name/size/values, array shape), what libbpf's find_kcfg_type and
+    the skeleton see."""
+    if not os.path.exists(obj_path):
+        return None
+    try:
+        elf = BpfElf(obj_path)
+        types = elf.btf_types()
+        btf = Btf(elf.section_by_name(".BTF").data)
+    except Exception:
+        return None
+
+    def describe(tid):
+        t = btf.types.get(tid)
+        if t is None or t.kind == 0:
+            return "void"
+        if t.kind == 1:
+            enc = types[tid][4] or 0
+            return (f"{t.name}:{t.size}" + (":signed" if enc & 1 else "")
+                    + (":bool" if enc & 4 else ""))
+        if t.kind == 3:
+            return f"[{t.array[1]} x {describe(t.array[0])}]"
+        if t.kind == 6:
+            vals = ", ".join(f"{n}={v}" for n, v in t.enums)
+            return f"enum {t.name}:{t.size}{':signed' if t.kflag else ''} {{{vals}}}"
+        if t.kind == 8:
+            return f"typedef {t.name} = {describe(t.type)}"
+        if t.kind in (9, 10, 11):
+            return {9: "volatile ", 10: "const ", 11: "restrict "}[t.kind] + describe(t.type)
+        return f"kind{t.kind} {t.name}:{t.size}"
+
+    weak = {s.name for s in elf.symbols if s.shndx == 0 and s.bind == 2}
+    out = {}
+    for kind, sname, _s, _v, members in types.values():
+        if kind != 15 or sname != ".kconfig":
+            continue
+        for vid in members:
+            _k, vname, vtype, _vl, _x = types[vid]
+            out[vname] = (describe(vtype), vname in weak)
+    return out
+
+
+def check_kconfig(name):
+    c_obj = os.path.join(C_OBJ_DIR, f"{name}.bpf.o")
+    if os.path.exists(c_obj + ".corig"):
+        c_obj = c_obj + ".corig"
+    want = kconfig_externs(c_obj)
+    got = kconfig_externs(os.path.join(REPO, "bld", f"{name}.bpf.o"))
+    if want is None or got is None or (not want and not got):
+        return
+    if want and not got:
+        yield ("WARN", f"C object declares .kconfig externs {', '.join(sorted(want))}; "
+                       "the translation declares none (a hardcoded stand-in; "
+                       "declare them with `// BTF_KCONFIG: NAME`, see TRANSLATING.md)")
+        return
+    for n in sorted(set(want) - set(got)):
+        yield ("ERROR", f"C object declares .kconfig extern {n} ({want[n][0]}), "
+                        "the translation does not")
+    for n in sorted(set(got) - set(want)):
+        yield ("ERROR", f"translation declares .kconfig extern {n} ({got[n][0]}), "
+                        "the C object does not")
+    for n in sorted(set(want) & set(got)):
+        if want[n][0] != got[n][0]:
+            yield ("ERROR", f".kconfig extern {n}: C type `{want[n][0]}`, "
+                            f"translation `{got[n][0]}`")
+        if want[n][1] != got[n][1]:
+            yield ("ERROR", f".kconfig extern {n} is {'weak' if want[n][1] else 'strong'} "
+                            f"in the C object, {'weak' if got[n][1] else 'strong'} in the translation")
+
+
 PRIVATE_SECTION = re.compile(r"^\.(data|bss)\.[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -489,6 +571,8 @@ def lint(name):
         emit(level, "decl-tags", text)
     for level, text in check_private_layout(name):
         emit(level, "private-layout", text)
+    for level, text in check_kconfig(name):
+        emit(level, "kconfig", text)
     for level, text in check_naked_verbatim(name, rs_raw):
         emit(level, "naked-verbatim", text)
 

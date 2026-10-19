@@ -16,6 +16,16 @@ name: a `___flavor` of a kfunc (libbpf strips the suffix for the lookup and
 then checks the declared prototype against the kernel's, which is what such
 a test is about). The declaration is left for add_ksyms.py to skip (it has a
 section already), so the Rust extern keeps the C's argument list.
+
+`// BTF_KCONFIG: NAME` selects a `.kconfig` extern the same way (C's
+`extern int CONFIG_X __kconfig;`): the C object's `.kconfig` DATASEC VAR
+gives the type (libbpf allows int, bool, char, char[] and the libbpf_tristate
+enum) and its undefined ELF symbol the weakness, and the Rust extern is
+rewritten into section ".kconfig" with the same declaration shape, so llc
+emits the VAR with linkage=extern inside `DATASEC '.kconfig'` and libbpf
+fills it from the running kernel's config at load time. The value is read
+through the symbol, as in C: a declaration without an initializer cannot be
+folded, so a plain Rust read is the C load.
 """
 import argparse
 from pathlib import Path
@@ -27,42 +37,57 @@ from bpfelf import BpfElf
 from bpfcore import Btf
 
 
+MARKERS = {"// BTF_KSYM:": ".ksyms", "// BTF_KCONFIG:": ".kconfig"}
+
+
 def declarations(source):
-    names = []
+    """name -> section (".ksyms" or ".kconfig"), in source order."""
+    names = {}
     for line in source.splitlines():
-        if not line.startswith("// BTF_KSYM:"):
+        marker = next((m for m in MARKERS if line.startswith(m)), None)
+        if marker is None:
             continue
-        match = re.fullmatch(r"// BTF_KSYM: ([A-Za-z_]\w*)\s*", line)
+        match = re.fullmatch(re.escape(marker) + r" ([A-Za-z_]\w*)\s*", line)
         if not match or match[1] in names:
             raise ValueError(f"invalid or duplicate ksym declaration: {line}")
-        names.append(match[1])
+        names[match[1]] = MARKERS[marker]
     return names
 
 
+def sections_of(names):
+    """A plain list of names selects `.ksyms` declarations."""
+    return names if isinstance(names, dict) else {n: ".ksyms" for n in names}
+
+
 def contract(elf, names):
-    """name -> (BTF type id of the C's .ksyms declaration, weak) for a
-    variable, (prototype type id, weak, True) for an extern function."""
+    """name -> (BTF type id of the C's declaration in the selected section,
+    weak) for a variable, (prototype type id, weak, True) for an extern
+    function."""
+    names = sections_of(names)
     types = elf.btf_types()
-    datasecs = [t for t in types.values() if t[0] == 15 and t[1] == ".ksyms"]
-    variables = {types[tid][1]: types[tid][2]
-                 for sec in datasecs for tid in sec[4] if types[tid][0] == 14}
-    functions = {types[tid][1]: types[tid][2]
-                 for sec in datasecs for tid in sec[4] if types[tid][0] == 12}
     result = {}
-    for name in names:
+    for name, section in names.items():
+        datasecs = [t for t in types.values() if t[0] == 15 and t[1] == section]
+        variables = {types[tid][1]: types[tid][2]
+                     for sec in datasecs for tid in sec[4] if types[tid][0] == 14}
+        functions = {types[tid][1]: types[tid][2]
+                     for sec in datasecs for tid in sec[4] if types[tid][0] == 12}
         symbols = [s for s in elf.symbols if s.name == name and s.shndx == 0
                    and s.bind in (1, 2)]
         if len(symbols) != 1 or (name not in variables and name not in functions):
-            raise ValueError(f"{name}: C object must declare one undefined .ksyms "
+            raise ValueError(f"{name}: C object must declare one undefined {section} "
                              "variable or function")
         if name in variables:
             result[name] = (variables[name], symbols[0].bind == 2)
         else:
+            if section != ".ksyms":
+                raise ValueError(f"{name}: only .ksyms declarations may be functions")
             result[name] = (functions[name], symbols[0].bind == 2, True)
     return result
 
 
 def lower(ir, names, btf, variables):
+    names = sections_of(names)
     if not names:
         return ir
     file = re.search(r"^(!\d+) = !DIFile\(", ir, re.M)
@@ -97,8 +122,37 @@ def lower(ir, names, btf, variables):
             return emitted[tid]
         t = btf.types[tid]
         if t.kind == 1:
+            # clang spells the only BTF_INT_BOOL integer `_Bool`; bpfcore
+            # does not keep the bool encoding bit (it is the prover's and
+            # not to be changed for this), so the name selects it.
+            encoding = ("boolean" if t.name == "_Bool"
+                        else "signed" if t.int_signed else "unsigned")
             value = (f"!DIBasicType(name: {quoted(t.name)}, size: {t.size * 8}, "
-                     f"encoding: DW_ATE_{'signed' if t.int_signed else 'unsigned'})")
+                     f"encoding: DW_ATE_{encoding})")
+        elif t.kind == 3:
+            elem, count = t.array
+            size = btf.type_size(tid)
+            if size is None:
+                raise ValueError(f"unsizeable array type {tid}")
+            subrange = add(f"!DISubrange(count: {count})")
+            elements = add("!{" + subrange + "}")
+            value = (f"!DICompositeType(tag: DW_TAG_array_type, baseType: {typ(elem)}, "
+                     f"size: {size * 8}, elements: {elements})")
+        elif t.kind == 6:
+            if not t.name:
+                raise ValueError("anonymous enum externs are unsupported")
+            # BTF ENUM signedness comes from the base type (llc), the
+            # enumerators' isUnsigned from the kflag.
+            signed = bool(t.kflag)
+            base = add(f"!DIBasicType(name: {quoted('int' if signed else 'unsigned int')}, "
+                       f"size: {t.size * 8}, encoding: DW_ATE_{'signed' if signed else 'unsigned'})")
+            enumerators = [add(f"!DIEnumerator(name: {quoted(n)}, value: {v}"
+                               + ("" if signed else ", isUnsigned: true") + ")")
+                           for n, v in t.enums]
+            elements = add("!{" + ", ".join(enumerators) + "}")
+            value = (f"distinct !DICompositeType(tag: DW_TAG_enumeration_type, "
+                     f"name: {quoted(t.name)}, file: {file[1]}, baseType: {base}, "
+                     f"size: {t.size * 8}, elements: {elements})")
         elif t.kind in (4, 5):
             if not t.name:
                 raise ValueError("anonymous ksym aggregates are unsupported")
@@ -137,7 +191,7 @@ def lower(ir, names, btf, variables):
         return ir[:match.start()] + declaration + ir[match.end():]
 
     expressions = []
-    for name in names:
+    for name, section in names.items():
         tid, weak, *is_func = variables[name]
         if is_func and is_func[0]:
             ir = lower_function(ir, name, tid)
@@ -150,16 +204,28 @@ def lower(ir, names, btf, variables):
         if "!dbg" in match[2] or "section " in match[2]:
             raise ValueError(f"{name}: refusing to overwrite existing section/debug metadata")
         base = btf.resolve(tid)
-        if base.kind == 1:
+        if section == ".kconfig" and not (
+                base.kind in (1, 6) or
+                (base.kind == 3 and btf.resolve(base.array[0]).kind == 1
+                 and btf.resolve(base.array[0]).size == 1)):
+            raise ValueError(f"{name}: libbpf allows only int, bool, char, char[] and "
+                             "libbpf_tristate .kconfig externs")
+        if base.kind in (1, 6):
             scalar = re.search(r"\b(?:global|constant) i(\d+)(?:,|$)", match[2])
             if not scalar or int(scalar[1]) != base.size * 8:
-                raise ValueError(f"{name}: Rust integer width differs from its C ksym declaration")
+                raise ValueError(f"{name}: Rust integer width differs from its C {section} declaration")
+        elif base.kind == 3:
+            elem = btf.resolve(base.array[0])
+            array = re.search(r"\b(?:global|constant) \[(\d+) x i(\d+)\](?:,|$)", match[2])
+            if (not array or elem.kind != 1 or int(array[1]) != base.array[1]
+                    or int(array[2]) != elem.size * 8):
+                raise ValueError(f"{name}: Rust array shape differs from its C {section} declaration")
         var = add(f"distinct !DIGlobalVariable(name: {quoted(name)}, scope: {cu}, "
                   f"file: {file[1]}, type: {typ(tid)}, isLocal: false, isDefinition: false)")
         expr = add(f"!DIGlobalVariableExpression(var: {var}, expr: !DIExpression())")
         expressions.append(expr)
         declaration = (f"@{name} = {'extern_weak' if weak else 'external'} {match[2]}, "
-                       f'section ".ksyms", !dbg {expr}')
+                       f'section "{section}", !dbg {expr}')
         ir = ir[:match.start()] + declaration + ir[match.end():]
     globals_ref = add("!{" + ", ".join(expressions) + "}")
     metadata.append(f"{cu} = distinct !DICompileUnit(language: DW_LANG_C11, file: {file[1]}, "

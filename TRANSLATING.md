@@ -250,6 +250,39 @@ check passes is what such a test is about), add `// BTF_KSYM: name` for
 the function as well: the C object's extern prototype is mirrored instead.
 `task_kfunc_success.rs` declares its three bpf_task_acquire flavors so.
 
+## kconfig externs
+
+C's `extern int CONFIG_HZ __kconfig;` is a `.kconfig` extern: libbpf fills
+it from the running kernel's config at load time (`LINUX_KERNEL_VERSION`,
+`LINUX_HAS_SYSCALL_WRAPPER` and `LINUX_HAS_BPF_COOKIE` are virtual ones) and
+the program reads it through a `.kconfig` map value. Declare it as a Rust
+extern static and select it with `// BTF_KCONFIG: NAME`:
+
+```rust
+// BTF_KCONFIG: CONFIG_HZ
+extern "C" {
+    static CONFIG_HZ: u32;
+}
+let hz = unsafe { CONFIG_HZ };
+```
+
+`scripts/ksym_vars.py` mirrors the C object's `.kconfig` declaration (type
+and weakness) onto the Rust extern as it does for `.ksyms`, so llc emits the
+`VAR` with `linkage=extern` inside `DATASEC '.kconfig'` and the skeleton
+gets its `kconfig` struct. libbpf accepts only `int`-sized integers, `bool`,
+`char`, `char[]` and the `libbpf_tristate` enum; the Rust width must match
+the C declaration (`unsigned long` -> `u64`, `_Bool` -> `u8`, `enum` ->
+`i32`/`u32`, `char[N]` -> `[u8; N]`). A plain read is the C's load (a
+declaration has no initializer to fold); write the branch the C writes
+rather than hardcoding one arm, and compare like clang does (`== 1` where
+the C object tests a `_Bool` against 1). A `__weak` extern stays a plain
+Rust extern; the weakness comes from the C object. The `kconfig` translint
+class checks that both objects declare the same externs with the same types;
+a translation that declares none while the C object does gets a WARN,
+silenced with `// translint: allow(kconfig)` plus the reason (e.g. the C
+object's only readers are usdt.bpf.h library functions its programs never
+call).
+
 ## Kernel type IDs and program load order
 
 For C's `bpf_core_type_id_kernel(T)`, declare an `extern "C"` function

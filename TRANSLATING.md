@@ -127,6 +127,15 @@ the kernel rejects non-identifier chars in type names, and
 are not load-bearing for libbpf — only the VAR name and member layout
 are.)
 
+A program that reads the kernel's map object through the map pointer
+(`struct bpf_map *map = (void *)&m_hash; map->max_entries`, a `#[btf]`
+view of `bpf_map` over `addr_of!(m_hash)`) must declare that map
+`static mut`: a `static` is an LLVM constant whose initializer is all
+null pointers, so every load from it folds to zero before the CO-RE
+relocation exists, and the check silently fails. The C map is a writable
+global; `scripts/maps_section.py` makes the section writable either way.
+`map_ptr_kern.rs` declares all of its maps so.
+
 ### Statically-initialized `values` slots (prog-array, map-in-map)
 
 C's `__array(values, void (void))` with `.values = { [0] = &prog }` asks the

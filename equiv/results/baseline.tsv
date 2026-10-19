@@ -826,3 +826,4 @@ xdp_tx	2e8c14402e744dfa26c945255e80aded	ff26d76303bf4bd92f68dc14ecabe0c0	5fec7b7
 xdpwall	2a6114a01d03582644e52eb4f0223675	0d9d8eecc5048c95df902e7c4e21908a	5fec7b79f78c1deb54d70c5ee2f32aac	EQUIV	xdpwall: 1/1 program(s) proved equivalent
 xfrm_info	eb09b4e246f21968b66de731195983d0	bdd58bb2061c7f33f25d1153b12c3198	5fec7b79f78c1deb54d70c5ee2f32aac	EQUIV	xfrm_info: 2/2 program(s) proved equivalent
 xsk_xdp_progs	fc61c0d6f5983b9e11c8dc6cabab9322	b2d58711e0e696a6496789d6099dd1ae	5fec7b79f78c1deb54d70c5ee2f32aac	EQUIV	xsk_xdp_progs: 5/5 program(s) proved equivalent
+map_ptr_kern	9bb58c2870722444d474610609fe2faa	c7bd3be0d8b348ef03d9dc5897f3c2b2	5fec7b79f78c1deb54d70c5ee2f32aac	BAIL	map_ptr_kern: 0/1 program(s) proved equivalent

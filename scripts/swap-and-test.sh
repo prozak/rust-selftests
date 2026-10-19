@@ -12,7 +12,10 @@
 # dependency files (which record skeleton-header inclusion), so prog-name /
 # test-name mismatches are handled without any hardcoded mapping; within a
 # consuming file, scripts/affected_tests.py keeps the test functions that
-# reference the object (see there).
+# reference the object or its skeleton (see there). An object that is one
+# half of a multi-object skeleton (Makefile.skel's `<skel>.skel.h-deps`)
+# has that skeleton regenerated, with the other halves as installed, and
+# its consumers.
 #
 # Expects env (exported by the Makefile): KERNEL_SRC SELFTESTS_SRC
 # SELFTESTS_OUTPUT LLVM_PREFIX TEST_RUNNER; FLAVOR=uml adds UML_HARNESS and
@@ -74,15 +77,32 @@ sfmake() {
 # Regenerate the skeleton headers derived from this object, if any. Tests
 # without skeletons load the .bpf.o from disk at runtime, so the swap alone
 # is enough for them.
+#
+# A multi-object skeleton (Makefile.skel: `<skel>.skel.h-deps := a.bpf.o
+# b.bpf.o ...`) is derived from every object it links, whatever its name:
+# bpftool's static linker merges the halves as installed, so a swap of any
+# half regenerates it, and the skeleton's consumers are that half's.
+LINKED=()
+if [ -f "${SELFTESTS_SRC}/Makefile.skel" ]; then
+    while read -r skel deps; do
+        case " ${deps} " in *" ${NAME}.bpf.o "*) LINKED+=("${skel}") ;; esac
+    done < <(sed -n 's/^\([A-Za-z0-9_]*\)\.skel\.h-deps *:= *\(.*\)$/\1.skel.h \2/p' \
+             "${SELFTESTS_SRC}/Makefile.skel")
+fi
 SKELS=()
-for h in "${OUT}/${NAME}.skel.h" "${OUT}/${NAME}.lskel.h"; do
+for b in "${NAME}.skel.h" "${NAME}.lskel.h" ${LINKED[@]+"${LINKED[@]}"}; do
+    case " ${SKELS[*]-} " in *"/${b} "*) continue ;; esac
+    h="${OUT}/${b}"
     # A failed skeleton build can remove the header. Its C consumer still
-    # requires it on the next swap/restore, so recover from source includes.
+    # requires it on the next swap/restore, so recover from source includes;
+    # a linked skeleton is always one the Makefile builds.
     if [ ! -f "${h}" ]; then
-        grep -qF "\"$(basename "${h}")\"" "${SELFTESTS_SRC}"/prog_tests/*.c || continue
+        case " ${LINKED[*]-} " in *" ${b} "*) ;; *)
+            grep -qF "\"${b}\"" "${SELFTESTS_SRC}"/prog_tests/*.c || continue ;;
+        esac
     fi
     rm -f "${h}"
-    SKELS+=("${OUT}//$(basename "${h}")")
+    SKELS+=("${OUT}//${b}")
 done
 
 TESTS=()
@@ -90,8 +110,14 @@ if [ "${#SKELS[@]}" -gt 0 ]; then
     sfmake "${SKELS[@]}" > /dev/null
 
     # Find every test object whose dep file pulls in one of those skeletons.
-    for d in $(grep -l -E "(^| |/)${NAME}\.l?skel\.h" "${OUT}"/*.test.d); do
-        TESTS+=("$(basename "${d}" .test.d)")
+    # A linked skeleton's generation also writes <skel>.subskel.h, which is
+    # what a subskeleton's consumer includes (test_subskeleton_lib).
+    for h in "${SKELS[@]}"; do
+        stem="$(basename "${h}")"; stem="${stem%.lskel.h}"; stem="${stem%.skel.h}"
+        for d in $(grep -l -E "(^| |/)${stem}\.(l?skel|subskel)\.h" "${OUT}"/*.test.d); do
+            base="$(basename "${d}" .test.d)"
+            case " ${TESTS[*]-} " in *" ${base} "*) ;; *) TESTS+=("${base}") ;; esac
+        done
     done
     # The selftests build auto-generates skeletons for every prog; some tests
     # ignore them and load the .bpf.o from disk instead, so an unconsumed
@@ -131,14 +157,20 @@ done
 # verif_scale_*, test_xdp_veth.c registers xdp_veth_*, ...), and a file
 # can hold tests of many objects (verifier.c: one per verifier_* object).
 # scripts/affected_tests.py expands each file to the test functions that
-# reference this object when that set is certainly complete, else to every
+# reference this object (or a skeleton it is linked into, under the
+# skeleton's name) when that set is certainly complete, else to every
 # test the file defines, and to the basename when it defines none. -t is
 # a substring match in test_progs, so a name may select tests whose name
 # extends it: a superset, never a miss.
 SRCS=()
 for t in "${TESTS[@]}"; do SRCS+=("${SELFTESTS_SRC}/prog_tests/${t}.c"); done
+NAMES="${NAME}"
+for h in ${SKELS[@]+"${SKELS[@]}"}; do
+    stem="$(basename "${h}")"; stem="${stem%.lskel.h}"; stem="${stem%.skel.h}"
+    [ "${stem}" = "${NAME}" ] || NAMES="${NAMES},${stem}"
+done
 EXPANDED=()
-for n in $(python3 "${HERE}/scripts/affected_tests.py" "${NAME}" "${SRCS[@]}"); do
+for n in $(python3 "${HERE}/scripts/affected_tests.py" "${NAMES}" "${SRCS[@]}"); do
     case " ${EXPANDED[*]-} " in *" ${n} "*) ;; *) EXPANDED+=("${n}") ;; esac
 done
 # Subtract tests known to fail with pristine C objects (kernel limits /

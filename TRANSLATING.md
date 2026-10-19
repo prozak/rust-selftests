@@ -325,12 +325,14 @@ the integers the code reads through, and add `// BTF_C_MEMBERS: name`:
 `scripts/btf_c_members.py` gives the struct the C object's member BTF
 (bitfield offsets and sizes, a copy of the enum). See test_usdt.rs.
 
-The gate swaps one object at a time: the object whose name the linked
-skeleton carries (test_subskeleton, test_usdt) runs its consumer with the
-C other halves; the other halves are NO-ORACLE on their own. To test a
-pair of translations together, install the other half with `SWAP_ONLY=1
+The gate swaps one object at a time: `scripts/swap-and-test.sh` reads
+Makefile.skel, regenerates every linked skeleton the object is a half of
+(with the C other halves as installed) and runs the skeleton's consumer,
+so each half has its own verdict. To test a pair of translations
+together, install the other half with `SWAP_ONLY=1
 scripts/swap-and-test.sh <other> rust`, run `make test-<main>`, then
-`make restore-all`.
+`make restore-all` and `make restore-<main>` (restore-all puts the C
+objects back but relinks nothing).
 
 ## Kernel type IDs and program load order
 

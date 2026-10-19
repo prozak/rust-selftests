@@ -2,10 +2,13 @@
 """The prog_tests test names that load a given object: the -t filter of one
 swap (scripts/swap-and-test.sh).
 
-  scripts/affected_tests.py <object-name> <prog_tests/file.c>...
+  scripts/affected_tests.py <object-name>[,<skeleton-name>...] <prog_tests/file.c>...
 
 A consuming file is one whose test object includes the object's skeleton
-or names its .bpf.o; swap-and-test.sh finds those. The whole file used to
+or names its .bpf.o; swap-and-test.sh finds those. An object linked into a
+multi-object skeleton of another name (test_usdt_multispec into test_usdt)
+is referenced under that skeleton's name: the further names count as the
+object's. The whole file used to
 run, which for prog_tests/verifier.c means every verifier test (145 of
 them, 3000 subtests, about 45 seconds) for a swap only test_verifier_<name>
 can observe. This script narrows the set to the test functions that
@@ -98,14 +101,17 @@ def test_bodies(code):
     return bodies
 
 
-def reference_pattern(name):
-    ident = re.escape(name)
-    return re.compile(rf"(?<![A-Za-z0-9_]){ident}(?![A-Za-z0-9]|_(?!_))")
+def reference_pattern(names):
+    ident = "|".join(re.escape(n) for n in names)
+    return re.compile(rf"(?<![A-Za-z0-9_])(?:{ident})(?![A-Za-z0-9]|_(?!_))")
 
 
-def affected_tests(name, text):
-    """The test names of one prog_tests source that a swap of `name` can
+def affected_tests(names, text):
+    """The test names of one prog_tests source that a swap of `names` (an
+    object name, or that and the skeleton names it is linked under) can
     affect, by the rules in the module docstring."""
+    if isinstance(names, str):
+        names = [names]
     code = blank_noncode(text)
     every = []
     for m in TEST_DEF.finditer(code):
@@ -116,9 +122,10 @@ def affected_tests(name, text):
     bodies = test_bodies(code)
     if not bodies:
         return every
-    references = [m.start() for m in reference_pattern(name).finditer(code)]
+    references = [m.start() for m in reference_pattern(names).finditer(code)]
     # the .bpf.o path is a string literal, blanked above: look in the source
-    references += [m.start() for m in re.finditer(r'"[^"]*' + re.escape(name) + r'\.bpf\.o"', text)]
+    objects = "|".join(re.escape(n) for n in names)
+    references += [m.start() for m in re.finditer(r'"[^"]*(?:' + objects + r')\.bpf\.o"', text)]
     if not references:
         return every
 
@@ -158,13 +165,14 @@ def affected_tests(name, text):
 
 def main(argv):
     if len(argv) < 3:
-        sys.exit("usage: affected_tests.py <object-name> <prog_tests/file.c>...")
-    name, files = argv[1], argv[2:]
+        sys.exit("usage: affected_tests.py <object-name>[,<skeleton-name>...] "
+                 "<prog_tests/file.c>...")
+    names, files = [n for n in argv[1].split(",") if n], argv[2:]
     out = []
     for path in files:
         try:
             with open(path, errors="replace") as f:
-                tests = affected_tests(name, f.read())
+                tests = affected_tests(names, f.read())
         except OSError:
             tests = []
         for t in tests or [os.path.splitext(os.path.basename(path))[0]]:

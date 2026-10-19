@@ -141,3 +141,27 @@ def test_cli_merges_files_in_order_without_duplicates(tmp_path):
                           str(tmp_path / "verifier.c"), str(tmp_path / "second.c")],
                          check=True, capture_output=True, text=True).stdout
     assert out.split() == ["verifier_and"]
+
+
+def test_a_linked_half_is_referenced_under_its_skeleton_name():
+    source = """
+#include "test_usdt.skel.h"
+#include "test_urandom_usdt.skel.h"
+void test_usdt_basic(void) { test_usdt__open_and_load(); }
+void test_usdt_multi(void) { test_usdt__open_and_load(); }
+void test_urandom_usdt(void) { test_urandom_usdt__open_and_load(); }
+"""
+    # the half's own name appears nowhere: the whole file
+    assert affected_tests.affected_tests("test_usdt_multispec", source) == [
+        "usdt_basic", "usdt_multi", "urandom_usdt"]
+    assert affected_tests.affected_tests(["test_usdt_multispec", "test_usdt"], source) == [
+        "usdt_basic", "usdt_multi"]
+
+
+def test_cli_takes_the_skeleton_names_after_commas(tmp_path):
+    (tmp_path / "usdt.c").write_text(
+        'void test_a(void) { test_usdt__open(); }\nvoid test_b(void) { other(); }\n')
+    out = subprocess.run([sys.executable, str(ROOT / "scripts/affected_tests.py"),
+                          "test_usdt_multispec,test_usdt", str(tmp_path / "usdt.c")],
+                         check=True, capture_output=True, text=True).stdout
+    assert out.split() == ["a"]

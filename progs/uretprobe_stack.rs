@@ -2,6 +2,11 @@
 #![no_std]
 #![no_main]
 
+// translint allow(kconfig): the C object's LINUX_HAS_BPF_COOKIE .kconfig
+// extern is read only by usdt.bpf.h's library functions (bpf_usdt_arg & co.)
+// in .text; BPF_USDT(usdt_probe) takes no usdt args and calls none of them
+// translint: allow(kconfig)
+
 // Direct translation of tools/testing/selftests/bpf/progs/uretprobe_stack.c
 // (bpf-rs-core idiom). Each uprobe/uretprobe/USDT program captures the user
 // stack into its own bss array and records the length; prog_tests/

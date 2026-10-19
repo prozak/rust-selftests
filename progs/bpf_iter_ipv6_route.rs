@@ -5,14 +5,12 @@
 // Direct translation of tools/testing/selftests/bpf/progs/bpf_iter_ipv6_route.c
 // (bpf-rs-core idiom).
 //
-// C's `extern bool CONFIG_IPV6_SUBTREES __kconfig __weak;` is elided: the
-// pipeline cannot provide __kconfig externs (#51), and
-// prog_tests/bpf_iter.c's test_ipv6_route() only drives a dummy read that
-// discards the printed content ("not check contents, but ensure read() ends
-// without error"), so the CONFIG_IPV6_SUBTREES branch is hardcoded to the C
-// source's `else` arm (a kernel built with IPV6_SUBTREES disabled would take
-// the same path). The pinned kernel has it enabled, so this diverges from the
-// C object there (#50).
+// C's `extern bool CONFIG_IPV6_SUBTREES __kconfig __weak;` is the
+// `// BTF_KCONFIG:` extern below: scripts/ksym_vars.py gives the Rust extern
+// the C object's `.kconfig` declaration (type `bool`, weak), libbpf fills it
+// from the running kernel's config, and the branch reads it like the C does.
+// The Rust extern is `u8` so the branch is the C's `if w1 == 0` on the loaded
+// byte; its BTF type is the mirrored C `bool` either way.
 //
 // `rt->fib6_nh[0]` (a C99 flexible array member) and `nh->nh_info->fib6_nh`
 // are both plain `struct fib6_nh` accesses at the field-name level; the
@@ -35,6 +33,11 @@ use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::bpf_seq_printf;
 use btf_macros::btf;
 use core::ffi::c_void;
+
+// BTF_KCONFIG: CONFIG_IPV6_SUBTREES
+extern "C" {
+    static CONFIG_IPV6_SUBTREES: u8;
+}
 
 #[repr(C)]
 struct bpf_iter_meta {
@@ -116,6 +119,7 @@ struct nexthop {
 struct fib6_info {
     fib6_ref: refcount_t,
     fib6_dst: rt6key,
+    fib6_src: rt6key,
     fib6_flags: u32,
     fib6_metric: u32,
     nh: *mut nexthop,
@@ -202,14 +206,28 @@ extern "C" fn dump_ipv6_route(ctx: *const bpf_iter__ipv6_route) -> i32 {
         core::mem::size_of_val(&params_dst) as u32,
     );
 
-    static FMT_SRC_ZERO: [u8; 37] = *b"00000000000000000000000000000000 00 \0";
-    bpf_seq_printf(
-        seq,
-        FMT_SRC_ZERO.as_ptr() as *const c_void,
-        FMT_SRC_ZERO.len() as u32,
-        core::ptr::null(),
-        0,
-    );
+    if unsafe { CONFIG_IPV6_SUBTREES } != 0 {
+        let src_addr = rt.fib6_src().addr().in6_u().u6_addr8().as_ptr();
+        let src_plen = unsafe { *rt.fib6_src().plen().as_ptr() } as u32;
+        static FMT_SRC: [u8; 11] = *b"%pi6 %02x \0";
+        let params_src: [u64; 2] = [src_addr as u64, src_plen as u64];
+        bpf_seq_printf(
+            seq,
+            FMT_SRC.as_ptr() as *const c_void,
+            FMT_SRC.len() as u32,
+            params_src.as_ptr() as *const c_void,
+            core::mem::size_of_val(&params_src) as u32,
+        );
+    } else {
+        static FMT_SRC_ZERO: [u8; 37] = *b"00000000000000000000000000000000 00 \0";
+        bpf_seq_printf(
+            seq,
+            FMT_SRC_ZERO.as_ptr() as *const c_void,
+            FMT_SRC_ZERO.len() as u32,
+            core::ptr::null(),
+            0,
+        );
+    }
 
     if gw_family != 0 {
         flags |= RTF_GATEWAY;

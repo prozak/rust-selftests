@@ -121,8 +121,30 @@ fn read_pt_regs_u64(ctx: *const u8, byte_off: i16) -> u64 {
 // single caller-chosen arg index, returning 0 on any error (matching the
 // `*res = 0` on error, C-side caller here never checks bpf_usdt_arg's return
 // code either).
+// usdt.bpf.h's `__bpf_usdt_spec_id()`: without BPF cookies (the
+// `LINUX_HAS_BPF_COOKIE` __kconfig extern, filled by libbpf) the spec id is
+// looked up by the probe's ip in `__bpf_usdt_ip_to_spec_id`.
+// BTF_KCONFIG: LINUX_HAS_BPF_COOKIE
+extern "C" {
+    static LINUX_HAS_BPF_COOKIE: u8;
+}
+const ESRCH: i32 = 3;
+
+fn usdt_spec_id(ctx: *const u8) -> i32 {
+    if unsafe { LINUX_HAS_BPF_COOKIE } == 0 {
+        // PT_REGS_IP(ctx) = ctx->ip, pt_regs slot 16
+        let ip: i64 = unsafe { *(ctx.add(16 * 8) as *const i64) };
+        let spec_id_ptr = bpf_map_lookup_elem(&__bpf_usdt_ip_to_spec_id, &ip) as *const i32;
+        return if spec_id_ptr.is_null() { -ESRCH } else { unsafe { *spec_id_ptr } };
+    }
+    bpf_get_attach_cookie(ctx as *const c_void) as i32
+}
+
 fn usdt_arg(ctx: *const u8, arg_num: usize) -> i64 {
-    let spec_id = bpf_get_attach_cookie(ctx as *const c_void) as i32;
+    let spec_id = usdt_spec_id(ctx);
+    if spec_id < 0 {
+        return 0;
+    }
     let spec_ptr = bpf_map_lookup_elem(&__bpf_usdt_specs, &spec_id) as *const UsdtSpec;
     if spec_ptr.is_null() {
         return 0;

@@ -46,14 +46,9 @@
 // so this is sound as long as build and run kernel match (same general
 // precondition as every other byte-offset-only CO-RE trick in this repo).
 //
-// `CONFIG_HZ` is a `__kconfig extern`: rustc emits no BTF for extern
-// statics, so keeping the extern makes skeleton regen fail to resolve it,
-// and this program's only consumer (`prog_tests/bpf_iter.c`'s
-// `test_tcp4()`) never touches `skel->kconfig` -- it only attaches the
-// prog and does a content-blind `read()` until EOF. So instead of the
-// extern, `CONFIG_HZ` is hardcoded to 1000, this kernel build's actual
-// value (`.config`: `CONFIG_HZ_1000=y`), matching `jiffies_to_clock_t`'s
-// real behavior exactly without needing the unemittable extern at all.
+// `CONFIG_HZ` is the C's `__kconfig` extern (`// BTF_KCONFIG:` below,
+// scripts/ksym_vars.py mirrors the C object's `.kconfig` declaration), so
+// libbpf fills it from the running kernel's config at load time.
 //
 // `timer_active`/`timer_expires` and the final `%d` field in
 // `dump_tcp_sock` each select between two or three *distinct* CO-RE field
@@ -84,8 +79,11 @@ const ICSK_TIME_PROBE0: u8 = 3;
 const ICSK_TIME_LOSS_PROBE: u8 = 5;
 const ICSK_TIME_REO_TIMEOUT: u8 = 6;
 
-const CONFIG_HZ: u64 = 1000;
-const USER_HZ: u64 = 100;
+// BTF_KCONFIG: CONFIG_HZ
+extern "C" {
+    static CONFIG_HZ: u32;
+}
+const USER_HZ: u32 = 100;
 const NSEC_PER_SEC: u64 = 1_000_000_000;
 
 // ------------------------------------------------------------------ ctx --
@@ -216,13 +214,15 @@ struct request_sock {
 // -------------------------------------------------------------- jiffies --
 
 fn jiffies_to_clock_t(x: u64) -> u64 {
-    let tick_nsec = (NSEC_PER_SEC + CONFIG_HZ / 2) / CONFIG_HZ;
-    let user_hz_nsec = NSEC_PER_SEC / USER_HZ;
+    // C: `extern unsigned CONFIG_HZ __kconfig;` read once per use site
+    // like the C's (clang reloads the .kconfig value each time).
+    let tick_nsec = (NSEC_PER_SEC + (unsafe { CONFIG_HZ } / 2) as u64) / unsafe { CONFIG_HZ } as u64;
+    let user_hz_nsec = NSEC_PER_SEC / USER_HZ as u64;
     if tick_nsec % user_hz_nsec == 0 {
-        if CONFIG_HZ < USER_HZ {
-            x * (USER_HZ / CONFIG_HZ)
+        if unsafe { CONFIG_HZ } < USER_HZ {
+            x * (USER_HZ / unsafe { CONFIG_HZ }) as u64
         } else {
-            x / (CONFIG_HZ / USER_HZ)
+            x / (unsafe { CONFIG_HZ } / USER_HZ) as u64
         }
     } else {
         x * tick_nsec / user_hz_nsec

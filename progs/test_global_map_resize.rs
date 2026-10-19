@@ -88,17 +88,14 @@ static mut percpu_arr: [i32; 1] = [0; 1];
 
 // C has `extern int LINUX_KERNEL_VERSION __kconfig;` here and stores it into
 // version_sink on every run, purely to exercise a libbpf regression path
-// (extern + datasec resize invalidating BTF type pointers) that no
-// prog_tests assertion actually checks the value of. Not possible yet
-// (#51): rustc's `extern "C" { static X: T; }` produces a plain
-// `@X = external global` LLVM global with no attached debug info (unlike
-// clang, which emits a DIGlobalVariable(isDefinition: false) for
-// `extern ... __kconfig`), so no BTF extern-linkage VAR is ever generated
-// for it. Without that BTF, libbpf's static linker (bpftool gen object,
-// part of skeleton regen) hard-fails with "failed to find BTF info for
-// global/extern symbol" before the object can even be loaded. Dropped;
-// version_sink stays a plain always-zero global (still required — it's a
-// real global FUNC/OBJECT symbol in the C object's keep-list).
+// (extern + datasec resize invalidating BTF type pointers). The extern is
+// declared with `// BTF_KCONFIG:` (scripts/ksym_vars.py mirrors the C
+// object's `.kconfig` declaration; libbpf fills it at load time) and the
+// programs store it like the C does.
+// BTF_KCONFIG: LINUX_KERNEL_VERSION
+extern "C" {
+    static LINUX_KERNEL_VERSION: i32;
+}
 #[no_mangle]
 static mut version_sink: isize = 0;
 
@@ -127,6 +124,9 @@ extern "C" fn bss_array_sum(_ctx: *const c_void) -> i32 {
         i += 1;
     }
     unsafe { sum = total };
+
+    // see above; ensure this is not optimized out
+    unsafe { version_sink = LINUX_KERNEL_VERSION as isize };
 
     0
 }
@@ -158,6 +158,9 @@ extern "C" fn data_array_sum(_ctx: *const c_void) -> i32 {
         i += 1;
     }
     unsafe { sum = total };
+
+    // see above; ensure this is not optimized out
+    unsafe { version_sink = LINUX_KERNEL_VERSION as isize };
 
     0
 }

@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0
 #![no_std]
 #![no_main]
+
+// translint allow(kconfig): the C object's LINUX_HAS_BPF_COOKIE .kconfig
+// extern is read only by usdt.bpf.h's library functions (bpf_usdt_arg & co.)
+// in .text, which none of its programs call; the translation has no such dead
+// code to read it from
+// translint: allow(kconfig)
 #![feature(linkage, used_with_arg)]
 #![allow(non_upper_case_globals)]
 

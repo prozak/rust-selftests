@@ -53,11 +53,11 @@
 // the same iteration count is verifier-safe and equally side-effect-free,
 // preserving the varying-hold-time behaviour the subtests parametrize on.
 //
-// CONFIG_NR_CPUS is dropped: it's a `__kconfig` extern
-// (the pipeline cannot provide those, #51) whose only use here
-// (`if (CONFIG_NR_CPUS > 1024) return -EOPNOTSUPP;`) is a guard against a
-// kernel config value that is always far below 1024 in this harness's test
-// kernel; the branch is unreachable in practice on the C side too.
+// bpf_arena_spin_lock.h's `CONFIG_NR_CPUS` guard (`if (CONFIG_NR_CPUS >
+// 1024) return -EOPNOTSUPP;`) reads the __kconfig extern (`// BTF_KCONFIG:`
+// below, filled by libbpf), as does bpf_atomic.h's `smp_store_release()`
+// fallback in the unlock (`if (!CONFIG_X86_64) smp_mb();`). The C's
+// qspinlock slowpath has more barrier sites than this bpf_loop lock.
 //
 // `cast_kern` (AS1 arena-global address -> AS0 kernel-usable PTR_TO_ARENA)
 // reuses arena_atomics.rs's byte-for-byte-confirmed hand-encoded
@@ -136,6 +136,21 @@ static mut lock: u32 = 0;
 /// use it with `BPF_MAX_LOOPS` (8M, `include/linux/bpf.h`) as the bound.
 const LOCK_RETRY_BOUND: u32 = 8 * 1024 * 1024;
 
+// BTF_KCONFIG: CONFIG_NR_CPUS
+// BTF_KCONFIG: CONFIG_X86_64
+extern "C" {
+    static CONFIG_NR_CPUS: u64;
+    static CONFIG_X86_64: u8;
+}
+
+/// bpf_atomic.h's `smp_mb()`: a `__sync_fetch_and_add(&__val, 0)` on a
+/// volatile stack word.
+#[inline(always)]
+fn smp_mb() {
+    let val = core::sync::atomic::AtomicU64::new(0);
+    val.fetch_add(0, Ordering::SeqCst);
+}
+
 struct LockCtx {
     lock_ptr: *mut AtomicU32,
     acquired: bool,
@@ -157,6 +172,9 @@ extern "C" fn try_lock_cb(_i: u64, ctx: *mut LockCtx) -> i64 {
 
 #[inline(always)]
 unsafe fn arena_spin_lock() -> i32 {
+    if CONFIG_NR_CPUS > 1024 {
+        return -95; // -EOPNOTSUPP
+    }
     let lock_ptr = cast_kern(core::ptr::addr_of_mut!(lock)) as *mut AtomicU32;
     let mut ctx = LockCtx {
         lock_ptr,
@@ -178,6 +196,10 @@ unsafe fn arena_spin_lock() -> i32 {
 #[inline(always)]
 unsafe fn arena_spin_unlock() {
     let lock_ptr = cast_kern(core::ptr::addr_of_mut!(lock)) as *mut AtomicU32;
+    // smp_store_release() fallback: a full barrier unless x86-64
+    if CONFIG_X86_64 == 0 {
+        smp_mb();
+    }
     (*lock_ptr).store(0, Ordering::Release);
 }
 

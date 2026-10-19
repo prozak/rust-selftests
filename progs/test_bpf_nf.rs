@@ -61,11 +61,9 @@
 // for a target `union` field (`nf_inet_addr`, `nf_conntrack_man_proto`) is
 // the same validated pattern that file established.
 //
-// `CONFIG_HZ` (`__kconfig extern`) is hardcoded to 1000 (this build's
-// `CONFIG_HZ_1000=y`) rather than kept as an extern: rustc emits no BTF for
-// extern statics, and `prog_tests/bpf_nf.c` never reads `skel->kconfig`, it
-// only asserts a tolerance range on `test_delta_timeout` -- same shortcut as
-// bpf_iter_tcp4.rs.
+// `CONFIG_HZ` is the C's `__kconfig` extern (`// BTF_KCONFIG:` below):
+// scripts/ksym_vars.py mirrors the C object's `.kconfig` declaration and
+// libbpf fills it from the running kernel's config at load time.
 //
 // Both `nf_ct_test` and `nf_ct_opts_new_test` locally shadow the file-scope
 // globals `saddr`/`sport`/`daddr`/`dport` with same-named stack locals
@@ -103,7 +101,10 @@ const NF_CT_ZONE_DIR_REPL: u8 = 1 << IP_CT_DIR_REPLY;
 const IPS_SEEN_REPLY: u32 = 1 << 1;
 const IPS_CONFIRMED: u32 = 1 << 3;
 
-const CONFIG_HZ: u64 = 1000;
+// BTF_KCONFIG: CONFIG_HZ
+extern "C" {
+    static CONFIG_HZ: u64;
+}
 
 // sizeof(struct nf_conntrack_tuple_hash) on the target kernel; see file
 // header comment.

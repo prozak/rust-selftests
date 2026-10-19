@@ -2,6 +2,11 @@
 #![no_std]
 #![no_main]
 
+// translint allow(kconfig): CONFIG_PREEMPT_RT is read by the bpf_in_*()
+// preempt-count guards that also need the percpu __preempt_count ksym (#47);
+// waived in equiv/waivers.tsv
+// translint: allow(kconfig)
+
 // Direct translation of tools/testing/selftests/bpf/progs/test_ctx.c
 // (bpf-rs-core idiom).
 

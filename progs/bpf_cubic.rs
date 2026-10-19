@@ -19,10 +19,11 @@
 // #[inline(never)] accessor fn (one #[btf] chain per function) per
 // [[btf-second-field-access-same-root-crashes-opt]].
 //
-// `extern unsigned long CONFIG_HZ __kconfig;` is dropped: prog_tests never
-// reads skel->kconfig, and the pipeline cannot provide __kconfig externs
-// (#51). HZ is hardcoded to 1000, this session's
-// FLAVOR=qemu test kernel's CONFIG_HZ (bpf-next-x86 checkout's .config).
+// `extern unsigned long CONFIG_HZ __kconfig;` is the `// BTF_KCONFIG:`
+// extern below (scripts/ksym_vars.py mirrors the C object's `.kconfig`
+// declaration; libbpf fills it at load time). C's `#define HZ CONFIG_HZ`
+// and `USEC_PER_JIFFY (USEC_PER_SEC / HZ)` are runtime reads/divisions at
+// every use, so they are the `hz()` / `usec_per_jiffy()` functions here.
 //
 // `tcp_is_cwnd_limited()`'s `is_cwnd_limited:1` bitfield has no plain
 // sibling field *before* it, but `scaling_ratio` (a plain u8) sits exactly
@@ -56,10 +57,20 @@ const SOL_TCP: i32 = 6;
 const TCP_NODELAY: i32 = 1;
 const EOPNOTSUPP: i64 = 95;
 
-const HZ: u32 = 1000;
+// BTF_KCONFIG: CONFIG_HZ
+extern "C" {
+    static CONFIG_HZ: u64;
+}
+#[inline(always)]
+fn hz() -> u64 {
+    unsafe { CONFIG_HZ }
+}
 const USEC_PER_MSEC: u64 = 1000;
 const USEC_PER_SEC: u64 = 1_000_000;
-const USEC_PER_JIFFY: u64 = USEC_PER_SEC / (HZ as u64);
+#[inline(always)]
+fn usec_per_jiffy() -> u64 {
+    USEC_PER_SEC / hz()
+}
 
 const BICTCP_BETA_SCALE: u32 = 1024;
 const BICTCP_HZ: u32 = 10;
@@ -332,7 +343,7 @@ fn bictcp_update(ca: *mut BpfBictcp, cwnd: u32, acked: u32) {
 
         if (*ca).last_cwnd == cwnd
             && (((tcp_jiffies32().wrapping_sub((*ca).last_time)) as i32) as i64) as u64
-                <= (HZ as u64) / 32
+                <= hz() / 32
         {
             return;
         }
@@ -359,7 +370,7 @@ fn bictcp_update(ca: *mut BpfBictcp, cwnd: u32, acked: u32) {
             }
 
             let t_diff32 = tcp_jiffies32().wrapping_sub((*ca).epoch_start);
-            let mut t: u64 = (((t_diff32 as i32) as i64) as u64).wrapping_mul(USEC_PER_JIFFY);
+            let mut t: u64 = (((t_diff32 as i32) as i64) as u64).wrapping_mul(usec_per_jiffy());
             t = t.wrapping_add((*ca).delay_min as u64);
             t <<= BICTCP_HZ;
             t = safe_div_u64(t, USEC_PER_SEC);
@@ -657,7 +668,7 @@ extern "C" fn bpf_cubic_acked(ctx: *const u64) {
     unsafe {
         if (*ca).epoch_start != 0
             && ((((tcp_jiffies32().wrapping_sub((*ca).epoch_start)) as i32) as i64) as u64)
-                < (HZ as u64)
+                < hz()
         {
             return;
         }

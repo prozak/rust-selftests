@@ -2,6 +2,10 @@
 #![no_std]
 #![no_main]
 
+// translint allow(kconfig): the test_populate* programs, which read
+// CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS, are not translated yet (#51)
+// translint: allow(kconfig)
+
 // Direct translation of tools/testing/selftests/bpf/progs/cpumask_success.c
 // (bpf-next-x86), bpf-rs-core idiom.
 //

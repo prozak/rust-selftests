@@ -11,9 +11,11 @@
 // `ctx` is the kprobe's own pt_regs, whose `di` slot (PT_REGS_PARM1(ctx))
 // holds a pointer to the real syscall pt_regs -- same double-indirection
 // idiom as test_probe_user.rs's `handle_sys_connect` and test_vmlinux.rs.
-// rustc can't emit the `__kconfig` BTF VAR BPF_KSYSCALL branches on, so the
-// wrapper-present branch is hardcoded to match this build's x86_64 kernel
-// (CONFIG_ARCH_HAS_SYSCALL_WRAPPER=y).
+// BPF_KSYSCALL branches on the `LINUX_HAS_SYSCALL_WRAPPER` __kconfig extern
+// (`// BTF_KCONFIG:` below, filled by libbpf at load time): with the wrapper
+// the args are bpf_probe_read_kernel()s off the inner regs (PT_REGS_PARMn_
+// CORE_SYSCALL), without it plain loads off ctx itself (PT_REGS_PARMn_
+// SYSCALL). The C compiles `if (_Bool)` here as `w != 1`, mirrored.
 //
 // x86_64 `struct pt_regs` is 21 `long`-sized fields in order: r15,r14,r13,
 // r12,bp,bx,r11,r10,r9,r8,ax,cx,dx,si,di,orig_ax,ip,cs,flags,sp,ss. Register
@@ -31,6 +33,11 @@ use core::ptr::{addr_of, read_volatile};
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::{bpf_get_current_pid_tgid, bpf_probe_read_kernel};
+
+// BTF_KCONFIG: LINUX_HAS_SYSCALL_WRAPPER
+extern "C" {
+    static LINUX_HAS_SYSCALL_WRAPPER: u8;
+}
 
 const DI: u64 = 14 * 8;
 const SI: u64 = 13 * 8;
@@ -144,14 +151,23 @@ extern "C" fn prctl_enter(ctx: *const u64) -> i32 {
         return 0;
     }
 
-    let regs = unsafe { *ctx.add(14) };
-
-    unsafe {
-        option_syscall = probe_read_u64(regs + DI) as i32;
-        arg2_syscall = probe_read_u64(regs + SI);
-        arg3_syscall = probe_read_u64(regs + DX);
-        arg4_syscall = probe_read_u64(regs + R10);
-        arg5_syscall = probe_read_u64(regs + R8);
+    if unsafe { LINUX_HAS_SYSCALL_WRAPPER } == 1 {
+        let regs = unsafe { *ctx.add(14) };
+        unsafe {
+            option_syscall = probe_read_u64(regs + DI) as i32;
+            arg2_syscall = probe_read_u64(regs + SI);
+            arg3_syscall = probe_read_u64(regs + DX);
+            arg4_syscall = probe_read_u64(regs + R10);
+            arg5_syscall = probe_read_u64(regs + R8);
+        }
+    } else {
+        unsafe {
+            option_syscall = *ctx.add(14) as i32;
+            arg2_syscall = *ctx.add(13);
+            arg3_syscall = *ctx.add(12);
+            arg4_syscall = *ctx.add(7);
+            arg5_syscall = *ctx.add(9);
+        }
     }
 
     0
@@ -164,18 +180,31 @@ extern "C" fn splice_enter(ctx: *const u64) -> i32 {
         return 0;
     }
 
-    let regs = unsafe { *ctx.add(14) };
-
-    unsafe {
-        let fd_in = probe_read_u64(regs + DI) as i32;
-        splice_fd_in = fd_in as i64 as u64;
-        splice_off_in = probe_read_u64(regs + SI);
-        let fd_out = probe_read_u64(regs + DX) as i32;
-        splice_fd_out = fd_out as i64 as u64;
-        splice_off_out = probe_read_u64(regs + R10);
-        splice_len = probe_read_u64(regs + R8);
-        let flags = probe_read_u64(regs + R9) as u32;
-        splice_flags = flags as u64;
+    if unsafe { LINUX_HAS_SYSCALL_WRAPPER } == 1 {
+        let regs = unsafe { *ctx.add(14) };
+        unsafe {
+            let fd_in = probe_read_u64(regs + DI) as i32;
+            splice_fd_in = fd_in as i64 as u64;
+            splice_off_in = probe_read_u64(regs + SI);
+            let fd_out = probe_read_u64(regs + DX) as i32;
+            splice_fd_out = fd_out as i64 as u64;
+            splice_off_out = probe_read_u64(regs + R10);
+            splice_len = probe_read_u64(regs + R8);
+            let flags = probe_read_u64(regs + R9) as u32;
+            splice_flags = flags as u64;
+        }
+    } else {
+        unsafe {
+            let fd_in = *ctx.add(14) as i32;
+            splice_fd_in = fd_in as i64 as u64;
+            splice_off_in = *ctx.add(13);
+            let fd_out = *ctx.add(12) as i32;
+            splice_fd_out = fd_out as i64 as u64;
+            splice_off_out = *ctx.add(7);
+            splice_len = *ctx.add(9);
+            let flags = *ctx.add(8) as u32;
+            splice_flags = flags as u64;
+        }
     }
 
     0

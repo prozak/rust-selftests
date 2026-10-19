@@ -2,6 +2,11 @@
 #![no_std]
 #![no_main]
 
+// translint allow(kconfig): the CONFIG_CGROUP_PIDS branch (cgroup v1 resolver)
+// needs an ENUMVAL CO-RE relocation (bpf_core_enum_value), which the pipeline
+// does not lower yet (#45 class); the branch stays untranslated until it does
+// translint: allow(kconfig)
+
 // Direct translation of tools/testing/selftests/bpf/progs/profiler2.c
 // (== profiler.inc.h with UNROLL undefined and INLINE empty/plain
 // `static`), bpf-rs-core idiom.

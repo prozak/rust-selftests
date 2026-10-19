@@ -38,9 +38,9 @@
 //
 // All non-address logic (jiffies helpers, the `icsk_ack.ato` /
 // `request_sock.num_timeout` bitfield-sibling-byte workaround, the
-// branch-merge-safe `#[inline(never)]` readers, `sock_i_ino`, `CONFIG_HZ`
-// hardcoded to 1000) is copied verbatim from bpf_iter_tcp4.rs -- none of it
-// is v4-specific.
+// branch-merge-safe `#[inline(never)]` readers, `sock_i_ino`, the
+// `CONFIG_HZ` __kconfig extern) is copied verbatim from bpf_iter_tcp4.rs --
+// none of it is v4-specific.
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::{
@@ -61,8 +61,11 @@ const ICSK_TIME_PROBE0: u8 = 3;
 const ICSK_TIME_LOSS_PROBE: u8 = 5;
 const ICSK_TIME_REO_TIMEOUT: u8 = 6;
 
-const CONFIG_HZ: u64 = 1000;
-const USER_HZ: u64 = 100;
+// BTF_KCONFIG: CONFIG_HZ
+extern "C" {
+    static CONFIG_HZ: u32;
+}
+const USER_HZ: u32 = 100;
 const NSEC_PER_SEC: u64 = 1_000_000_000;
 
 // ------------------------------------------------------------------ ctx --
@@ -203,13 +206,15 @@ struct request_sock {
 // -------------------------------------------------------------- jiffies --
 
 fn jiffies_to_clock_t(x: u64) -> u64 {
-    let tick_nsec = (NSEC_PER_SEC + CONFIG_HZ / 2) / CONFIG_HZ;
-    let user_hz_nsec = NSEC_PER_SEC / USER_HZ;
+    // C: `extern unsigned CONFIG_HZ __kconfig;` read once per use site
+    // like the C's (clang reloads the .kconfig value each time).
+    let tick_nsec = (NSEC_PER_SEC + (unsafe { CONFIG_HZ } / 2) as u64) / unsafe { CONFIG_HZ } as u64;
+    let user_hz_nsec = NSEC_PER_SEC / USER_HZ as u64;
     if tick_nsec % user_hz_nsec == 0 {
-        if CONFIG_HZ < USER_HZ {
-            x * (USER_HZ / CONFIG_HZ)
+        if unsafe { CONFIG_HZ } < USER_HZ {
+            x * (USER_HZ / unsafe { CONFIG_HZ }) as u64
         } else {
-            x / (CONFIG_HZ / USER_HZ)
+            x / (unsafe { CONFIG_HZ } / USER_HZ) as u64
         }
     } else {
         x * tick_nsec / user_hz_nsec

@@ -64,9 +64,26 @@ static mut user_ptr: *mut char = core::ptr::null_mut();
 /// ARCH_HAS_SYSCALL_WRAPPER.
 #[link_section = "ksyscall/nanosleep"]
 #[no_mangle]
-extern "C" fn handle_kprobe_auto(_ctx: *const u64) -> i32 {
+extern "C" fn handle_kprobe_auto(ctx: *const u64) -> i32 {
+    // BPF_KSYSCALL(handle_kprobe_auto, req, rem): the two args are unused,
+    // but with LINUX_HAS_SYSCALL_WRAPPER set the macro reads them off the
+    // inner regs with bpf_probe_read_kernel(), calls clang keeps (the
+    // wrapper-less plain loads it drops); mirrored.
+    if unsafe { LINUX_HAS_SYSCALL_WRAPPER } == 1 {
+        let regs = unsafe { *ctx.add(14) } as *const u64;
+        let mut v: u64 = 0;
+        bpf_rs_core::helpers::bpf_probe_read_kernel(
+            &mut v, 8, unsafe { regs.add(14) } as *const core::ffi::c_void);
+        bpf_rs_core::helpers::bpf_probe_read_kernel(
+            &mut v, 8, unsafe { regs.add(13) } as *const core::ffi::c_void);
+    }
     unsafe { kprobe2_res = 11 };
     0
+}
+
+// BTF_KCONFIG: LINUX_HAS_SYSCALL_WRAPPER
+extern "C" {
+    static LINUX_HAS_SYSCALL_WRAPPER: u8;
 }
 
 #[link_section = "kretsyscall/nanosleep"]

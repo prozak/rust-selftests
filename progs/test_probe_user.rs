@@ -53,11 +53,11 @@ fn handle_sys_connect_common(uservaddr: *mut c_void) -> i32 {
 }
 
 /// BPF_KSYSCALL(handle_sys_connect, int fd, struct sockaddr_in *uservaddr,
-/// int addrlen): ctx is `struct pt_regs *`. LINUX_HAS_SYSCALL_WRAPPER is a
-/// `__kconfig` extern the macro branches on; rustc can't emit `__kconfig`
-/// BTF VARs, so the branch is hardcoded here to match this build's kernel
-/// (.config has CONFIG_ARCH_HAS_SYSCALL_WRAPPER=y for x86_64), i.e. the
-/// "read pt_regs via the wrapper's inner regs pointer" branch.
+/// int addrlen): ctx is `struct pt_regs *`. LINUX_HAS_SYSCALL_WRAPPER is the
+/// `__kconfig` extern the macro branches on (`// BTF_KCONFIG:` below, filled
+/// by libbpf at load time): with the wrapper the arg is read via the inner
+/// regs pointer, without it straight off ctx (PT_REGS_PARM2_SYSCALL(ctx) =
+/// ctx->si). The C compiles `if (_Bool)` as `w != 1`, mirrored.
 /// ctx is the kprobe pt_regs at the entry of `__x64_sys_connect(struct
 /// pt_regs *regs)`; x86_64's `struct pt_regs` is 21 `long`-sized fields
 /// (r15,r14,r13,r12,bp,bx,r11,r10,r9,r8,ax,cx,dx,si,di,orig_ax,ip,cs,flags,
@@ -71,10 +71,20 @@ fn handle_sys_connect_common(uservaddr: *mut c_void) -> i32 {
 #[link_section = "ksyscall/connect"]
 #[no_mangle]
 extern "C" fn handle_sys_connect(ctx: *const u64) -> i32 {
-    let regs = unsafe { *ctx.add(14) } as *const u64;
-    let mut uservaddr: u64 = 0;
-    bpf_probe_read_kernel(&mut uservaddr, 8, unsafe { regs.add(13) } as *const c_void);
+    let uservaddr: u64 = if unsafe { LINUX_HAS_SYSCALL_WRAPPER } == 1 {
+        let regs = unsafe { *ctx.add(14) } as *const u64;
+        let mut v: u64 = 0;
+        bpf_probe_read_kernel(&mut v, 8, unsafe { regs.add(13) } as *const c_void);
+        v
+    } else {
+        unsafe { *ctx.add(13) }
+    };
     handle_sys_connect_common(uservaddr as *mut c_void)
+}
+
+// BTF_KCONFIG: LINUX_HAS_SYSCALL_WRAPPER
+extern "C" {
+    static LINUX_HAS_SYSCALL_WRAPPER: u8;
 }
 
 bpf_object!("GPL");

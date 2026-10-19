@@ -16,6 +16,11 @@ The member's type becomes a PTR to that FUNC's FUNC_PROTO (appended, so no
 existing type moves, as in btf_map_slots.py). The function must be in the
 object; the member must be a pointer.
 
+A global variable (C's `int (*fn_ptr)(void);`, a NULL in .bss) is named
+without a struct, and gets the same pointer type:
+
+    // BTF_FN_PTR: fn_ptr = lib_routine
+
 Usage: btf_fn_ptrs.py <obj.bpf.o> <source.rs>
 """
 import os
@@ -28,7 +33,8 @@ from btf_map_slots import MODS, walk  # noqa: E402
 from btf_test_tags import elf_find_section  # noqa: E402
 
 BTF_KIND_PTR, BTF_KIND_STRUCT, BTF_KIND_UNION, BTF_KIND_FUNC = 2, 4, 5, 12
-DECL = re.compile(r"^// BTF_FN_PTR: ([A-Za-z_]\w*)\.([A-Za-z_]\w*) = ([A-Za-z_]\w*)\s*$", re.M)
+DECL = re.compile(r"^// BTF_FN_PTR: (?:([A-Za-z_]\w*)\.)?([A-Za-z_]\w*) = ([A-Za-z_]\w*)\s*$", re.M)
+BTF_KIND_VAR = 14
 
 
 def declarations(source):
@@ -69,6 +75,20 @@ def patch(path, decls):
         if len(funcs) != 1:
             raise SystemExit(f"[btf_fn_ptrs] ERROR: {os.path.basename(path)}: expected one FUNC {fname}, found {len(funcs)}")
         proto = struct.unpack_from("<I", data, types[funcs[0]][0] + 8)[0]
+        if sname is None:
+            variables = named({BTF_KIND_VAR}, mname)
+            if len(variables) != 1:
+                raise SystemExit(f"[btf_fn_ptrs] ERROR: {os.path.basename(path)}: expected one variable {mname}, found {len(variables)}")
+            vpos = types[variables[0]][0]
+            v_type = struct.unpack_from("<I", data, vpos + 8)[0]
+            if types.get(resolve(v_type), (0, 0, 0))[1] != BTF_KIND_PTR:
+                raise SystemExit(f"[btf_fn_ptrs] ERROR: {os.path.basename(path)}: {mname} is not a pointer")
+            if proto not in ptr_of:
+                ptr_of[proto] = next_tid + len(new_types) // 12
+                new_types.extend(struct.pack("<III", 0, BTF_KIND_PTR << 24, proto))
+            struct.pack_into("<I", data, vpos + 8, ptr_of[proto])
+            done.append(f"{mname}={fname}")
+            continue
         structs = named({BTF_KIND_STRUCT, BTF_KIND_UNION}, sname)
         if len(structs) != 1:
             raise SystemExit(f"[btf_fn_ptrs] ERROR: {os.path.basename(path)}: expected one struct {sname}, found {len(structs)}")

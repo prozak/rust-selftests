@@ -26,6 +26,18 @@ emits the VAR with linkage=extern inside `DATASEC '.kconfig'` and libbpf
 fills it from the running kernel's config at load time. The value is read
 through the symbol, as in C: a declaration without an initializer cannot be
 folded, so a plain Rust read is the C load.
+
+`// BTF_EXTERN: NAME` selects a cross-object extern, the C's `extern int
+var;`, `extern struct { ... } map SEC(".maps");` or `extern int fn(void);`
+that the static linker (bpftool gen object, Makefile.skel's linked
+skeletons) resolves against another object's definition. The C object's
+extern VAR or FUNC gives the type, in whatever DATASEC the C keeps it (an
+extern map sits in `.maps`, a plain variable or function in none), and the
+Rust extern is declared the same way; an extern function is put in the
+`.extern` section libbpf's linker reserves for such externs, which also
+keeps rust-bpf's add_ksyms.py from making it a kfunc. An anonymous
+aggregate (a map definition) is mirrored with its members, so the linker
+can match the extern map against the definition.
 """
 import argparse
 from pathlib import Path
@@ -37,7 +49,8 @@ from bpfelf import BpfElf
 from bpfcore import Btf
 
 
-MARKERS = {"// BTF_KSYM:": ".ksyms", "// BTF_KCONFIG:": ".kconfig"}
+MARKERS = {"// BTF_KSYM:": ".ksyms", "// BTF_KCONFIG:": ".kconfig",
+           "// BTF_EXTERN:": "extern"}
 
 
 def declarations(source):
@@ -60,29 +73,50 @@ def sections_of(names):
 
 
 def contract(elf, names):
-    """name -> (BTF type id of the C's declaration in the selected section,
-    weak) for a variable, (prototype type id, weak, True) for an extern
-    function."""
+    """name -> (BTF type id of the C's declaration, weak, is_function,
+    section): the type is the VAR's type or the FUNC's prototype, the
+    section the DATASEC the C object keeps the declaration in (None for a
+    cross-object extern outside any)."""
     names = sections_of(names)
     types = elf.btf_types()
     result = {}
     for name, section in names.items():
+        symbols = [s for s in elf.symbols if s.name == name and s.shndx == 0
+                   and s.bind in (1, 2)]
+        weak = len(symbols) == 1 and symbols[0].bind == 2
+        if section == "extern":
+            # The C's cross-object extern: one extern VAR or FUNC of that
+            # name, in whatever DATASEC the C object keeps it.
+            candidates = [tid for tid, t in types.items()
+                          if t[0] in (12, 14) and t[1] == name]
+            if len(symbols) != 1 or len(candidates) != 1:
+                raise ValueError(f"{name}: C object must declare one undefined "
+                                 "extern variable or function")
+            tid = candidates[0]
+            is_func = types[tid][0] == 12
+            if is_func and types[tid][3] != 2:
+                raise ValueError(f"{name}: the C object's function is not an extern")
+            containing = [t[1] for t in types.values() if t[0] == 15 and tid in t[4]]
+            if containing and containing[0] in MARKERS.values():
+                raise ValueError(f"{name}: a {containing[0]} extern, select it with "
+                                 "the matching marker")
+            result[name] = (types[tid][2], weak, is_func,
+                            containing[0] if containing else None)
+            continue
         datasecs = [t for t in types.values() if t[0] == 15 and t[1] == section]
         variables = {types[tid][1]: types[tid][2]
                      for sec in datasecs for tid in sec[4] if types[tid][0] == 14}
         functions = {types[tid][1]: types[tid][2]
                      for sec in datasecs for tid in sec[4] if types[tid][0] == 12}
-        symbols = [s for s in elf.symbols if s.name == name and s.shndx == 0
-                   and s.bind in (1, 2)]
         if len(symbols) != 1 or (name not in variables and name not in functions):
             raise ValueError(f"{name}: C object must declare one undefined {section} "
                              "variable or function")
         if name in variables:
-            result[name] = (variables[name], symbols[0].bind == 2)
+            result[name] = (variables[name], weak, False, section)
         else:
             if section != ".ksyms":
                 raise ValueError(f"{name}: only .ksyms declarations may be functions")
-            result[name] = (functions[name], symbols[0].bind == 2, True)
+            result[name] = (functions[name], weak, True, section)
     return result
 
 
@@ -154,9 +188,26 @@ def lower(ir, names, btf, variables):
                      f"name: {quoted(t.name)}, file: {file[1]}, baseType: {base}, "
                      f"size: {t.size * 8}, elements: {elements})")
         elif t.kind in (4, 5):
-            if not t.name:
-                raise ValueError("anonymous ksym aggregates are unsupported")
             tag = "structure" if t.kind == 4 else "union"
+            if not t.name:
+                # The C's anonymous aggregate (a map definition): mirrored
+                # with its members, so the linker can match the extern
+                # against the definition it resolves it with.
+                ref = reserve()
+                emitted[tid] = ref
+                members = []
+                for m in t.members:
+                    size = btf.type_size(m.type)
+                    if size is None or m.bitfield_size:
+                        raise ValueError(f"unsupported member {m.name} of an anonymous extern aggregate")
+                    members.append(add(
+                        f"!DIDerivedType(tag: DW_TAG_member, name: {quoted(m.name)}, "
+                        f"scope: {ref}, file: {file[1]}, baseType: {typ(m.type)}, "
+                        f"size: {size * 8}, offset: {m.bit_offset})"))
+                elements = add("!{" + ", ".join(members) + "}")
+                metadata.append(f"{ref} = distinct !DICompositeType(tag: DW_TAG_{tag}_type, "
+                                f"file: {file[1]}, size: {t.size * 8}, elements: {elements})")
+                return ref
             value = (f"distinct !DICompositeType(tag: DW_TAG_{tag}_type, "
                      f"name: {quoted(t.name)}, file: {file[1]}, "
                      f"size: {t.size * 8}, elements: {empty})")
@@ -175,7 +226,7 @@ def lower(ir, names, btf, variables):
         emitted[tid] = add(value)
         return emitted[tid]
 
-    def lower_function(ir, name, tid):
+    def lower_function(ir, name, tid, section):
         pattern = r"^declare ([^\n]*?@" + re.escape(name) + r"\([^\n]*)$"
         matches = list(re.finditer(pattern, ir, re.M))
         if len(matches) != 1:
@@ -187,14 +238,17 @@ def lower(ir, names, btf, variables):
             raise ValueError(f"{name}: the C declaration is not a function prototype")
         sp = add(f"!DISubprogram(name: {quoted(name)}, scope: {file[1]}, file: {file[1]}, "
                  f"type: {typ(tid)}, flags: DIFlagPrototyped, spFlags: DISPFlagOptimized)")
-        declaration = f'declare !dbg {sp} {match[1]} section ".ksyms"'
+        declaration = f'declare !dbg {sp} {match[1]} section "{section}"'
         return ir[:match.start()] + declaration + ir[match.end():]
 
     expressions = []
-    for name, section in names.items():
-        tid, weak, *is_func = variables[name]
-        if is_func and is_func[0]:
-            ir = lower_function(ir, name, tid)
+    for name in names:
+        tid, weak, is_func, section = variables[name]
+        if is_func:
+            # libbpf's linker resolves `.extern` functions against other
+            # objects' definitions (and add_ksyms.py leaves a declaration
+            # with a section alone), `.ksyms` ones are kfuncs.
+            ir = lower_function(ir, name, tid, section or ".extern")
             continue
         pattern = r"^@" + re.escape(name) + r" = (external|extern_weak) ([^\n]+)$"
         matches = list(re.finditer(pattern, ir, re.M))
@@ -224,8 +278,9 @@ def lower(ir, names, btf, variables):
                   f"file: {file[1]}, type: {typ(tid)}, isLocal: false, isDefinition: false)")
         expr = add(f"!DIGlobalVariableExpression(var: {var}, expr: !DIExpression())")
         expressions.append(expr)
+        placement = f'section "{section}", ' if section else ""
         declaration = (f"@{name} = {'extern_weak' if weak else 'external'} {match[2]}, "
-                       f'section "{section}", !dbg {expr}')
+                       f"{placement}!dbg {expr}")
         ir = ir[:match.start()] + declaration + ir[match.end():]
     globals_ref = add("!{" + ", ".join(expressions) + "}")
     metadata.append(f"{cu} = distinct !DICompileUnit(language: DW_LANG_C11, file: {file[1]}, "

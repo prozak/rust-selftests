@@ -186,7 +186,7 @@ $(BLDDIR)/%-reloc.bc: $(BLDDIR)/%-linked.bc
 	$(BPF_POSTPROC) $< $@
 
 # --- Internalize (keep = C object ABI) + optimize ---
-KSYM_VAR_SRCS := $(shell grep -l '^// BTF_KSYM:\|^// BTF_KCONFIG:' progs/*.rs)
+KSYM_VAR_SRCS := $(shell grep -l '^// BTF_KSYM:\|^// BTF_KCONFIG:\|^// BTF_EXTERN:' progs/*.rs)
 $(patsubst progs/%.rs,$(BLDDIR)/%-opt.bc,$(KSYM_VAR_SRCS)): scripts/ksym_vars.py
 TYPE_ID_SRCS := $(shell grep -l '^// BTF_TYPE_ID:' progs/*.rs)
 $(patsubst progs/%.rs,$(BLDDIR)/%-opt.bc,$(TYPE_ID_SRCS)): scripts/type_id.py
@@ -203,7 +203,7 @@ $(BLDDIR)/uprobe_multi_usdt-opt.bc: PUBLIC_API_EXTRA = --internalize-public-api-
 
 $(BLDDIR)/%-opt.bc: $(BLDDIR)/%-reloc.bc $(BLDDIR)/%.keep
 	@set -e; src=$<; \
-	if grep -q '^// BTF_KSYM:\|^// BTF_KCONFIG:' progs/$*.rs; then \
+	if grep -q '^// BTF_KSYM:\|^// BTF_KCONFIG:\|^// BTF_EXTERN:' progs/$*.rs; then \
 		$(LLVM_DIS) $$src -o $@.ksyms.ll; \
 		python3 scripts/ksym_vars.py $@.ksyms.ll progs/$*.rs $(SELFTESTS_OUTPUT)/$*.bpf.o; \
 		src=$@.ksyms.ll; \
@@ -250,6 +250,14 @@ $(RUSTBPF)/btf_tags.py:
 # the C object has it in .rodata.
 ORDER_SRCS := $(shell grep -l '^// BPF_PROGRAM_ORDER:' progs/*.rs)
 $(patsubst progs/%.rs,$(BLDDIR)/%.bpf.o,$(ORDER_SRCS)): scripts/program_order.py
+# The objects the selftests link into multi-object skeletons (Makefile.skel's
+# `<skel>.skel.h-deps`) get the C object's ELF section flags, which libbpf's
+# static linker requires to be equal across the objects it merges.
+LINKED_OBJS := $(shell [ -f $(SELFTESTS_SRC)/Makefile.skel ] && \
+	sed -n 's/^.*\.skel\.h-deps := //p' $(SELFTESTS_SRC)/Makefile.skel | tr ' ' '\n' | sed 's/\.bpf\.o$$//' | sort -u)
+$(patsubst %,$(BLDDIR)/%.bpf.o,$(LINKED_OBJS)): scripts/section_flags.py
+C_MEMBERS_SRCS := $(shell grep -l '^// BTF_C_MEMBERS:' progs/*.rs)
+$(patsubst progs/%.rs,$(BLDDIR)/%.bpf.o,$(C_MEMBERS_SRCS)): scripts/btf_c_members.py
 $(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc scripts/naked_abi.py scripts/btf_graph_types.py scripts/private_sections.py \
 		scripts/maps_section.py scripts/btf_rename.py scripts/btf_map_slots.py scripts/btf_fn_ptrs.py scripts/btf_test_tags.py scripts/btf_type_tags.py scripts/btf_anon.py \
 		scripts/stack_args.py
@@ -275,6 +283,8 @@ $(BLDDIR)/%.bpf.o: $(BLDDIR)/%-ksyms.bc scripts/naked_abi.py scripts/btf_graph_t
 	@if grep -q '^// BTF_ANON$$' progs/$*.rs; then python3 scripts/btf_anon.py $@; fi
 	python3 scripts/btf_test_tags.py $@ progs/$*.rs
 	python3 scripts/btf_type_tags.py $@ progs/$*.rs
+	@if grep -q '^// BTF_C_MEMBERS:' progs/$*.rs; then python3 scripts/btf_c_members.py $@ $(SELFTESTS_OUTPUT)/$*.bpf.o progs/$*.rs; fi
+	@if echo " $(LINKED_OBJS) " | grep -q " $* "; then python3 scripts/section_flags.py $@ $(SELFTESTS_OUTPUT)/$*.bpf.o; fi
 
 # --- Kernel verifier gate (all built objects), UML flavor only ---
 # Objects a translation declares must FAIL to load (test_tags! __failure) are

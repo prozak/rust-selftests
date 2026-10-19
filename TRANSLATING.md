@@ -283,6 +283,55 @@ silenced with `// translint: allow(kconfig)` plus the reason (e.g. the C
 object's only readers are usdt.bpf.h library functions its programs never
 call).
 
+## Statically linked objects (extern variables, maps and functions)
+
+Some C objects are halves of a multi-object skeleton: Makefile.skel's
+`<skel>.skel.h-deps` lists them (linked_vars1/2, test_subskeleton and its
+two libraries, test_usdt with test_usdt_multispec, ...) and bpftool's
+static linker (libbpf's linker.c) merges them. Such a C file refers to the
+other half's globals with plain externs; the translation declares them the
+same way and selects each with `// BTF_EXTERN: NAME`:
+
+```rust
+// BTF_EXTERN: my_pid
+// BTF_EXTERN: map2
+// BTF_EXTERN: lib_routine
+extern "C" {
+    static my_pid: i32;
+    static map2: BpfMap<u32, u32, { maps::HASH }, 16>;
+    fn lib_routine() -> i32;
+}
+```
+
+`scripts/ksym_vars.py` mirrors the C object's extern VAR or FUNC (type,
+weakness, and the DATASEC the C keeps it in: `.maps` for an extern map,
+none for a plain variable or function; an anonymous map definition is
+mirrored with its members so the linker can match it against the
+definition). An extern function goes into the `.extern` section libbpf's
+linker reserves for externs it resolves, which also keeps rust-bpf's
+add_ksyms.py from declaring it a kfunc. Weak definitions (`__weak int x`)
+are `#[linkage = "weak"]` statics (`#![feature(linkage)]`); a weak global
+the C forces into `.data` keeps `#[link_section = ".data"]`.
+
+The build gives a linked object the C object's ELF section flags
+(`scripts/section_flags.py`, for every object in Makefile.skel's deps):
+clang's `license` and `.maps` are writable sections, rustc's immutable
+statics make them read-only, and the linker merges same-named sections
+only with equal flags. A weak map both halves define (usdt.bpf.h's
+`__bpf_usdt_specs`) is matched member by member down to its value struct,
+so the Rust struct must carry the C's name and members; where the C has
+bitfields or enum members, declare the C's members in the C's order with
+the integers the code reads through, and add `// BTF_C_MEMBERS: name`:
+`scripts/btf_c_members.py` gives the struct the C object's member BTF
+(bitfield offsets and sizes, a copy of the enum). See test_usdt.rs.
+
+The gate swaps one object at a time: the object whose name the linked
+skeleton carries (test_subskeleton, test_usdt) runs its consumer with the
+C other halves; the other halves are NO-ORACLE on their own. To test a
+pair of translations together, install the other half with `SWAP_ONLY=1
+scripts/swap-and-test.sh <other> rust`, run `make test-<main>`, then
+`make restore-all`.
+
 ## Kernel type IDs and program load order
 
 For C's `bpf_core_type_id_kernel(T)`, declare an `extern "C"` function

@@ -18,9 +18,17 @@
 #      running test_progs. Host whiteouts do not survive 9p, so deletions
 #      recorded in upper are replayed in the guest.
 #
+# GATE_JOB=<n>: step 1 only, for a worker whose guest was booted once and
+# runs its objects in sequence (scripts/gate-guest-loop): the -t filter and
+# the -d denylist go into upper/ as the files test_progs reads, and
+# <worker>/jobs/<n>/ready tells the guest to run; the caller waits for
+# <worker>/jobs/<n>/rc. Booting one guest per object (the default) costs
+# ~16 s of boot, init and setup for a median 0.5 s of tests
+# (docs/gate-runtime.md).
+#
 # The shared tree must not change while workers run (ci_nightly.py holds
 # its lock). Exit status: swap-and-test's on a failed build, else the
-# guest's.
+# guest's (0 under GATE_JOB).
 set -euo pipefail
 
 W="$(mkdir -p "$1" && cd "$1" && pwd)"
@@ -58,5 +66,18 @@ unshare -Urm bash -c '
 # 2. run the guest on the same two-layer view
 FILTER="$(sed -n 1p "${W}/filter")"
 DENY="$(sed -n 2p "${W}/filter")"
+if [ -n "${GATE_JOB:-}" ]; then
+    # Always files (qemu-test-progs says why); in the worker's layer, so
+    # the guest's overlay shows them in its cwd.
+    tr ',' '\n' <<< "${FILTER}" > "${W}/upper/.test-filter"
+    rm -f "${W}/upper/.test-deny"
+    [ -z "${DENY}" ] || tr ',' '\n' <<< "${DENY}" > "${W}/upper/.test-deny"
+    J="${W}/jobs/${GATE_JOB}"
+    rm -rf "${J}"
+    mkdir -p "${J}"
+    : > "${J}/ready"
+    echo "[gate-overlay] job ${GATE_JOB} posted"
+    exit 0
+fi
 GATE_UPPER="${W}/upper" SELFTESTS_OUTPUT="${OUT}" \
     "${HERE}/scripts/qemu-test-progs" -t "${FILTER}" ${DENY:+-d "${DENY}"}

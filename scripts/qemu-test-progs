@@ -23,6 +23,10 @@
 #   TEST_PROGS_EXTRA  extra test_progs arguments (e.g. -v to print the
 #                     libbpf and verifier log of passing tests too)
 #   QEMU_ALLOW_TCG    set to run without a usable /dev/kvm (slow)
+#   GATE_LOOP         a gate worker's dir: boot once and run the jobs the
+#                     host posts there, one object after another
+#                     (scripts/gate-guest-loop; -t is not used), until
+#                     <dir>/stop or QEMU_TIMEOUT (default a day here)
 
 set -uo pipefail
 
@@ -61,6 +65,19 @@ if ! { exec 3<>/dev/kvm; } 2>/dev/null; then
 fi
 exec 3<&-
 [ -x "${TEST_PROGS}" ] || { echo "test_progs not found: ${TEST_PROGS}" >&2; exit 1; }
+
+# One guest for a worker's whole queue: the per-object prelude below moves
+# into scripts/gate-guest-loop, run per job. The command is a path, not a
+# script: the kernel command line is capped at 2048 bytes (below).
+if [ -n "${GATE_LOOP:-}" ]; then
+    exec timeout "${QEMU_TIMEOUT:-86400}" "${VNG}" \
+        --run "${QEMU_KERNEL}" \
+        --cpus "${QEMU_CPUS:-8}" --memory "${QEMU_MEM:-4G}" \
+        --rw \
+        --cwd "${OUT}" \
+        --verbose \
+        -- "${HERE}/scripts/gate-guest-loop '${GATE_LOOP}' '${OUT}'"
+fi
 
 # vng passes the guest command on the KERNEL COMMAND LINE, which x86 caps at
 # 2048 bytes. Objects consumed by a prog_tests file that registers many tests

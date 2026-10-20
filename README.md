@@ -249,9 +249,13 @@ itself; with nothing changed it finishes in seconds. `make ci-local` runs
 it after the proof guard. The whole corpus afresh, with the proof sweep,
 is `make ci-nightly` (see [docs/ci-nightly.md](docs/ci-nightly.md)). A
 swap runs only the `prog_tests` functions that load the swapped object
-(`scripts/affected_tests.py`); the full gate over 776 objects took 1840 s
-with eight guests on 2026-10-18, against 2662 s the day before, when every
-`verifier_*` swap ran all 145 tests of `prog_tests/verifier.c`.
+(`scripts/affected_tests.py`), and each guest is booted once per worker
+and fed its objects in sequence (`scripts/gate-guest-loop`; anything but a
+PASS is rerun alone in a fresh guest): the full gate over 883 objects took
+730 s on 2026-10-19, against 2069 s with one guest per object the
+same day and 2662 s on 2026-10-17, when every `verifier_*` swap ran all
+145 tests of `prog_tests/verifier.c`; [docs/gate-runtime.md](docs/gate-runtime.md)
+has the measured breakdown.
 It needs `pip install -r requirements.txt`, into `.venv/` if you want
 `make` to find it by itself.
 

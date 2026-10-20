@@ -5,7 +5,12 @@ gate.py re-runs only the translations whose inputs changed, against the
 committed qemu/gate/baseline.tsv. Both swap an object into the selftests
 output through scripts/swap-and-test.sh (alone, in the shared tree) or
 scripts/gate-overlay.sh (N at once, each in a private overlay), judge the
-guest's test_progs summary, and put the C object back.
+guest's test_progs summary, and put the C object back. An overlay worker
+boots its guest once and feeds it its objects one after another (Guest,
+scripts/gate-guest-loop): booting per object cost ~16 s of boot, init and
+setup for a median 0.5 s of tests (docs/gate-runtime.md). Anything but a
+PASS from that guest is rerun the classic way, alone in a fresh guest, so
+a verdict other than PASS never rests on a shared kernel.
 
 The driver passes its own `run` into Gate so that a test's substitute
 reaches every guest launch; the process bookkeeping here (CHILDREN,
@@ -17,6 +22,7 @@ import hashlib
 import os
 import re
 from pathlib import Path
+import shutil
 import signal
 import subprocess
 import sys
@@ -39,7 +45,8 @@ BASELINE_HEADER = "# name\trust_md5\tc_md5\tenv_md5\tverdict\tseconds\tsummary\n
 ENV_FILES = ["scripts/swap-and-test.sh", "scripts/affected_tests.py",
              "scripts/qemu-test-progs", "scripts/gate-overlay.sh",
              "scripts/gate-record-filter", "scripts/known-bad-tests",
-             "scripts/gate-serial", "scripts/extra-consumers"]
+             "scripts/gate-serial", "scripts/extra-consumers",
+             "scripts/gate-guest-loop"]
 
 
 def stop_children():
@@ -83,6 +90,90 @@ def run(argv, log, env, timeout=None, cwd=REPO):
         finally:
             with CHILD_LOCK:
                 CHILDREN.discard(child)
+
+
+def spawn(argv, log, env, cwd=REPO):
+    """A child that outlives the call (a worker's guest), appending to log;
+    registered like run()'s so stop_children() reaches it. The caller
+    discards it from CHILDREN when it is gone. None once cancelled."""
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("ab") as output:
+        output.write(("$ " + repr([str(a) for a in argv]) + "\n").encode())
+        output.flush()
+        with CHILD_LOCK:
+            if CANCELLED.is_set():
+                return None
+            child = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                     stdout=output, stderr=subprocess.STDOUT,
+                                     start_new_session=True)
+            CHILDREN.add(child)
+    return child
+
+
+class Guest:
+    """A worker's guest, booted once (scripts/qemu-test-progs under GATE_LOOP)
+    and fed objects through <worker>/jobs/<n>: the host posts a job after
+    gate-overlay.sh step 1 (GATE_JOB), the guest writes its rc there
+    (scripts/gate-guest-loop has the protocol)."""
+
+    def __init__(self, spawn, wenv, log):
+        self.dir = Path(wenv["GATE_DIR"])
+        self.log = log
+        self.next_job = 0
+        self.checked = False  # under_kvm, once the boot log is there
+        shutil.rmtree(self.dir / "jobs", ignore_errors=True)
+        (self.dir / "jobs").mkdir(parents=True)
+        (self.dir / "stop").unlink(missing_ok=True)
+        self.proc = spawn(["scripts/qemu-test-progs"], log, dict(wenv, GATE_LOOP=str(self.dir)))
+
+    def alive(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    def job(self):
+        n = self.next_job
+        self.next_job += 1
+        return n
+
+    def job_log(self, n):
+        return self.dir / "jobs" / str(n) / "log"
+
+    def wait(self, n, timeout):
+        """test_progs's exit status for job n, or None when the guest died
+        or the deadline passed; the guest is stopped then."""
+        rc_file = self.dir / "jobs" / str(n) / "rc"
+        deadline = time.monotonic() + timeout
+        while True:
+            if rc_file.exists():  # written by rename: complete once seen
+                return int(rc_file.read_text().strip() or 99)
+            if not self.alive() or time.monotonic() > deadline or CANCELLED.is_set():
+                self.stop()
+                return None
+            time.sleep(0.2)
+
+    def stop(self, grace=15):
+        """Ask the loop to leave; kill the guest's process group if it does
+        not within grace seconds (vng's power-off takes a moment)."""
+        self.request_stop()
+        self.join(grace)
+
+    def request_stop(self):
+        (self.dir / "stop").touch()
+
+    def join(self, grace=15):
+        proc, self.proc = self.proc, None
+        if proc is None:
+            return
+        try:
+            proc.wait(timeout=grace)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait()
+        finally:
+            with CHILD_LOCK:
+                CHILDREN.discard(proc)
 
 
 # test_progs' exit status when the -t filter selected no test: the consumer
@@ -267,14 +358,19 @@ def env_hash(repo, kernel, c_dir, env):
 class Gate:
     """Run objects through the gate on a set of worker environments.
 
-    A worker environment with GATE_DIR runs through gate-overlay.sh; the
+    A worker environment with GATE_DIR runs through gate-overlay.sh, in the
+    worker's one guest when `spawn` is given (Guest; the classic one guest
+    per object otherwise, and as the rerun of anything but a PASS); the
     shared environment (the one given to the constructor) runs through
     swap-and-test.sh in the shared tree. on_row(name, result) is called
     for every finished object, under the gate's lock.
     """
 
-    def __init__(self, *, run, env, log_dir, timeout, base, on_row):
+    def __init__(self, *, run, env, log_dir, timeout, base, on_row, spawn=None):
         self.run = run
+        self.spawn = spawn
+        self.guests = {}       # GATE_DIR -> Guest
+        self.boots = {}        # GATE_DIR -> guests booted, for the log names
         self.shared_env = env
         self.log_dir = Path(log_dir)
         self.timeout = timeout
@@ -292,13 +388,70 @@ class Gate:
             under_kvm(log, self.allow_tcg, self.base)
             return rc, *runtime_result(name, rc, log.read_text(errors="replace"))
 
-        rc, verdict, note = one("rust", self.log_dir / f"{name}.log")
-        row = dict(verdict=verdict, exit=rc, summary=note,
-                   c_exit=0, c_verdict="NOT-RUN", c_summary="")
-        if verdict == "FAIL":
+        log = self.log_dir / f"{name}.log"
+        row = self.gate_in_guest(name, wenv, log) if self.spawn else None
+        if row is None:
+            rc, verdict, note = one("rust", log)
+            row = dict(verdict=verdict, exit=rc, summary=note,
+                       c_exit=0, c_verdict="NOT-RUN", c_summary="")
+        if row["verdict"] == "FAIL":
             c_rc, c_verdict, c_note = one("c", self.log_dir / f"{name}.c.log")
             row.update(c_exit=c_rc, c_verdict=c_verdict, c_summary=c_note)
         return row
+
+    def guest_for(self, wenv):
+        key = wenv["GATE_DIR"]
+        guest = self.guests.get(key)
+        if guest is None or not guest.alive():
+            self.boots[key] = self.boots.get(key, 0) + 1
+            log = self.log_dir / f"guest-{Path(key).name}-{self.boots[key]}.log"
+            guest = self.guests[key] = Guest(self.spawn, wenv, log)
+        return guest
+
+    def gate_in_guest(self, name, wenv, log):
+        """The object as one job of the worker's guest. None when it has to
+        be rerun the classic way: a FAIL, a guest that died (a kernel crash
+        is the usual reason) or a job past the timeout; the guest is stopped
+        then, so nothing a failing test left behind reaches the next object.
+        A step-1 failure (no consumer, a build error) is judged as it is:
+        the classic path would fail the same step."""
+        guest = self.guest_for(wenv)
+        n = guest.job()
+        rc = self.run(["scripts/gate-overlay.sh", wenv["GATE_DIR"], name, "rust"],
+                      log, dict(wenv, GATE_JOB=str(n)), self.timeout)
+        if rc:
+            verdict, note = runtime_result(name, rc, log.read_text(errors="replace"))
+            return dict(verdict=verdict, exit=rc, summary=note,
+                        c_exit=0, c_verdict="NOT-RUN", c_summary="")
+        rc = guest.wait(n, self.timeout)
+        job_log = guest.job_log(n)
+        with log.open("ab") as out:
+            out.write(f"\n[gate] job {n} of {guest.log.name}: "
+                      f"{'rc ' + str(rc) if rc is not None else 'no result (guest gone or timed out)'}\n".encode())
+            if job_log.exists():
+                out.write(job_log.read_bytes())
+        if rc is None:
+            shutil.copyfile(log, log.with_suffix(".loop.log"))
+            return None
+        if not guest.checked:
+            under_kvm(guest.log, self.allow_tcg, self.base)
+            guest.checked = True
+        verdict, note = runtime_result(name, rc, log.read_text(errors="replace"))
+        if verdict == "FAIL":
+            guest.stop()
+            self.guests.pop(wenv["GATE_DIR"], None)
+            shutil.copyfile(log, log.with_suffix(".loop.log"))
+            return None
+        return dict(verdict=verdict, exit=rc, summary=note,
+                    c_exit=0, c_verdict="NOT-RUN", c_summary="")
+
+    def stop_guests(self):
+        guests = list(self.guests.values())
+        self.guests.clear()
+        for guest in guests:
+            guest.request_stop()
+        for guest in guests:
+            guest.join()
 
     def gate_one(self, name, wenv):
         """The verdict dict, with `seconds`: the wall time the worker spent on
@@ -355,9 +508,12 @@ class Gate:
             return
         with ThreadPoolExecutor(max_workers=len(self.workers)) as pool:
             queue = longest_first([n for n in names if n not in serial], seconds or {})
-            for future in [pool.submit(self.worker_loop, k, queue)
-                           for k in range(len(self.workers))]:
-                future.result()
+            try:
+                for future in [pool.submit(self.worker_loop, k, queue)
+                               for k in range(len(self.workers))]:
+                    future.result()
+            finally:
+                self.stop_guests()
         # The classic way, alone in the shared tree: stress tests another
         # VM's load would perturb (see scripts/gate-serial).
         self.workers.append(self.shared_env)

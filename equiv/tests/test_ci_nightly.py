@@ -9,6 +9,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
+import fake_guest  # noqa: E402
 import ci_nightly as nightly
 
 
@@ -85,6 +86,9 @@ def stack(tmp_path, monkeypatch):
         return 0
 
     monkeypatch.setattr(nightly, "run", fake_run)
+    controls["guests"] = []
+    monkeypatch.setattr(nightly.qemu_gate, "spawn",
+                        fake_guest.fake_spawn(controls, controls["guests"]))
     handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
     yield repo, c_dir, calls, controls
     for sig, handler in handlers.items():
@@ -348,6 +352,9 @@ def test_overlay_mode_never_touches_the_shared_tree(stack, monkeypatch, tmp_path
             runs.append(argv[1:])
             assert env["SELFTESTS_OUTPUT"] == str(c_dir)
             log.parent.mkdir(parents=True, exist_ok=True)
+            if "GATE_JOB" in env and not rust_rc:
+                fake_guest.post_job(env, log)  # the worker's guest answers it
+                return 0
             log.write_text("Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED\n")
             return rust_rc if argv[-1] == "rust" else 0
         return original_run(argv, log, env, timeout)

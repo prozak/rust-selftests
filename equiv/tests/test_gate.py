@@ -10,6 +10,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
+import fake_guest  # noqa: E402
 import gate  # noqa: E402
 import qemu_gate  # noqa: E402
 
@@ -67,6 +68,13 @@ def stack(tmp_path, monkeypatch):
                 if controls["no_oracle"]:
                     log.write_text("no prog_tests consume a\n")
                     return 1
+                if "GATE_JOB" in env:
+                    # gate-overlay.sh step 1: post the job, the guest answers
+                    if controls["runtime"]:
+                        log.write_text("[swap] build failed\n")
+                        return controls["runtime"]
+                    fake_guest.post_job(env, log)
+                    return 0
                 log.write_text("Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED\n")
                 return controls["runtime"]
             if shared:
@@ -80,6 +88,9 @@ def stack(tmp_path, monkeypatch):
         return 0
 
     monkeypatch.setattr(gate, "run", fake_run)
+    guests = []
+    controls.update(job_rc=0, guest_dies=False, job_hangs=False, guests=guests)
+    monkeypatch.setattr(qemu_gate, "spawn", fake_guest.fake_spawn(controls, guests))
     handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
     yield repo, c_dir, calls, controls
     for sig, handler in handlers.items():
@@ -363,3 +374,108 @@ def test_gate_records_seconds_and_orders_the_queue(stack, monkeypatch):
     assert gate.main(["--workers", "2"]) == 0
     assert order == ["c", "b", "a"]  # unknown first, then longest first
     assert {n: row["seconds"] for n, row in baseline(repo).items()} == {"a": "3", "b": "3", "c": "3"}
+
+
+def overlay_runs(calls):
+    """(which, job) of every gate-overlay.sh call: the job number under
+    GATE_JOB (a job of the worker's guest), None for a classic boot."""
+    return [(argv[-1], env.get("GATE_JOB")) for argv, env in calls
+            if argv[0] == "scripts/gate-overlay.sh"]
+
+
+def add_object(repo, c_dir, name):
+    (repo / f"progs/{name}.rs").write_text("rust source")
+    (c_dir / f"{name}.bpf.o").write_text("C")
+    (c_dir / f"{name}.bpf.o.corig").write_text("C")
+    (repo / f"bld/{name}.bpf.o").write_text("Rust")
+
+
+def test_overlay_worker_runs_its_objects_in_one_guest(stack):
+    repo, c_dir, calls, controls = stack
+    add_object(repo, c_dir, "b")
+    assert gate.main(["--workers", "2"]) == 0
+    # two workers, two objects: each object is job 0 of its worker's guest
+    assert overlay_runs(calls) == [("rust", "0"), ("rust", "0")]
+    guests = controls["guests"]
+    assert len(guests) == 2 and all(g.jobs == [0] for g in guests)
+    assert all((g.dir / "stop").exists() and g.returncode == 0 for g in guests)
+    assert {n: row["verdict"] for n, row in baseline(repo).items()} == {"a": "PASS", "b": "PASS"}
+    log = (repo / gate.LOG_DIR / "a.log").read_text()
+    assert "job 0 posted" in log and "[gate] job 0 of guest-w" in log and "Summary:" in log
+
+
+def test_one_guest_takes_the_whole_queue_in_order(stack, monkeypatch):
+    repo, c_dir, calls, controls = stack
+    for name in ("b", "c"):
+        add_object(repo, c_dir, name)
+    # one overlay worker (two would split the queue): gate.py's minimum is
+    # 2 workers for overlays, so build the worker list by hand
+    overlay_envs = qemu_gate.overlay_envs
+    monkeypatch.setattr(qemu_gate, "overlay_envs", lambda env, root, n: overlay_envs(env, root, 1))
+    assert gate.main(["--workers", "2"]) == 0
+    assert overlay_runs(calls) == [("rust", "0"), ("rust", "1"), ("rust", "2")]
+    assert len(controls["guests"]) == 1 and controls["guests"][0].jobs == [0, 1, 2]
+
+
+def test_job_fail_stops_the_guest_and_reruns_alone(stack, capsys):
+    repo, c_dir, calls, controls = stack
+    controls["job_rc"] = 1
+    assert gate.main([]) == 0
+    # job 0 FAILs -> the guest is stopped and the classic boot reruns the
+    # Rust object alone, where it PASSes: no alarm, no C run
+    assert overlay_runs(calls) == [("rust", "0"), ("rust", None)]
+    guest = controls["guests"][0]
+    assert (guest.dir / "stop").exists() and guest.returncode == 0
+    assert baseline(repo)["a"]["verdict"] == "PASS"  # the isolated rerun decides
+    assert (repo / gate.LOG_DIR / "a.loop.log").exists()
+    assert "ALARM" not in capsys.readouterr().out
+
+
+def test_job_fail_confirmed_alone_runs_the_c_oracle(stack, capsys):
+    repo, c_dir, calls, controls = stack
+    controls["job_rc"] = 1
+    controls["runtime"] = 1
+    assert gate.main([]) == 1
+    # step 1 itself fails under GATE_JOB (runtime != 0 = build failure):
+    # judged as a FAIL without a guest, then the C oracle
+    assert overlay_runs(calls) == [("rust", "0"), ("c", None)]
+    assert baseline(repo)["a"]["verdict"] == "FAIL"
+    assert "ALARM" in capsys.readouterr().out
+
+
+def test_dead_guest_reruns_the_object_alone_and_boots_anew(stack):
+    repo, c_dir, calls, controls = stack
+    add_object(repo, c_dir, "b")
+    controls["guest_dies"] = True
+
+    assert gate.main(["--workers", "2"]) == 0
+    runs = overlay_runs(calls)
+    # every object: its job (the guest dies on it), then the classic boot
+    assert sorted(runs, key=str) == [("rust", "0"), ("rust", "0"), ("rust", None), ("rust", None)]
+    assert all(row["verdict"] == "PASS" for row in baseline(repo).values())
+
+
+def test_hung_job_times_out_into_the_classic_rerun(stack):
+    repo, c_dir, calls, controls = stack
+    controls["job_hangs"] = True
+    assert gate.main(["--runtime-timeout", "1"]) == 0
+    assert overlay_runs(calls) == [("rust", "0"), ("rust", None)]
+    guest = controls["guests"][0]
+    assert (guest.dir / "stop").exists()
+    assert baseline(repo)["a"]["verdict"] == "PASS"
+
+
+def test_no_oracle_is_judged_at_step_one_without_a_job(stack):
+    repo, c_dir, calls, controls = stack
+    controls["no_oracle"] = True
+    assert gate.main([]) == 0
+    assert overlay_runs(calls) == [("rust", "0")]
+    assert baseline(repo)["a"]["verdict"] == "NO-ORACLE"
+    assert controls["guests"][0].jobs == []
+
+
+def test_guest_loop_script_is_part_of_the_environment(stack):
+    repo, c_dir, _, _ = stack
+    before = current_env_hash(repo, c_dir)
+    (repo / "scripts/gate-guest-loop").write_text("# changed\n")
+    assert current_env_hash(repo, c_dir) != before

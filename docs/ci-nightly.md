@@ -57,11 +57,15 @@ The driver sequences every stage even if the outer make uses `-j`:
    skeleton, the consuming test object and the relinked `test_progs` land
    in the worker's upper directory (about 40 MB per object), the guest
    mounts the same overlay before running `test_progs` (from a copy on
-   the guest's tmpfs: mapped through overlayfs, the binary's own
-   `vm_file` is the layer's file, and `bpf_iter`'s `task_vma` subtest,
-   which compares `bpf_d_path()` of that mapping with `/proc/<pid>/maps`,
-   fails for C and Rust alike), and the shared output is never written,
-   so going back to C costs nothing. The objects listed in
+   the guest's tmpfs for the tests that resolve their own executable's
+   path: mapped through overlayfs, the binary's own `vm_file` is the
+   layer's file, and `bpf_iter`'s `task_vma` subtest, which compares
+   `bpf_d_path()` of that mapping with `/proc/<pid>/maps`, fails for C
+   and Rust alike), and the shared output is never written, so going
+   back to C costs nothing. A worker's guest is booted once and runs the
+   worker's objects in sequence (`scripts/gate-guest-loop`); anything but
+   a PASS is rerun alone in a fresh guest, then the C object as before
+   ([gate-runtime.md](gate-runtime.md)). The objects listed in
    `scripts/gate-serial` run afterwards, one at a time, in the shared
    output itself, as a single worker does: `fentry_recursive` and its
    target, whose stress test another guest's load perturbs (#52).

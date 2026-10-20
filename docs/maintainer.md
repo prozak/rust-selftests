@@ -27,11 +27,19 @@ Rust object, C object and gate environment hash with the committed
 skipped; the rest run through their consuming `prog_tests` in QEMU,
 `GATE_WORKERS` guests at a time, each over a private overlay of the
 selftests output (`scripts/gate-overlay.sh`), the `scripts/gate-serial`
-objects afterwards, alone in the shared output. Rows that ran are
-rewritten in place (commit them with the translation). Exit 1 means an
-alarm: a FAIL (a recorded one keeps alarming until the objects change) or
-a PASS that became NO-ORACLE. Logs are `qemu/gate/logs/<name>.log` and
-`<name>.c.log` (the C re-run after a FAIL).
+objects afterwards, alone in the shared output. Each worker boots its
+guest once and runs its objects one after another in it
+(`scripts/gate-guest-loop`; the host posts a job after the overlay build
+and reads the exit status back); anything but a PASS there is rerun the
+classic way, alone in a fresh guest, before it counts (see
+[gate-runtime.md](gate-runtime.md) for why: booting per object was 82%
+of the gate). Rows that ran are rewritten in place (commit them with the
+translation). Exit 1 means an alarm: a FAIL (a recorded one keeps
+alarming until the objects change) or a PASS that became NO-ORACLE. Logs
+are `qemu/gate/logs/<name>.log` (the overlay build and the job's
+test_progs output), `<name>.loop.log` (a job attempt that was rerun
+alone), `<name>.c.log` (the C re-run after a FAIL) and
+`guest-w<k>-<boot>.log` (a worker's guest console).
 
 Which tests a swap runs: `scripts/swap-and-test.sh` finds the `prog_tests`
 files whose test object includes the swapped object's skeleton (from the
@@ -174,9 +182,11 @@ those seconds because each swap ran all 145 tests of
 `prog_tests/verifier.c`; running only the tests that load the object
 (`scripts/affected_tests.py`, see "Running what changed in QEMU") cut the
 full gate to 1840 s on 2026-10-18 (14570 worker seconds; a `verifier_*`
-object 17 s instead of 60 s). What remains is mostly the guest boot and
-shutdown, about 13 s of a typical 18 s object; batching several objects
-per guest is the next lever (#67). Two rows turned PASS into NO-ORACLE
+object 17 s instead of 60 s). What remained was the guest boot, init and
+setup, 15.8 s of a typical 17 s object; one guest per worker (#74,
+[gate-runtime.md](gate-runtime.md)) removed that: 730 s on 2026-10-19
+for 883 objects (5809 worker seconds), every verdict unchanged. Two rows
+turned PASS into NO-ORACLE
 with the narrower filter, `verifier_stack_arg` and `pyperf600`: their only
 test is in `known-bad-tests`, and the other tests of their file, which the
 old filter ran, never loaded them.

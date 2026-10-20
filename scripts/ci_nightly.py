@@ -191,7 +191,8 @@ def main(argv=None):
         save_report(out, report)
 
     gate = qemu_gate.Gate(run=run, env=env, log_dir=out / "runtime",
-                          timeout=args.runtime_timeout, base=out, on_row=record)
+                          timeout=args.runtime_timeout, base=out, on_row=record,
+                          spawn=qemu_gate.spawn)
     handlers = {sig: signal.signal(sig, interrupted)
                 for sig in (signal.SIGINT, signal.SIGTERM)}
     try:

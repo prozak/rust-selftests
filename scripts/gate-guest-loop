@@ -1,0 +1,89 @@
+#!/bin/bash
+# gate-guest-loop <worker-dir> <selftests-output> [idle-seconds]
+#
+# The command of a gate worker's guest (scripts/qemu-test-progs under
+# GATE_LOOP): boot once, then run the worker's objects one after another
+# as the host posts them, instead of one guest per object. Each job is
+# what today's per-object prelude does: mount the worker's overlay upper
+# over the shared selftests output, replay the host's deletions, run
+# test_progs from a tmpfs copy with the -t filter and the -d denylist that
+# scripts/gate-overlay.sh wrote into the upper, and report the exit status.
+#
+# Protocol, over the 9p-shared worker dir (9p caches nothing here, so the
+# host's writes are visible at once):
+#   host:  builds <worker>/upper (gate-overlay.sh step 1, with .test-filter
+#          and .test-deny in it), then `touch <worker>/jobs/<n>/ready`,
+#          n = 0, 1, 2, ... in order;
+#   guest: runs the job, writes test_progs's output to <worker>/jobs/<n>/log
+#          and its exit status to <worker>/jobs/<n>/rc (last, atomically);
+#   host:  `touch <worker>/stop` when its queue is empty.
+# The guest also powers off after idle-seconds (default 600) without a job,
+# so a host that died does not leave it running. The host never rewrites
+# upper/ before rc is there: the overlay is unmounted by then.
+#
+# A test_progs that crashes the kernel kills the guest; the host sees the
+# missing rc and reruns that object the classic way, alone in a fresh guest.
+set -u
+
+W="$1"
+OUT="$2"
+IDLE="${3:-600}"
+PROG=test_progs
+up() { cut -d' ' -f1 /proc/uptime; }
+
+mount -t bpf bpffs /sys/fs/bpf 2>/dev/null
+mkdir -p /run/gate && mount -t tmpfs tmpfs /run/gate
+
+n=0
+waited=0
+while [ ! -e "${W}/stop" ]; do
+    J="${W}/jobs/${n}"
+    if [ ! -e "${J}/ready" ]; then
+        sleep 0.2
+        waited=$((waited + 1))
+        [ "${waited}" -lt $((IDLE * 5)) ] || { echo "gate-guest-loop: idle for ${IDLE}s, leaving"; break; }
+        continue
+    fi
+    waited=0
+    echo "gate-guest-loop: job ${n}"
+    # Stamps for scripts/gate_profile.py: the job's log has no kernel
+    # timestamps (they go to the console, the guest's own log).
+    echo "[gate-guest-loop] job ${n} start $(up)" > "${J}/log"
+    rm -rf /run/gate/u /run/gate/w
+    mkdir /run/gate/u /run/gate/w
+    rc=99
+    if mount -t overlay overlay \
+            -o "lowerdir=${W}/upper:${OUT},upperdir=/run/gate/u,workdir=/run/gate/w" "${OUT}"; then
+        # 9p hides overlay whiteouts: delete again what the host deleted.
+        (cd "${W}/upper" && find . -type c) | while read -r f; do rm -f "${OUT}/${f}"; done
+        # From tmpfs, not the overlay, for the tests that look at their own
+        # executable's path: bpf_iter's task_vma subtest compares
+        # bpf_d_path() of test_progs's text mapping with /proc/self/maps,
+        # and through overlayfs they differ (see scripts/qemu-test-progs).
+        # The 33 MB copy over 9p costs more than a median object's tests,
+        # so only the consumers that resolve /proc/self/exe or /proc/self/
+        # maps get it (prog_tests grep); a wrong guess here is a FAIL,
+        # which the host reruns the classic way, from tmpfs.
+        RUN="./${PROG}"
+        if grep -qE 'bpf_iter|d_path|uprobe|usdt|attach_probe|bpf_cookie|fill_link_info|task_pt_regs|^iters|tailcalls|pkcs7|file_reader' \
+                "${OUT}/.test-filter"; then
+            rm -f "/run/gate/${PROG}"
+            cp -p "${OUT}/${PROG}" /run/gate/
+            RUN="/run/gate/${PROG}"
+        fi
+        DENY_ARG=""
+        [ ! -s "${OUT}/.test-deny" ] || DENY_ARG="-d @.test-deny"
+        echo "[gate-guest-loop] job ${n} run $(up)" >> "${J}/log"
+        (cd "${OUT}" && "${RUN}" -t @.test-filter ${DENY_ARG}) >> "${J}/log" 2>&1
+        rc=$?
+        # A test can leave a process behind holding the overlay; detach it
+        # rather than wait.
+        umount "${OUT}" 2>/dev/null || umount -l "${OUT}"
+    else
+        echo "gate-guest-loop: overlay mount failed" >> "${J}/log"
+    fi
+    echo "[gate-guest-loop] job ${n} done $(up) rc=${rc}" >> "${J}/log"
+    echo "${rc}" > "${J}/rc.tmp" && mv "${J}/rc.tmp" "${J}/rc"
+    n=$((n + 1))
+done
+echo "gate-guest-loop: done after ${n} job(s)"

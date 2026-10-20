@@ -155,7 +155,7 @@ def main(argv=None):
               flush=True)
 
     gate = qemu_gate.Gate(run=run, env=env, log_dir=log_dir, timeout=args.runtime_timeout,
-                          base=REPO, on_row=record)
+                          base=REPO, on_row=record, spawn=qemu_gate.spawn)
     handlers = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGINT, signal.SIGTERM)}
     status = 0
     try:

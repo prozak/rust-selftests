@@ -11,7 +11,12 @@
 // that cannot hold a 16-byte dynptr (`&val` of an 8-byte local), and a
 // dynptr in a function-local static (a map value, not the stack). The
 // third program loads and is run by the consumer: it passes invalid flags
-// to bpf_dynptr_from_mem and the resulting uninitialized dynptr on.
+// to bpf_dynptr_from_mem and the resulting uninitialized dynptr on. The
+// C_LAYOUT marker orders .bss as the C object does (err, pid, then the
+// function-local static dynptr at offset 8): the prover's trace observable
+// carries the kfunc's .bss pointer argument.
+
+// C_LAYOUT: .bss
 
 use bpf_rs_core::bpf_object;
 use bpf_rs_core::helpers::{bpf_dynptr_from_mem, bpf_get_current_pid_tgid, bpf_map_lookup_elem};
@@ -70,9 +75,13 @@ extern "C" fn not_valid_dynptr(_ctx: *const u64) -> i32 {
     unsafe { bpf_verify_pkcs7_signature(p, p, core::ptr::null_mut()) }
 }
 
-// C: static struct bpf_dynptr val; (a function-local static in .bss; named
-// static_val here because Rust lets no local shadow a static)
+// C: static struct bpf_dynptr val; (a function-local static in .bss, which
+// clang names `____not_ptr_to_stack.val`; the Rust static carries that
+// symbol name since translint's layout check and the prover's trace key on
+// it, and is called static_val in the source because Rust lets no local
+// shadow a static)
 #[allow(non_upper_case_globals)]
+#[export_name = "____not_ptr_to_stack.val"]
 static mut static_val: bpf_dynptr = bpf_dynptr { __opaque: [0; 2] };
 
 #[link_section = "?lsm.s/bpf"]

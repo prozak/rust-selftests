@@ -39,7 +39,7 @@ BASELINE_HEADER = "# name\trust_md5\tc_md5\tenv_md5\tverdict\tseconds\tsummary\n
 ENV_FILES = ["scripts/swap-and-test.sh", "scripts/affected_tests.py",
              "scripts/qemu-test-progs", "scripts/gate-overlay.sh",
              "scripts/gate-record-filter", "scripts/known-bad-tests",
-             "scripts/gate-serial"]
+             "scripts/gate-serial", "scripts/extra-consumers"]
 
 
 def stop_children():

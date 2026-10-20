@@ -1,0 +1,10 @@
+# Objects consumed by a prog_tests file that scripts/swap-and-test.sh's
+# two searches cannot see (the skeleton includes in *.test.d and the
+# literal "<name>.bpf.o" strings in prog_tests/*.c): the test runs a
+# user program that builds the object's file name at run time. One
+# `<object> <prog_tests basename>` per line; '#' comments. The file is
+# part of the gate environment hash (scripts/qemu_gate.py ENV_FILES).
+#
+# prog_tests/xdp_synproxy.c runs ./xdp_synproxy, which opens
+# "<argv0>_kern.bpf.o" (xdp_synproxy.c: snprintf "%s_kern.bpf.o").
+xdp_synproxy_kern xdp_synproxy

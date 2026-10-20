@@ -116,6 +116,15 @@ if [ "${#SKELS[@]}" -gt 0 ]; then
         stem="$(basename "${h}")"; stem="${stem%.lskel.h}"; stem="${stem%.skel.h}"
         for d in $(grep -l -E "(^| |/)${stem}\.(l?skel|subskel)\.h" "${OUT}"/*.test.d); do
             base="$(basename "${d}" .test.d)"
+            # A map_tests/ source is compiled into test_maps, which the
+            # gate never runs (#68): not a consumer. Keeping it would make
+            # the test_progs relink below demand a test object the main
+            # Makefile does not build (map_percpu_stats: C-FAIL for the
+            # pristine object too).
+            if [ -f "${SELFTESTS_SRC}/map_tests/${base}.c" ] && \
+               [ ! -f "${SELFTESTS_SRC}/prog_tests/${base}.c" ]; then
+                continue
+            fi
             case " ${TESTS[*]-} " in *" ${base} "*) ;; *) TESTS+=("${base}") ;; esac
         done
     done
@@ -149,6 +158,15 @@ for f in $(grep -l -E "\"[^\"]*${NAME}\.bpf\.o\"" "${SELFTESTS_SRC}"/prog_tests/
     base="$(basename "${f}" .c)"
     case " ${TESTS[*]-} " in *" ${base} "*) ;; *) TESTS+=("${base}") ;; esac
 done
+# A consumer neither grep can see: a prog_tests file that runs a user
+# program which builds the object's file name at run time
+# (prog_tests/xdp_synproxy.c runs ./xdp_synproxy, which opens
+# "<argv0>_kern.bpf.o"). scripts/extra-consumers lists those by hand.
+while read -r obj base; do
+    case "${obj}" in ''|'#'*) continue ;; esac
+    [ "${obj}" = "${NAME}" ] || continue
+    case " ${TESTS[*]-} " in *" ${base} "*) ;; *) TESTS+=("${base}") ;; esac
+done < "${HERE}/scripts/extra-consumers"
 [ "${#TESTS[@]}" -gt 0 ] || { echo "no prog_tests consume ${NAME}" >&2; exit 1; }
 
 # The names collected above are prog_tests FILE basenames, but the -t

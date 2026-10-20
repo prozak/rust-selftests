@@ -46,3 +46,11 @@ exceptions/non-throwing extension -> non-throwing subprog
 # object as well. Running all of prog_tests/verifier.c hid this (an earlier
 # privileged test warmed the cache): an upstream test-isolation bug.
 verifier_unpriv/unpriv: pseudo function policy diagnostic
+
+# arena_memcg: at pin 645f5fcf the pristine C object fails in this guest:
+# the child that faults the 64M arena in under memory.max (cwd page cache
+# over virtiofs as the reclaimable headroom) is killed by SIGBUS
+# ("child faulted the arena in: got FALSE", memory.events max 25, oom 0),
+# which is the failure mode the test attributes to a kernel without the
+# arena memcg reclaim fix. The Rust object is the C's single map.
+arena_memcg

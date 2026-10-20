@@ -71,8 +71,16 @@ sfmake() {
         VMLINUX_BTF="${VMLINUX_BTF:-${KERNEL_SRC}/linux}" \
         ARCH=x86_64 TEST_KMODS= SKIP_LLVM=1 \
         ${FLAVOR_BPF_CFLAGS} BPF_STRICT_BUILD=0 \
+        NON_CHECK_FEAT_TARGETS="clean docs-clean emit_tests $*" \
         -j"$(nproc)" -k "$@"
 }
+# NON_CHECK_FEAT_TARGETS: the selftests Makefile includes
+# tools/build/Makefile.feature for every goal outside that list, and the
+# include probes the toolchain on every make (a test-all.c compile that
+# fails, then test-llvm): 0.3 s per invocation here, for a result
+# (feature-llvm) the Makefile reads only under SKIP_LLVM != 1. Naming our
+# goals in the list skips the include. Should a bpf-next bump rename the
+# variable, the probe merely runs again.
 
 # Regenerate the skeleton headers derived from this object, if any. Tests
 # without skeletons load the .bpf.o from disk at runtime, so the swap alone
@@ -107,11 +115,11 @@ done
 
 TESTS=()
 if [ "${#SKELS[@]}" -gt 0 ]; then
-    sfmake "${SKELS[@]}" > /dev/null
-
     # Find every test object whose dep file pulls in one of those skeletons.
-    # A linked skeleton's generation also writes <skel>.subskel.h, which is
-    # what a subskeleton's consumer includes (test_subskeleton_lib).
+    # The dep files are the previous build's, which is enough: a test's
+    # include set does not depend on the skeleton's content. A linked
+    # skeleton's generation also writes <skel>.subskel.h, which is what a
+    # subskeleton's consumer includes (test_subskeleton_lib).
     for h in "${SKELS[@]}"; do
         stem="$(basename "${h}")"; stem="${stem%.lskel.h}"; stem="${stem%.skel.h}"
         for d in $(grep -l -E "(^| |/)${stem}\.(l?skel|subskel)\.h" "${OUT}"/*.test.d); do
@@ -131,16 +139,24 @@ if [ "${#SKELS[@]}" -gt 0 ]; then
     # The selftests build auto-generates skeletons for every prog; some tests
     # ignore them and load the .bpf.o from disk instead, so an unconsumed
     # skeleton is normal — fall through to runtime discovery.
+    #
+    # One make for the skeletons and, with consumers, test_progs: its rule
+    # depends on every skeleton, so the regeneration precedes the runner
+    # sub-make (Makefile.runner, since bpf-next 645f5fcf) whose .test.d
+    # includes make it recompile the objects that include a regenerated
+    # skeleton; the relink follows. A *.test.o is no longer a goal the main
+    # Makefile knows. A second make for the skeletons alone would parse the
+    # Makefile (and its toolchain probes) twice: 0.25 s per swap.
+    GOALS=("${SKELS[@]}")
     if [ "${#TESTS[@]}" -gt 0 ]; then
-        # Since bpf-next 645f5fcf the test objects are compiled by a
-        # sub-make (Makefile.runner) that the main Makefile's test_progs rule
-        # always runs; the .test.d files it includes make it recompile the
-        # objects that include a regenerated skeleton, and the relink follows.
-        # A *.test.o is no longer a goal the main Makefile knows. PERMISSIVE
-        # mode drops an object whose compile failed from the link without
-        # failing make, so demand one newer than the skeleton for each test.
         rm -f "${OUT}/test_progs"
-        sfmake "${OUT}//test_progs" > /dev/null
+        GOALS+=("${OUT}//test_progs")
+    fi
+    sfmake "${GOALS[@]}" > /dev/null
+    if [ "${#TESTS[@]}" -gt 0 ]; then
+        # PERMISSIVE mode drops an object whose compile failed from the link
+        # without failing make, so demand one newer than the skeleton for
+        # each test.
         for base in "${TESTS[@]}"; do
             for h in "${SKELS[@]}"; do
                 [ "${OUT}/${base}.test.o" -nt "${OUT}/$(basename "${h}")" ] || \

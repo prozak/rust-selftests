@@ -8,9 +8,12 @@ scripts/gate-overlay.sh (N at once, each in a private overlay), judge the
 guest's test_progs summary, and put the C object back. An overlay worker
 boots its guest once and feeds it its objects one after another (Guest,
 scripts/gate-guest-loop): booting per object cost ~16 s of boot, init and
-setup for a median 0.5 s of tests (docs/gate-runtime.md). Anything but a
-PASS from that guest is rerun the classic way, alone in a fresh guest, so
-a verdict other than PASS never rests on a shared kernel.
+setup for a median 0.5 s of tests (docs/gate-runtime.md). While the guest
+runs one object the worker builds the next one's layer (gate-overlay.sh
+step 1, in a thread) in the other of its two slots, so the host-side build
+(~1.2 s, more than a median object's tests) overlaps the guest. Anything
+but a PASS from that guest is rerun the classic way, alone in a fresh
+guest, so a verdict other than PASS never rests on a shared kernel.
 
 The driver passes its own `run` into Gate so that a test's substitute
 reaches every guest launch; the process bookkeeping here (CHILDREN,
@@ -112,9 +115,9 @@ def spawn(argv, log, env, cwd=REPO):
 
 class Guest:
     """A worker's guest, booted once (scripts/qemu-test-progs under GATE_LOOP)
-    and fed objects through <worker>/jobs/<n>: the host posts a job after
-    gate-overlay.sh step 1 (GATE_JOB), the guest writes its rc there
-    (scripts/gate-guest-loop has the protocol)."""
+    and fed objects through <worker>/jobs/<n>: the host posts a slot's upper
+    (gate-overlay.sh step 1 under GATE_PREPARE) as a job, the guest writes
+    its rc there (scripts/gate-guest-loop has the protocol)."""
 
     def __init__(self, spawn, wenv, log):
         self.dir = Path(wenv["GATE_DIR"])
@@ -129,9 +132,15 @@ class Guest:
     def alive(self):
         return self.proc is not None and self.proc.poll() is None
 
-    def job(self):
+    def post(self, upper):
+        """Post a prepared slot's upper as the next job; ready goes last, it
+        is what the guest acts on. Returns the job number."""
         n = self.next_job
         self.next_job += 1
+        job = self.dir / "jobs" / str(n)
+        job.mkdir(parents=True)
+        (job / "upper").write_text(f"{upper}\n")
+        (job / "ready").touch()
         return n
 
     def job_log(self, n):
@@ -148,7 +157,7 @@ class Guest:
             if not self.alive() or time.monotonic() > deadline or CANCELLED.is_set():
                 self.stop()
                 return None
-            time.sleep(0.2)
+            time.sleep(0.05)
 
     def stop(self, grace=15):
         """Ask the loop to leave; kill the guest's process group if it does
@@ -216,13 +225,18 @@ def read_serial(path):
             if line.strip() and not line.startswith("#")}
 
 
-def under_kvm(log, allow_tcg, base):
+def under_kvm(log, allow_tcg, base, booted=False):
     # vng falls back to TCG silently; an emulated guest is several times
     # slower and produces failures of its own (#52), so its verdicts are
-    # not evidence. A run that never booted is judged on its own log.
+    # not evidence. A run that never booted is judged on its own log; a
+    # guest known to have booted (`booted`: it answered a job) must show
+    # its banner, or the check would skip in silence.
     text = log.read_text(errors="replace")
-    if (not allow_tcg and "Linux version" in text
-            and "Hypervisor detected: KVM" not in text):
+    if "Linux version" not in text:
+        if booted:
+            raise RuntimeError(f"guest log has no kernel banner; see {log.relative_to(base)}")
+        return
+    if not allow_tcg and "Hypervisor detected: KVM" not in text:
         raise RuntimeError(f"guest ran without KVM (TCG); see {log.relative_to(base)}")
 
 
@@ -359,12 +373,15 @@ class Gate:
     """Run objects through the gate on a set of worker environments.
 
     A worker environment with GATE_DIR runs through gate-overlay.sh, in the
-    worker's one guest when `spawn` is given (Guest; the classic one guest
-    per object otherwise, and as the rerun of anything but a PASS); the
-    shared environment (the one given to the constructor) runs through
+    worker's one guest when `spawn` is given (Guest, with the next object's
+    step 1 overlapping the guest: pipelined_loop; the classic one guest per
+    object otherwise, and as the rerun of anything but a PASS); the shared
+    environment (the one given to the constructor) runs through
     swap-and-test.sh in the shared tree. on_row(name, result) is called
     for every finished object, under the gate's lock.
     """
+
+    SLOTS = 2  # layers per worker: one the guest runs, one the host builds
 
     def __init__(self, *, run, env, log_dir, timeout, base, on_row, spawn=None):
         self.run = run
@@ -381,23 +398,52 @@ class Gate:
         self.workers = []
         self.active_by_worker = {}
 
-    def gate_overlay(self, name, wenv):
-        def one(which, log):
-            rc = self.run(["scripts/gate-overlay.sh", wenv["GATE_DIR"], name, which],
-                          log, wenv, self.timeout)
-            under_kvm(log, self.allow_tcg, self.base)
-            return rc, *runtime_result(name, rc, log.read_text(errors="replace"))
+    def classic(self, name, wenv, which, log):
+        """One object alone in a fresh guest: gate-overlay.sh over
+        <worker>/upper (never a slot, which may hold the next object)."""
+        rc = self.run(["scripts/gate-overlay.sh", wenv["GATE_DIR"], name, which],
+                      log, wenv, self.timeout)
+        under_kvm(log, self.allow_tcg, self.base)
+        return rc, *runtime_result(name, rc, log.read_text(errors="replace"))
 
-        log = self.log_dir / f"{name}.log"
-        row = self.gate_in_guest(name, wenv, log) if self.spawn else None
-        if row is None:
-            rc, verdict, note = one("rust", log)
-            row = dict(verdict=verdict, exit=rc, summary=note,
-                       c_exit=0, c_verdict="NOT-RUN", c_summary="")
+    def gate_overlay(self, name, wenv):
+        """The classic way, one guest per object (a worker without spawn)."""
+        rc, verdict, note = self.classic(name, wenv, "rust", self.log_dir / f"{name}.log")
+        row = dict(verdict=verdict, exit=rc, summary=note,
+                   c_exit=0, c_verdict="NOT-RUN", c_summary="")
+        return self.with_oracle(name, wenv, row)
+
+    def with_oracle(self, name, wenv, row):
         if row["verdict"] == "FAIL":
-            c_rc, c_verdict, c_note = one("c", self.log_dir / f"{name}.c.log")
+            c_rc, c_verdict, c_note = self.classic(name, wenv, "c", self.log_dir / f"{name}.c.log")
             row.update(c_exit=c_rc, c_verdict=c_verdict, c_summary=c_note)
         return row
+
+    def prepare(self, name, wenv, slot):
+        """gate-overlay.sh step 1 of `name` into the worker's slot
+        (GATE_PREPARE): the layer the guest will run, with the -t filter and
+        -d denylist in it. What finish() needs, `seconds` included."""
+        log = self.log_dir / f"{name}.log"
+        slot_dir = Path(wenv["GATE_DIR"]) / f"s{slot}"
+        start = time.monotonic()
+        rc = self.run(["scripts/gate-overlay.sh", str(slot_dir), name, "rust"],
+                      log, dict(wenv, GATE_PREPARE="1"), self.timeout)
+        seconds = time.monotonic() - start
+        with log.open("ab") as out:
+            out.write(f"[gate] step 1 took {seconds:.2f} s (rc {rc})\n".encode())
+        return dict(name=name, log=log, rc=rc, upper=slot_dir / "upper", seconds=seconds)
+
+    def finish(self, wenv, prepared):
+        """The verdict dict of a prepared object: its job in the worker's
+        guest, the classic rerun of anything but a PASS, the C oracle after
+        a FAIL."""
+        name, log = prepared["name"], prepared["log"]
+        row = self.gate_in_guest(wenv, prepared)
+        if row is None:
+            rc, verdict, note = self.classic(name, wenv, "rust", log)
+            row = dict(verdict=verdict, exit=rc, summary=note,
+                       c_exit=0, c_verdict="NOT-RUN", c_summary="")
+        return self.with_oracle(name, wenv, row)
 
     def guest_for(self, wenv):
         key = wenv["GATE_DIR"]
@@ -408,21 +454,20 @@ class Gate:
             guest = self.guests[key] = Guest(self.spawn, wenv, log)
         return guest
 
-    def gate_in_guest(self, name, wenv, log):
-        """The object as one job of the worker's guest. None when it has to
-        be rerun the classic way: a FAIL, a guest that died (a kernel crash
-        is the usual reason) or a job past the timeout; the guest is stopped
-        then, so nothing a failing test left behind reaches the next object.
-        A step-1 failure (no consumer, a build error) is judged as it is:
-        the classic path would fail the same step."""
-        guest = self.guest_for(wenv)
-        n = guest.job()
-        rc = self.run(["scripts/gate-overlay.sh", wenv["GATE_DIR"], name, "rust"],
-                      log, dict(wenv, GATE_JOB=str(n)), self.timeout)
+    def gate_in_guest(self, wenv, prepared):
+        """The prepared object as one job of the worker's guest. None when it
+        has to be rerun the classic way: a FAIL, a guest that died (a kernel
+        crash is the usual reason) or a job past the timeout; the guest is
+        stopped then, so nothing a failing test left behind reaches the next
+        object. A step-1 failure (no consumer, a build error) is judged as
+        it is: the classic path would fail the same step."""
+        name, log, rc = prepared["name"], prepared["log"], prepared["rc"]
         if rc:
             verdict, note = runtime_result(name, rc, log.read_text(errors="replace"))
             return dict(verdict=verdict, exit=rc, summary=note,
                         c_exit=0, c_verdict="NOT-RUN", c_summary="")
+        guest = self.guest_for(wenv)
+        n = guest.post(prepared["upper"])
         rc = guest.wait(n, self.timeout)
         job_log = guest.job_log(n)
         with log.open("ab") as out:
@@ -434,7 +479,7 @@ class Gate:
             shutil.copyfile(log, log.with_suffix(".loop.log"))
             return None
         if not guest.checked:
-            under_kvm(guest.log, self.allow_tcg, self.base)
+            under_kvm(guest.log, self.allow_tcg, self.base, booted=True)
             guest.checked = True
         verdict, note = runtime_result(name, rc, log.read_text(errors="replace"))
         if verdict == "FAIL":
@@ -483,17 +528,59 @@ class Gate:
                     c_exit=c_rc, c_verdict=c_verdict if verdict == "FAIL" else "NOT-RUN",
                     c_summary=c_note if verdict == "FAIL" else "")
 
+    def take(self, queue):
+        with self.lock:
+            return queue.pop(0) if queue else None
+
     def worker_loop(self, k, queue):
+        if self.spawn and "GATE_DIR" in self.workers[k]:
+            return self.pipelined_loop(k, queue)
         while not CANCELLED.is_set():
+            name = self.take(queue)
+            if name is None:
+                return
             with self.lock:
-                if not queue:
-                    return
-                name = queue.pop(0)
                 self.active_by_worker[k] = name
             result = self.gate_one(name, self.workers[k])
             with self.lock:
                 self.on_row(name, result)
                 self.active_by_worker.pop(k, None)
+
+    def pipelined_loop(self, k, queue):
+        """An overlay worker with a guest: while the guest runs one object,
+        a builder thread prepares the next one in the other slot. A slot is
+        rebuilt only after the rc of its last job (the guest has unmounted
+        it by then). `seconds` of an object = its step 1 + the rest, so the
+        column's sum exceeds the worker's wall time by the overlap. An
+        object prepared when the gate is cancelled is dropped unrecorded."""
+        wenv = self.workers[k]
+        count = 0
+        with ThreadPoolExecutor(max_workers=1) as builder:
+            def start(name):
+                nonlocal count
+                future = builder.submit(self.prepare, name, wenv, count % self.SLOTS)
+                count += 1
+                return future
+
+            name = self.take(queue)
+            if name is None:
+                return
+            self.guest_for(wenv)  # boot now: it overlaps the first step 1
+            pending = start(name)
+            while pending is not None:
+                prepared = pending.result()
+                if CANCELLED.is_set():
+                    return
+                name = self.take(queue)
+                pending = start(name) if name is not None else None
+                with self.lock:
+                    self.active_by_worker[k] = prepared["name"]
+                started = time.monotonic()
+                result = self.finish(wenv, prepared)
+                result["seconds"] = round(prepared["seconds"] + time.monotonic() - started)
+                with self.lock:
+                    self.on_row(prepared["name"], result)
+                    self.active_by_worker.pop(k, None)
 
     def run_all(self, names, workers, serial, seconds=None):
         """Every name once: the non-serial ones over `workers`, then the

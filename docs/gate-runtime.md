@@ -108,3 +108,66 @@ levers, in order: the host-side build (2051 s; overlap it with the
 guest's previous job, or cache swap-and-test.sh's consumer discovery),
 then the tail (the dozen network objects, 1000 s of tests, bound the
 wall time at 8 workers: ~190 s for test_lwt_ip_encap alone).
+
+## After: the next object's build overlaps the guest, one leaner make
+
+2026-10-20, 886 objects, same host. The host-side build was the largest
+per-object cost left, so it was measured by part, in a scratch overlay:
+step 1 of `gate-overlay.sh` took 1.65 s for a typical object
+(test_ringbuf, test_tunnel_kern; verifier_bounds 2.0 s), of which the
+two `make` invocations in swap-and-test.sh were 0.37 s (the skeleton
+goal) and 1.19 s (`test_progs`); the consumer greps, affected_tests.py,
+the user namespace and the overlay mount were under 0.1 s in all (not
+the 1.3 s the first table above guessed). Inside the makes:
+
+| part | s | what |
+|---|---|---|
+| toolchain feature probe | 0.33 | `tools/build/Makefile.feature`, included for every goal outside the Makefile's `NON_CHECK_FEAT_TARGETS`: a test-all.c compile that fails (no Python.h), then test-llvm, on every invocation, for a `feature-llvm` read only under `SKIP_LLVM != 1`, which the gate never is |
+| second Makefile parse | 0.25 | the skeleton goal in a make of its own, before the consumer discovery and the `test_progs` make |
+| parse-time probes | ~0.5 | ~35 shells per parse (13 clang, 10 rustc, 6 `gcc -dM`, pkg-config, awk), in the main Makefile and again in the runner sub-make; pre-seeding them from the command line would hard-code probe results a bpf-next bump silently invalidates, so they stay |
+| the work | ~0.5 | skeleton generation, the consumer's recompile, the 33 MB `test_progs` link (0.25 s) |
+
+Two changes to the build (swap-and-test.sh): the goals are named in
+`NON_CHECK_FEAT_TARGETS` on the command line, which skips the probe
+(a rename upstream merely brings it back), and the skeletons and
+`test_progs` are one make: the `.test.d` files the discovery reads are
+the previous build's (a test's include set does not depend on the
+skeleton's content) and the `test_progs` rule depends on every
+skeleton, so the regeneration precedes the runner sub-make. Step 1 is
+1.05-1.33 s solo now. Then the overlap: a worker has two slots
+(`<worker>/s0`, `<worker>/s1`), and while its guest runs the object in
+one, a builder thread prepares the next object in the other
+(`gate-overlay.sh` under `GATE_PREPARE`; `qemu_gate.Gate.pipelined_loop`);
+the slot is posted as a job (`jobs/<n>/upper`, then `ready`) once the
+previous job's rc is in, so a FAIL still stops the guest before the
+next object runs, and a classic rerun uses `<worker>/upper`, never a
+slot. The polls for `ready` and `rc` went from 0.2 s to 0.05 s.
+
+Full re-gate (the scripts are in `ENV_FILES`): **563 s wall**, 591 s
+in a second run, against 730 s, every verdict and test summary
+identical both times (852 PASS / 0 FAIL / 34 NO-ORACLE), 8 boots, no
+fallback rerun. Per object the
+`seconds` column is now step 1 plus the rest, so the worker-seconds
+below add up to more than 8 x 563: the overlapped part is counted on
+both sides.
+
+| phase | median s | sum s | share | what it is now |
+|---|---|---|---|---|
+| host | 1.95 | 1776 | 31% | step 1 (median 1.72 s under eight concurrent builds and guests, 1418 s in all) plus the polls and bookkeeping; overlapped with the guest's previous job except for a worker's first object, which also waits for the boot |
+| pre | 0.41 | 641 | 11% | as before; eight builds now run beside the guests, hence the slightly higher medians here and below |
+| tests | 0.98 | 3243 | 57% | as before |
+
+Found on the way: the guest console log (`guest-w<k>-<boot>.log`) lost
+its boot banner in loop mode. vng relays the guest command's stdout
+through a descriptor of its own on the same file, writing from offset
+0 under the console it appends, and a hundred `gate-guest-loop: job`
+lines overwrote the first 10 KB, `Linux version` and `Hypervisor
+detected: KVM` with them, so the TCG check (`qemu_gate.under_kvm`)
+found no banner and skipped in silence. The loop's output now goes to
+`<worker>/loop.log`, and a guest that answered a job must show its
+banner or the gate stops with an error.
+
+What is left is the tail: test_lwt_ip_encap (190 s), test_xdp (135 s),
+test_tunnel_kern (114 s) and the other network objects bound the wall
+time at 8 workers whatever the per-object cost, and the serial stages
+(restore-all, build, the two `gate-serial` objects) are ~30 s.

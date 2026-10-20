@@ -29,8 +29,9 @@ skipped; the rest run through their consuming `prog_tests` in QEMU,
 selftests output (`scripts/gate-overlay.sh`), the `scripts/gate-serial`
 objects afterwards, alone in the shared output. Each worker boots its
 guest once and runs its objects one after another in it
-(`scripts/gate-guest-loop`; the host posts a job after the overlay build
-and reads the exit status back); anything but a PASS there is rerun the
+(`scripts/gate-guest-loop`; the host builds the next object's layer while
+the guest runs the current one, posts it as a job and reads the exit
+status back); anything but a PASS there is rerun the
 classic way, alone in a fresh guest, before it counts (see
 [gate-runtime.md](gate-runtime.md) for why: booting per object was 82%
 of the gate). Rows that ran are rewritten in place (commit them with the

@@ -251,9 +251,11 @@ is `make ci-nightly` (see [docs/ci-nightly.md](docs/ci-nightly.md)). A
 swap runs only the `prog_tests` functions that load the swapped object
 (`scripts/affected_tests.py`), and each guest is booted once per worker
 and fed its objects in sequence (`scripts/gate-guest-loop`; anything but a
-PASS is rerun alone in a fresh guest): the full gate over 883 objects took
-730 s on 2026-10-19, against 2069 s with one guest per object the
-same day and 2662 s on 2026-10-17, when every `verifier_*` swap ran all
+PASS is rerun alone in a fresh guest), the next object's layer being built
+while the guest runs the current one: the full gate over 886 objects took
+563-591 s on 2026-10-20, against 730 s the day before with the build in
+sequence, 2069 s with one guest per object and 2662 s on 2026-10-17,
+when every `verifier_*` swap ran all
 145 tests of `prog_tests/verifier.c`; [docs/gate-runtime.md](docs/gate-runtime.md)
 has the measured breakdown.
 It needs `pip install -r requirements.txt`, into `.venv/` if you want

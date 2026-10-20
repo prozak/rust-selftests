@@ -68,7 +68,12 @@ exec 3<&-
 
 # One guest for a worker's whole queue: the per-object prelude below moves
 # into scripts/gate-guest-loop, run per job. The command is a path, not a
-# script: the kernel command line is capped at 2048 bytes (below).
+# script: the kernel command line is capped at 2048 bytes (below). The
+# loop's own output goes to a file of its own: vng relays the guest
+# command's stdout through a descriptor of its own on our stdout's file,
+# writing from offset 0, under the kernel console it appends to the same
+# file, and a hundred job lines overwrite the boot banner (`Linux
+# version`, `Hypervisor detected: KVM`) the TCG check reads.
 if [ -n "${GATE_LOOP:-}" ]; then
     exec timeout "${QEMU_TIMEOUT:-86400}" "${VNG}" \
         --run "${QEMU_KERNEL}" \
@@ -76,7 +81,7 @@ if [ -n "${GATE_LOOP:-}" ]; then
         --rw \
         --cwd "${OUT}" \
         --verbose \
-        -- "${HERE}/scripts/gate-guest-loop '${GATE_LOOP}' '${OUT}'"
+        -- "${HERE}/scripts/gate-guest-loop '${GATE_LOOP}' '${OUT}' > '${GATE_LOOP}/loop.log' 2>&1"
 fi
 
 # vng passes the guest command on the KERNEL COMMAND LINE, which x86 caps at

@@ -352,8 +352,9 @@ def test_overlay_mode_never_touches_the_shared_tree(stack, monkeypatch, tmp_path
             runs.append(argv[1:])
             assert env["SELFTESTS_OUTPUT"] == str(c_dir)
             log.parent.mkdir(parents=True, exist_ok=True)
-            if "GATE_JOB" in env and not rust_rc:
-                fake_guest.post_job(env, log)  # the worker's guest answers it
+            if "GATE_PREPARE" in env and not rust_rc:
+                # step 1 into a slot; the gate posts it, the worker's guest answers
+                log.write_text("[gate-overlay] prepared\n")
                 return 0
             log.write_text("Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED\n")
             return rust_rc if argv[-1] == "rust" else 0
@@ -363,7 +364,8 @@ def test_overlay_mode_never_touches_the_shared_tree(stack, monkeypatch, tmp_path
     rc = nightly.main(["--out", str(repo / "report"), "--gate-workers", "2"])
     row = json.loads((repo / "report/summary.json").read_text())["runtime"]["a"]
     workers = {str(build / "gate/w1"), str(build / "gate/w2")}
-    assert runs[0][1:] == ["a", "rust"] and runs[0][0] in workers
+    # step 1 goes into a slot of a worker dir
+    assert runs[0][1:] == ["a", "rust"] and str(Path(runs[0][0]).parent) in workers
     if rust_rc:  # a failing Rust run gets the C oracle, in a fresh layer
         assert rc == 1 and row["verdict"] == "FAIL" and row["c_verdict"] == "PASS"
         assert [r[1:] for r in runs] == [["a", "rust"], ["a", "c"]]

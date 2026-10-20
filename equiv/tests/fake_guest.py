@@ -2,7 +2,9 @@
 GATE_LOOP + scripts/gate-guest-loop), for the drivers' tests: answers every
 job the host posts under <worker>/jobs/<n> with controls["job_rc"] and a
 test summary, hangs on controls["job_hangs"], dies on
-controls["guest_dies"]. A Popen look-alike for qemu_gate.Guest."""
+controls["guest_dies"], answers job 0 only once controls["hold"] (an Event)
+is set. Records the slot upper each job named (`uppers`). A Popen
+look-alike for qemu_gate.Guest."""
 from pathlib import Path
 import subprocess
 import threading
@@ -15,6 +17,7 @@ class FakeGuest:
         self.env = env
         self.controls = controls
         self.jobs = []
+        self.uppers = []
         self.returncode = None
         self.pid = 0
         self.answer = threading.Thread(target=self.serve, daemon=True)
@@ -26,6 +29,13 @@ class FakeGuest:
             job = self.dir / "jobs" / str(n)
             if (job / "ready").exists():
                 self.jobs.append(n)
+                # the host names the slot's upper before ready, under the worker
+                upper = Path((job / "upper").read_text().strip())
+                assert upper.is_relative_to(self.dir) and upper.name == "upper", upper
+                self.uppers.append(str(upper))
+                hold = self.controls.get("hold")
+                if hold is not None and n == 0:
+                    hold.wait(10)
                 if self.controls.get("guest_dies"):
                     self.returncode = 137
                     return
@@ -49,20 +59,13 @@ class FakeGuest:
 
 def fake_spawn(controls, guests):
     """A qemu_gate.spawn substitute: boots a FakeGuest per call, records it
-    in `guests`, writes a KVM boot banner to the guest log."""
+    in `guests`, writes a KVM boot banner (controls["banner"] if set) to
+    the guest log."""
     def spawn(argv, log, env, cwd=None):
         assert [str(a) for a in argv] == ["scripts/qemu-test-progs"]
         log.parent.mkdir(parents=True, exist_ok=True)
-        log.write_text("Linux version fake\nHypervisor detected: KVM\n")
+        log.write_text(controls.get("banner", "Linux version fake\nHypervisor detected: KVM\n"))
         guest = FakeGuest(env, controls)
         guests.append(guest)
         return guest
     return spawn
-
-
-def post_job(env, log):
-    """What gate-overlay.sh step 1 does under GATE_JOB: post the job dir."""
-    job = Path(env["GATE_DIR"]) / "jobs" / env["GATE_JOB"]
-    job.mkdir(parents=True)
-    (job / "ready").touch()
-    log.write_text(f"[gate-overlay] job {env['GATE_JOB']} posted\n")

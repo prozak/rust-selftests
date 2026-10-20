@@ -11,15 +11,17 @@
 #
 # Protocol, over the 9p-shared worker dir (9p caches nothing here, so the
 # host's writes are visible at once):
-#   host:  builds <worker>/upper (gate-overlay.sh step 1, with .test-filter
-#          and .test-deny in it), then `touch <worker>/jobs/<n>/ready`,
-#          n = 0, 1, 2, ... in order;
+#   host:  builds a slot's upper (<worker>/s0/upper or s1/upper:
+#          gate-overlay.sh step 1 under GATE_PREPARE, with .test-filter and
+#          .test-deny in it), writes its path to <worker>/jobs/<n>/upper,
+#          then `touch <worker>/jobs/<n>/ready`, n = 0, 1, 2, ... in order;
 #   guest: runs the job, writes test_progs's output to <worker>/jobs/<n>/log
 #          and its exit status to <worker>/jobs/<n>/rc (last, atomically);
 #   host:  `touch <worker>/stop` when its queue is empty.
 # The guest also powers off after idle-seconds (default 600) without a job,
-# so a host that died does not leave it running. The host never rewrites
-# upper/ before rc is there: the overlay is unmounted by then.
+# so a host that died does not leave it running. The host rebuilds a slot
+# only after the rc of its last job is there: the overlay is unmounted by
+# then; the other slot is what it builds while this job runs.
 #
 # A test_progs that crashes the kernel kills the guest; the host sees the
 # missing rc and reruns that object the classic way, alone in a fresh guest.
@@ -39,13 +41,14 @@ waited=0
 while [ ! -e "${W}/stop" ]; do
     J="${W}/jobs/${n}"
     if [ ! -e "${J}/ready" ]; then
-        sleep 0.2
+        sleep 0.05
         waited=$((waited + 1))
-        [ "${waited}" -lt $((IDLE * 5)) ] || { echo "gate-guest-loop: idle for ${IDLE}s, leaving"; break; }
+        [ "${waited}" -lt $((IDLE * 20)) ] || { echo "gate-guest-loop: idle for ${IDLE}s, leaving"; break; }
         continue
     fi
     waited=0
-    echo "gate-guest-loop: job ${n}"
+    UPPER="$(cat "${J}/upper")"
+    echo "gate-guest-loop: job ${n} (${UPPER})"
     # Stamps for scripts/gate_profile.py: the job's log has no kernel
     # timestamps (they go to the console, the guest's own log).
     echo "[gate-guest-loop] job ${n} start $(up)" > "${J}/log"
@@ -53,9 +56,9 @@ while [ ! -e "${W}/stop" ]; do
     mkdir /run/gate/u /run/gate/w
     rc=99
     if mount -t overlay overlay \
-            -o "lowerdir=${W}/upper:${OUT},upperdir=/run/gate/u,workdir=/run/gate/w" "${OUT}"; then
+            -o "lowerdir=${UPPER}:${OUT},upperdir=/run/gate/u,workdir=/run/gate/w" "${OUT}"; then
         # 9p hides overlay whiteouts: delete again what the host deleted.
-        (cd "${W}/upper" && find . -type c) | while read -r f; do rm -f "${OUT}/${f}"; done
+        (cd "${UPPER}" && find . -type c) | while read -r f; do rm -f "${OUT}/${f}"; done
         # From tmpfs, not the overlay, for the tests that look at their own
         # executable's path: bpf_iter's task_vma subtest compares
         # bpf_d_path() of test_progs's text mapping with /proc/self/maps,

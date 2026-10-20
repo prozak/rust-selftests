@@ -63,7 +63,8 @@ The driver sequences every stage even if the outer make uses `-j`:
    `bpf_d_path()` of that mapping with `/proc/<pid>/maps`, fails for C
    and Rust alike), and the shared output is never written, so going
    back to C costs nothing. A worker's guest is booted once and runs the
-   worker's objects in sequence (`scripts/gate-guest-loop`); anything but
+   worker's objects in sequence (`scripts/gate-guest-loop`), the next
+   object's layer being built while it runs the current one; anything but
    a PASS is rerun alone in a fresh guest, then the C object as before
    ([gate-runtime.md](gate-runtime.md)). The objects listed in
    `scripts/gate-serial` run afterwards, one at a time, in the shared

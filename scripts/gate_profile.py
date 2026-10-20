@@ -7,7 +7,8 @@ worker's time on the object, host side included) into phases from the
 kernel printk timestamps vng's verbose log carries:
 
   host     seconds minus the guest's lifetime (the overlay build: skeleton
-           regeneration and the test_progs relink; QEMU start and teardown)
+           regeneration and the test_progs relink; QEMU start and teardown;
+           for a job, the polls and the gate's bookkeeping)
   boot     kernel start to virtme-ng-init running as init
   init     virtme-ng-init: systemd-tmpfiles, udev coldplug and settle
   pre      the gate's prelude (overlay mount, test_progs copy) and
@@ -20,7 +21,11 @@ instead, `job N start|run|done`: boot/init are 0, pre is start to run (the
 overlay mount and the test_progs copy), tests is run to done (test_progs,
 its start included), and the guest's lifetime is the job's own; the boots
 are counted once per guest, from the workers' guest-*.log files, in a
-separate line.
+separate line. Such a log also carries `[gate] step 1 took N s`, the
+overlay build alone, reported as `build` (a part of host). A worker
+builds the next object while its guest runs the current one, so the sum
+of the baseline seconds (step 1 + the rest, per object) exceeds the
+workers' wall time by the overlapped part.
 
 Usage: scripts/gate_profile.py [--logs DIR] [--baseline FILE] [--tsv] [--top N]
 """
@@ -34,7 +39,9 @@ import sys
 REPO = Path(__file__).resolve().parents[1]
 TS = re.compile(r"^\[ *([0-9.]+)\]")
 STAMP = re.compile(r"^\[gate-guest-loop\] job \d+ (start|run|done) ([0-9.]+)")
+STEP1 = re.compile(r"^\[gate\] step 1 took ([0-9.]+) s")
 PHASES = ("host", "boot", "init", "pre", "tests")
+COLUMNS = PHASES + ("build",)
 MARKS = (("init", "as init process"), ("basic", "basic initialization done"),
          ("udev", "udev is done"), ("script", "starting script"),
          ("testmod", "bpf_testmod: loading"), ("end", "reboot: Power down"))
@@ -49,6 +56,10 @@ def milestones(text):
         st = STAMP.match(line)
         if st:
             m.setdefault("job_" + st.group(1), float(st.group(2)))
+            continue
+        s1 = STEP1.match(line)
+        if s1:
+            m["step1"] = float(s1.group(1))  # the last attempt's build
             continue
         t = TS.match(line)
         if not t:
@@ -67,7 +78,7 @@ def phases(seconds, m):
     if "job_done" in m and "job_start" in m:
         run = m.get("job_run", m["job_done"])
         d = dict(boot=0.0, init=0.0, pre=run - m["job_start"], tests=m["job_done"] - run,
-                 guest=m["job_done"] - m["job_start"])
+                 guest=m["job_done"] - m["job_start"], build=m.get("step1"))
         d["host"] = (seconds - d["guest"]) if seconds is not None else None
         return d
     if "end" not in m and "last" not in m:
@@ -80,7 +91,7 @@ def phases(seconds, m):
              init=(m.get("udev", m.get("script", m["init"])) - m["init"]) if booted else 0.0,
              pre=first_test - start_script,
              tests=end - first_test,
-             guest=end - m["first"])
+             guest=end - m["first"], build=m.get("step1"))
     d["host"] = (seconds - d["guest"]) if seconds is not None else None
     return d
 
@@ -131,6 +142,13 @@ def fmt_table(per, guests, top):
         out.append(f"| {key} | {statistics.median(xs):.2f} | {statistics.mean(xs):.2f} | "
                    f"{max(xs):.1f} | {s:.0f} | {100 * s / total:.0f}% |")
     out.append(f"| total (baseline seconds) | | | | {total:.0f} | 100% |")
+    builds = [d["build"] for _, _, d in per.values() if d.get("build") is not None]
+    if builds:
+        out.append(f"\nOf host, the overlay build alone (gate-overlay.sh step 1) over "
+                   f"{len(builds)} objects: median {statistics.median(builds):.2f} s, "
+                   f"sum {sum(builds):.0f} s. A worker builds the next object while its "
+                   f"guest runs the current one, so the baseline seconds add up to more "
+                   f"than the workers' wall time.")
     if guests:
         boots = sum(g["boot"] + g["init"] for g in guests.values())
         out.append(f"\n{len(guests)} guest boot(s) outside the objects' logs: "
@@ -164,9 +182,9 @@ def main(argv=None):
         print("no gate logs with a guest run", file=sys.stderr)
         return 1
     if args.tsv:
-        print("name\tverdict\tseconds\t" + "\t".join(PHASES))
+        print("name\tverdict\tseconds\t" + "\t".join(COLUMNS))
         for name, (verdict, sec, d) in sorted(per.items()):
-            cells = ["" if d[k] is None else f"{d[k]:.2f}" for k in PHASES]
+            cells = ["" if d.get(k) is None else f"{d[k]:.2f}" for k in COLUMNS]
             print(f"{name}\t{verdict}\t{sec}\t" + "\t".join(cells))
         return 0
     print(fmt_table(per, guests, args.top))

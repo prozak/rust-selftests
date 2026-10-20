@@ -34,8 +34,9 @@ use bpf_rs_core::ctx::__sk_buff;
 use bpf_rs_core::helpers::{
     bpf_dynptr_data, bpf_dynptr_from_mem, bpf_dynptr_read, bpf_dynptr_write, bpf_get_current_comm,
     bpf_loop, bpf_map_lookup_elem, bpf_map_update_elem, bpf_ringbuf_discard_dynptr,
-    bpf_ringbuf_reserve_dynptr, bpf_ringbuf_submit, bpf_ringbuf_submit_dynptr, bpf_skb_pull_data,
-    bpf_strncmp, bpf_this_cpu_ptr, bpf_xdp_adjust_head, sink,
+    bpf_get_current_task_btf, bpf_ringbuf_reserve_dynptr, bpf_ringbuf_submit,
+    bpf_ringbuf_submit_dynptr, bpf_skb_pull_data, bpf_strncmp, bpf_this_cpu_ptr,
+    bpf_xdp_adjust_head, sink,
 };
 use bpf_rs_core::maps::{self, BpfMap};
 use bpf_rs_core::progs::fentry_arg;
@@ -89,6 +90,12 @@ pub struct xdp_md {
     pub egress_ifindex: u32,
 }
 
+#[allow(non_camel_case_types)]
+#[repr(C)]
+pub struct task_struct {
+    _opaque: [u8; 0],
+}
+
 #[link_section = ".maps"]
 #[no_mangle]
 static array_map1: BpfMap<u32, bpf_dynptr, { maps::ARRAY }, 1> = BpfMap::new();
@@ -133,6 +140,11 @@ extern "C" {
         buffer__opt: *mut c_void,
         buffer__szk: u32,
     ) -> *mut c_void;
+    fn bpf_dynptr_adjust(ptr: *const bpf_dynptr, start: u32, end: u32) -> i32;
+    fn bpf_dynptr_is_null(ptr: *const bpf_dynptr) -> u8;
+    fn bpf_dynptr_is_rdonly(ptr: *const bpf_dynptr) -> u8;
+    fn bpf_dynptr_size(ptr: *const bpf_dynptr) -> u32;
+    fn bpf_dynptr_clone(ptr: *const bpf_dynptr, clone__uninit: *mut bpf_dynptr) -> i32;
 }
 
 #[inline(always)]
@@ -246,6 +258,32 @@ test_tags! {
     dynptr_slice_commuted_invalidate: __failure, __msg("invalid mem access 'scalar'");
     invalid_data_slices: __failure, __msg("invalid mem access 'scalar'");
     invalid_slice_rdwr_rdonly: __failure, __msg("the prog does not allow writes to packet data");
+    dynptr_adjust_invalid: __failure, __msg("Expected an initialized dynptr as R1");
+    dynptr_is_null_invalid: __failure, __msg("Expected an initialized dynptr as R1");
+    dynptr_is_rdonly_invalid: __failure, __msg("Expected an initialized dynptr as R1");
+    dynptr_size_invalid: __failure, __msg("Expected an initialized dynptr as R1");
+    clone_invalid1: __failure, __msg("Expected an initialized dynptr as R1");
+    clone_invalid2: __failure, __msg("cannot overwrite referenced dynptr");
+    clone_invalidate1: __failure, __msg("Expected an initialized dynptr as R3");
+    clone_invalidate2: __failure, __msg("Expected an initialized dynptr as R3");
+    clone_invalidate3: __failure, __msg("Expected an initialized dynptr as R3");
+    clone_invalidate4: __failure, __msg("invalid mem access 'scalar'");
+    referenced_dynptr_lost_on_subprog_return: __failure, __msg("cannot overwrite referenced dynptr");
+    caller_dynptr_slice_across_subprog_valid: __success;
+    callee_dynptr_slice_invalid_after_return: __failure, __msg("invalid mem access 'scalar'");
+    caller_dynptr_slice_release_after_subprog_invalid: __failure, __msg("invalid mem access 'scalar'");
+    clone_invalidate5: __failure, __msg("invalid mem access 'scalar'");
+    clone_invalidate6: __failure, __msg("invalid mem access 'scalar'");
+    clone_skb_packet_data: __failure, __msg("invalid mem access 'scalar'");
+    clone_skb_packet_meta: __failure, __msg("invalid mem access 'scalar'");
+    clone_xdp_packet_data: __failure, __msg("invalid mem access 'scalar'");
+    test_dynptr_skb_small_buff: __failure, __msg("memory, len pair leads to invalid memory access");
+    test_dynptr_reg_type: __failure, __msg("R1 type=trusted_ptr_ expected=fp, dynptr_ptr");
+    dynptr_overwrite_ref_with_clone: __success;
+    dynptr_overwrite_ref_last_clone: __failure, __msg("cannot overwrite referenced dynptr");
+    dynptr_overwrite_clone_with_original: __success;
+    dynptr_overwrite_ref_invalidate_slice: __failure, __msg("invalid mem access 'scalar'");
+    dynptr_overwrite_ref_clone_slice_valid: __success;
 }
 
 /* Every bpf_ringbuf_reserve_dynptr call must have a corresponding
@@ -2012,6 +2050,647 @@ extern "C" fn invalid_slice_rdwr_rdonly(skb: *mut __sk_buff) -> i32 {
     let mut hdr = unsafe { bpf_dynptr_slice_rdwr(dp(&ptr), 0, buffer.as_mut_ptr() as *mut c_void, 14) }
         as *mut ethhdr;
     sink(&mut hdr);
+
+    0
+}
+
+/* bpf_dynptr_adjust can only be called on initialized dynptrs */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_adjust_invalid(_ctx: *mut c_void) -> i32 {
+    let mut ptr = bpf_dynptr { __opaque: [0, 0] };
+
+    /* this should fail */
+    unsafe {
+        bpf_dynptr_adjust(addr_of_mut!(ptr), 1, 2);
+    }
+
+    0
+}
+
+/* bpf_dynptr_is_null can only be called on initialized dynptrs */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_is_null_invalid(_ctx: *mut c_void) -> i32 {
+    let mut ptr = bpf_dynptr { __opaque: [0, 0] };
+
+    /* this should fail */
+    unsafe {
+        bpf_dynptr_is_null(addr_of_mut!(ptr));
+    }
+
+    0
+}
+
+/* bpf_dynptr_is_rdonly can only be called on initialized dynptrs */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_is_rdonly_invalid(_ctx: *mut c_void) -> i32 {
+    let mut ptr = bpf_dynptr { __opaque: [0, 0] };
+
+    /* this should fail */
+    unsafe {
+        bpf_dynptr_is_rdonly(addr_of_mut!(ptr));
+    }
+
+    0
+}
+
+/* bpf_dynptr_size can only be called on initialized dynptrs */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_size_invalid(_ctx: *mut c_void) -> i32 {
+    let mut ptr = bpf_dynptr { __opaque: [0, 0] };
+
+    /* this should fail */
+    unsafe {
+        bpf_dynptr_size(addr_of_mut!(ptr));
+    }
+
+    0
+}
+
+/* Only initialized dynptrs can be cloned */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn clone_invalid1(_ctx: *mut c_void) -> i32 {
+    /* reverse-declared: clang's frame has ptr1 at fp-16 and ptr2 at fp-32,
+     * rustc gives the last-declared local the higher slot, and the prover
+     * pins the clone kfunc's pointer arguments by frame offset */
+    let ptr2 = MaybeUninit::<bpf_dynptr>::uninit();
+    let mut ptr1 = bpf_dynptr { __opaque: [0, 0] };
+
+    /* this should fail */
+    unsafe {
+        bpf_dynptr_clone(addr_of_mut!(ptr1), dpm(&ptr2));
+    }
+
+    0
+}
+
+/* Can't overwrite an existing dynptr when cloning */
+#[link_section = "?xdp"]
+#[no_mangle]
+extern "C" fn clone_invalid2(xdp: *mut xdp_md) -> i32 {
+    /* reverse-declared (clone_invalid1) */
+    let clone = MaybeUninit::<bpf_dynptr>::uninit();
+    let ptr1 = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        bpf_dynptr_from_xdp(xdp, 0, dpm(&ptr1));
+    }
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, 64, 0, dpv(&clone));
+
+    /* this should fail */
+    unsafe {
+        bpf_dynptr_clone(dp(&ptr1), dpm(&clone));
+    }
+
+    bpf_ringbuf_submit_dynptr(dpv(&clone), 0);
+
+    0
+}
+
+/* Invalidating a dynptr should invalidate its clones */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn clone_invalidate1(_ctx: *mut c_void) -> i32 {
+    let clone = MaybeUninit::<bpf_dynptr>::uninit();
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let mut read_data = MaybeUninit::<[u8; 64]>::uninit();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, unsafe { val } as u32, 0, dpv(&ptr));
+
+    unsafe {
+        bpf_dynptr_clone(dp(&ptr), dpm(&clone));
+    }
+
+    bpf_ringbuf_submit_dynptr(dpv(&ptr), 0);
+
+    /* this should fail */
+    bpf_dynptr_read(read_data.as_mut_ptr() as *mut c_void, 64, dp(&clone), 0, 0);
+
+    0
+}
+
+/* Invalidating a dynptr should invalidate its parent */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn clone_invalidate2(_ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let clone = MaybeUninit::<bpf_dynptr>::uninit();
+    let mut read_data = MaybeUninit::<[u8; 64]>::uninit();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, unsafe { val } as u32, 0, dpv(&ptr));
+
+    unsafe {
+        bpf_dynptr_clone(dp(&ptr), dpm(&clone));
+    }
+
+    bpf_ringbuf_submit_dynptr(dpv(&clone), 0);
+
+    /* this should fail */
+    bpf_dynptr_read(read_data.as_mut_ptr() as *mut c_void, 64, dp(&ptr), 0, 0);
+
+    0
+}
+
+/* Invalidating a dynptr should invalidate its siblings */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn clone_invalidate3(_ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let clone1 = MaybeUninit::<bpf_dynptr>::uninit();
+    let clone2 = MaybeUninit::<bpf_dynptr>::uninit();
+    let mut read_data = MaybeUninit::<[u8; 64]>::uninit();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, unsafe { val } as u32, 0, dpv(&ptr));
+
+    unsafe {
+        bpf_dynptr_clone(dp(&ptr), dpm(&clone1));
+
+        bpf_dynptr_clone(dp(&ptr), dpm(&clone2));
+    }
+
+    bpf_ringbuf_submit_dynptr(dpv(&clone2), 0);
+
+    /* this should fail */
+    bpf_dynptr_read(read_data.as_mut_ptr() as *mut c_void, 64, dp(&clone1), 0, 0);
+
+    0
+}
+
+/* Invalidating a dynptr should invalidate any data slices
+ * of its clones
+ */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn clone_invalidate4(_ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let clone = MaybeUninit::<bpf_dynptr>::uninit();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, unsafe { val } as u32, 0, dpv(&ptr));
+
+    unsafe {
+        bpf_dynptr_clone(dp(&ptr), dpm(&clone));
+    }
+    let data = bpf_dynptr_data(dpv(&clone), 0, 4) as *mut i32;
+    if data.is_null() {
+        return 0;
+    }
+
+    bpf_ringbuf_submit_dynptr(dpv(&ptr), 0);
+
+    /* this should fail */
+    unsafe {
+        *data = 123;
+    }
+
+    0
+}
+
+#[inline(never)]
+fn clone_slice_in_subprog(ptr: *mut bpf_dynptr, data: *mut *mut i32) {
+    let clone = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        bpf_dynptr_clone(ptr, dpm(&clone));
+        *data = bpf_dynptr_data(dpv(&clone), 0, 4) as *mut i32;
+    }
+}
+
+#[inline(never)]
+fn caller_slice_in_subprog(ptr: *mut bpf_dynptr, data: *mut *mut i32) {
+    let clone = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        *data = bpf_dynptr_data(ptr as *mut c_void, 0, 4) as *mut i32;
+        bpf_dynptr_clone(ptr, dpm(&clone));
+    }
+}
+
+#[inline(never)]
+fn reserve_dynptr_in_subprog() {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, unsafe { val } as u32, 0, dpv(&ptr));
+}
+
+/* A subprogram cannot lose the last dynptr that can release a resource. */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn referenced_dynptr_lost_on_subprog_return(_ctx: *mut c_void) -> i32 {
+    reserve_dynptr_in_subprog();
+
+    0
+}
+
+/*
+ * Destroying a callee-local clone on return must not invalidate a slice whose
+ * source dynptr belongs to the caller.
+ */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn caller_dynptr_slice_across_subprog_valid(_ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let mut data: *mut i32 = core::ptr::null_mut();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, unsafe { val } as u32, 0, dpv(&ptr));
+    caller_slice_in_subprog(dpm(&ptr), &mut data);
+    if !data.is_null() {
+        unsafe {
+            *data = 123;
+        }
+    }
+    bpf_ringbuf_submit_dynptr(dpv(&ptr), 0);
+
+    0
+}
+
+/*
+ * A slice derived from a callee-local clone is invalid after the subprogram
+ * returns.
+ */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn callee_dynptr_slice_invalid_after_return(_ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let mut data: *mut i32 = core::ptr::null_mut();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, unsafe { val } as u32, 0, dpv(&ptr));
+    clone_slice_in_subprog(dpm(&ptr), &mut data);
+    if !data.is_null() {
+        /* this should fail */
+        unsafe {
+            *data = 123;
+        }
+    }
+    bpf_ringbuf_submit_dynptr(dpv(&ptr), 0);
+
+    0
+}
+
+/*
+ * A slice from a caller-owned dynptr survives the subprogram return, but
+ * releasing the shared reservation must invalidate it.
+ */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn caller_dynptr_slice_release_after_subprog_invalid(_ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let mut data: *mut i32 = core::ptr::null_mut();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, unsafe { val } as u32, 0, dpv(&ptr));
+    caller_slice_in_subprog(dpm(&ptr), &mut data);
+    bpf_ringbuf_submit_dynptr(dpv(&ptr), 0);
+    if !data.is_null() {
+        /* this should fail */
+        unsafe {
+            *data = 123;
+        }
+    }
+
+    0
+}
+
+/* Invalidating a dynptr should invalidate any data slices
+ * of its parent
+ */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn clone_invalidate5(_ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let clone = MaybeUninit::<bpf_dynptr>::uninit();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, unsafe { val } as u32, 0, dpv(&ptr));
+    let data = bpf_dynptr_data(dpv(&ptr), 0, 4) as *mut i32;
+    if data.is_null() {
+        return 0;
+    }
+
+    unsafe {
+        bpf_dynptr_clone(dp(&ptr), dpm(&clone));
+    }
+
+    bpf_ringbuf_submit_dynptr(dpv(&clone), 0);
+
+    /* this should fail */
+    unsafe {
+        *data = 123;
+    }
+
+    0
+}
+
+/* Invalidating a dynptr should invalidate any data slices
+ * of its sibling
+ */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn clone_invalidate6(_ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let clone1 = MaybeUninit::<bpf_dynptr>::uninit();
+    let clone2 = MaybeUninit::<bpf_dynptr>::uninit();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, unsafe { val } as u32, 0, dpv(&ptr));
+
+    unsafe {
+        bpf_dynptr_clone(dp(&ptr), dpm(&clone1));
+
+        bpf_dynptr_clone(dp(&ptr), dpm(&clone2));
+    }
+
+    let data = bpf_dynptr_data(dpv(&clone1), 0, 4) as *mut i32;
+    if data.is_null() {
+        return 0;
+    }
+
+    bpf_ringbuf_submit_dynptr(dpv(&clone2), 0);
+
+    /* this should fail */
+    unsafe {
+        *data = 123;
+    }
+
+    0
+}
+
+/* A skb clone's data slices should be invalid anytime packet data changes */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn clone_skb_packet_data(skb: *mut __sk_buff) -> i32 {
+    let mut buffer: [u8; 4] = [0; 4];
+    let clone = MaybeUninit::<bpf_dynptr>::uninit();
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        bpf_dynptr_from_skb(skb as *mut c_void, 0, dpm(&ptr));
+
+        bpf_dynptr_clone(dp(&ptr), dpm(&clone));
+    }
+    let data = unsafe { bpf_dynptr_slice_rdwr(dp(&clone), 0, buffer.as_mut_ptr() as *mut c_void, 4) }
+        as *mut u32;
+    if data.is_null() {
+        return XDP_DROP;
+    }
+
+    if bpf_skb_pull_data(skb as *const c_void, unsafe { (*skb).len }) != 0 {
+        return SK_DROP;
+    }
+
+    /* this should fail */
+    unsafe {
+        *data = 123;
+    }
+
+    0
+}
+
+/* A skb clone's metadata slice becomes invalid anytime packet data changes */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn clone_skb_packet_meta(skb: *mut __sk_buff) -> i32 {
+    let clone = MaybeUninit::<bpf_dynptr>::uninit();
+    let meta = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        bpf_dynptr_from_skb_meta(skb as *mut c_void, 0, dpm(&meta));
+        bpf_dynptr_clone(dp(&meta), dpm(&clone));
+    }
+    let md = unsafe { bpf_dynptr_slice_rdwr(dp(&clone), 0, core::ptr::null_mut(), 1) } as *mut u8;
+    if md.is_null() {
+        return SK_DROP;
+    }
+
+    if bpf_skb_pull_data(skb as *const c_void, unsafe { (*skb).len }) != 0 {
+        return SK_DROP;
+    }
+
+    /* this should fail */
+    unsafe {
+        *md = 42;
+    }
+
+    0
+}
+
+/* A xdp clone's data slices should be invalid anytime packet data changes */
+#[link_section = "?xdp"]
+#[no_mangle]
+extern "C" fn clone_xdp_packet_data(xdp: *mut xdp_md) -> i32 {
+    let mut buffer: [u8; 4] = [0; 4];
+    let clone = MaybeUninit::<bpf_dynptr>::uninit();
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        bpf_dynptr_from_xdp(xdp, 0, dpm(&ptr));
+
+        bpf_dynptr_clone(dp(&ptr), dpm(&clone));
+    }
+    let data = unsafe { bpf_dynptr_slice_rdwr(dp(&clone), 0, buffer.as_mut_ptr() as *mut c_void, 4) }
+        as *mut u32;
+    if data.is_null() {
+        return XDP_DROP;
+    }
+
+    /* C: bpf_xdp_adjust_head(xdp, 0 - (int)sizeof(*hdr)) with struct ethhdr *hdr */
+    if bpf_xdp_adjust_head(xdp, 0 - 14) != 0 {
+        return XDP_DROP;
+    }
+
+    /* this should fail */
+    unsafe {
+        *data = 123;
+    }
+
+    0
+}
+
+/* Buffers that are provided must be sufficiently long */
+#[link_section = "?cgroup_skb/egress"]
+#[no_mangle]
+extern "C" fn test_dynptr_skb_small_buff(skb: *mut __sk_buff) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let mut buffer: [u8; 8] = [0; 8];
+
+    if unsafe { bpf_dynptr_from_skb(skb as *mut c_void, 0, dpm(&ptr)) } != 0 {
+        unsafe {
+            err = 1;
+        }
+        return 1;
+    }
+
+    /* This may return NULL. SKB may require a buffer */
+    let data = unsafe { bpf_dynptr_slice(dp(&ptr), 0, buffer.as_mut_ptr() as *mut c_void, 9) }
+        as *mut u64;
+
+    (!data.is_null()) as i32
+}
+
+#[no_mangle]
+#[inline(never)]
+extern "C" fn global_call_bpf_dynptr(dynptr: *const bpf_dynptr) -> i64 {
+    let mut ret: *mut u8 = core::ptr::null_mut();
+    /* Avoid leaving this global function empty to avoid having the compiler
+     * optimize away the call to this global function.
+     */
+    let mut d = dynptr as *mut bpf_dynptr;
+    sink(&mut d);
+    sink(&mut ret);
+    ret as i64
+}
+
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn test_dynptr_reg_type(_ctx: *mut c_void) -> i32 {
+    let current = bpf_get_current_task_btf::<task_struct>();
+    /* R1 holds a PTR_TO_BTF_ID, which cannot be passed to a function
+     * accepting ARG_PTR_TO_DYNPTR | MEM_RDONLY.
+     */
+    global_call_bpf_dynptr(current as *const bpf_dynptr);
+    0
+}
+
+/* Overwriting a referenced dynptr is allowed if a clone still holds the ref */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_overwrite_ref_with_clone(_ctx: *mut c_void) -> i32 {
+    /* reverse-declared (clone_invalid1) */
+    let clone = MaybeUninit::<bpf_dynptr>::uninit();
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, 64, 0, dpv(&ptr));
+
+    unsafe {
+        bpf_dynptr_clone(dp(&ptr), dpm(&clone));
+    }
+
+    /* Overwrite the original - clone still holds the ref */
+    unsafe {
+        write_volatile(dpv(&ptr) as *mut u8, 0);
+    }
+
+    bpf_ringbuf_discard_dynptr(dpv(&clone), 0);
+
+    0
+}
+
+/* Overwriting the last referenced dynptr should still be rejected */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_overwrite_ref_last_clone(_ctx: *mut c_void) -> i32 {
+    /* reverse-declared (clone_invalid1) */
+    let clone = MaybeUninit::<bpf_dynptr>::uninit();
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, 64, 0, dpv(&ptr));
+
+    unsafe {
+        bpf_dynptr_clone(dp(&ptr), dpm(&clone));
+    }
+
+    /* Overwrite the original - clone still holds the ref, OK */
+    unsafe {
+        write_volatile(dpv(&ptr) as *mut u8, 0);
+    }
+
+    /* Overwrite the last holder - this should fail */
+    unsafe {
+        write_volatile(dpv(&clone) as *mut u8, 0);
+    }
+
+    0
+}
+
+/* Overwriting a clone should be allowed if the original still holds the ref */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_overwrite_clone_with_original(_ctx: *mut c_void) -> i32 {
+    /* reverse-declared (clone_invalid1) */
+    let clone = MaybeUninit::<bpf_dynptr>::uninit();
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, 64, 0, dpv(&ptr));
+
+    unsafe {
+        bpf_dynptr_clone(dp(&ptr), dpm(&clone));
+    }
+
+    /* Overwrite the clone - original still holds the ref */
+    unsafe {
+        write_volatile(dpv(&clone) as *mut u8, 0);
+    }
+
+    bpf_ringbuf_discard_dynptr(dpv(&ptr), 0);
+
+    0
+}
+
+/* Data slices from the destroyed dynptr should be invalidated */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_overwrite_ref_invalidate_slice(_ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let clone = MaybeUninit::<bpf_dynptr>::uninit();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, unsafe { val } as u32, 0, dpv(&ptr));
+
+    let data = bpf_dynptr_data(dpv(&ptr), 0, 4) as *mut i32;
+    if data.is_null() {
+        return 0;
+    }
+
+    unsafe {
+        bpf_dynptr_clone(dp(&ptr), dpm(&clone));
+    }
+
+    /* Overwrite the original - clone holds the ref */
+    unsafe {
+        write_volatile(dpv(&ptr) as *mut u8, 0);
+    }
+
+    /* data was from the original dynptr, should be invalid now */
+    unsafe {
+        *data = 123;
+    }
+
+    0
+}
+
+/*
+ * Data slices from a dynptr clone should remain valid after
+ * overwriting the original dynptr
+ */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_overwrite_ref_clone_slice_valid(_ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let clone = MaybeUninit::<bpf_dynptr>::uninit();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, unsafe { val } as u32, 0, dpv(&ptr));
+
+    unsafe {
+        bpf_dynptr_clone(dp(&ptr), dpm(&clone));
+    }
+
+    let data = bpf_dynptr_data(dpv(&clone), 0, 4) as *mut i32;
+    if data.is_null() {
+        bpf_ringbuf_discard_dynptr(dpv(&clone), 0);
+        return 0;
+    }
+
+    /* Overwrite the original - clone holds the ref */
+    unsafe {
+        write_volatile(dpv(&ptr) as *mut u8, 0);
+    }
+
+    /* data is from the clone, should still be valid */
+    unsafe {
+        *data = 123;
+    }
+
+    bpf_ringbuf_discard_dynptr(dpv(&clone), 0);
 
     0
 }

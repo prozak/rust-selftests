@@ -73,6 +73,11 @@ bpf_mod_race	1670cefed4e82f99ad9f006eb3ed5c2e	39e03483c6271d65f09084947eb54a3a	0
 bpf_nop_bench	4505999897976905d5f547587baf97f7	c4e7b7cb47a5eafc6675a47cbe8f8c33	001bf3ff93806cfb828ff6d3e9c82b0d	NO-ORACLE	1	no consuming prog_tests
 bpf_qdisc_dynptr_use_after_invalidate_clone	c73ffabb309147f2ea6434bc21689534	6e784eca8f8056b548355723d4e24801	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	5	Summary: 1/11 PASSED, 0 SKIPPED, 0/0 FAILED
 bpf_qdisc_fail__incompl_ops	f716280859390a34869dd2d06338e6fe	b54dff7ef9d5e700c460600a96f248a9	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	6	Summary: 2/11 PASSED, 0 SKIPPED, 0/0 FAILED
+bpf_qdisc_fail__invalid_dynptr	511caaf228ec19d3a0adfcc5883e357c	f067f3311d8c4f052fd34a0b3ea8b22a	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	13	Summary: 1/11 PASSED, 0 SKIPPED, 0/0 FAILED
+bpf_qdisc_fail__invalid_dynptr_cross_frame	14f8c94cf1760365798bbf13b7d13e7a	8b06247b26e83f7e26fa145305c2b7fe	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	13	Summary: 1/11 PASSED, 0 SKIPPED, 0/0 FAILED
+bpf_qdisc_fail__invalid_dynptr_returned_slice	a4382506e805fba805aa5beb8ebe6953	0cf95a05189c822c397fa3d11e3a7a24	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	13	Summary: 1/11 PASSED, 0 SKIPPED, 0/0 FAILED
+bpf_qdisc_fail__invalid_dynptr_slice	3e9d5f1b53af2bfb9ae0361950dffc79	4998ced05baf8766de43bcb1894335fb	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	13	Summary: 1/11 PASSED, 0 SKIPPED, 0/0 FAILED
+bpf_qdisc_fail__untrusted_write	0a39e8d5664daef8e74d164fa09823e4	84d5c81d9ee1195ff7627bb541cac23e	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	13	Summary: 1/11 PASSED, 0 SKIPPED, 0/0 FAILED
 bpf_qdisc_fifo	cac60224a64baba045a206b3c2f95b06	9be1af8722d8b97efca9862a069c8943	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	6	Summary: 2/11 PASSED, 0 SKIPPED, 0/0 FAILED
 bpf_qdisc_fq	4731aebe3c68461640090c808119bc21	ab2b4c94470e633e33d15bad5278226f	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	6	Summary: 2/11 PASSED, 0 SKIPPED, 0/0 FAILED
 bpf_smc	c675f40d116caa676b357c18f0d4618b	720dfbbee3bf000f02e6efebf00ad325	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	4	Summary: 1/1 PASSED, 0 SKIPPED, 0/0 FAILED

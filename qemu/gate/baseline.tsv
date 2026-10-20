@@ -398,6 +398,10 @@ struct_ops_forgotten_cb	6c0036c8e72bddc61a5b6b0ca6aa41b8	bd5a544285a9098d5f953ce
 struct_ops_id_ops_mapping1	852f3e3c79b0e670a596d3c5f7bc9e5d	06d0b03de1d3561ee351a38cb29d72c2	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	3	Summary: 1/1 PASSED, 0 SKIPPED, 0/0 FAILED
 struct_ops_id_ops_mapping2	d87c54e684efa1897ea7d72e3f2a9257	a176e489b1d918995d583612ebc48667	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	3	Summary: 1/1 PASSED, 0 SKIPPED, 0/0 FAILED
 struct_ops_kptr_return	7c0772b04baf2727ec0d8adb2eb923c4	a5ac00c160942a706b96bd5f6f22c40c	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	3	Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED
+struct_ops_kptr_return_fail__invalid_scalar	20c18c8ba7e9aadaf2345e5adf677233	ac191ad508a1ac68d841dbc81e79ccc7	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	9	Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED
+struct_ops_kptr_return_fail__local_kptr	3340f957eaf07e1ec9672572ed0eb6fc	d21e64966a5c67d61a9cc1b7e3550ff1	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	12	Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED
+struct_ops_kptr_return_fail__nonzero_offset	5be5a7ee8d5245558ef07f47d9b8a8a6	02f389d5d7d25e90dac7a24ded073d06	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	11	Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED
+struct_ops_kptr_return_fail__wrong_type	65db04c31aa33cc5e7906ea55971cea3	0152284f002e6b16c97a1bd824796a56	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	12	Summary: 1/5 PASSED, 0 SKIPPED, 0/0 FAILED
 struct_ops_maybe_null	7f21cef0c8a984cc456f69b15e3a6bc1	b001c896c572846886e51d08d1de8d2a	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	3	Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED
 struct_ops_maybe_null_fail	d0c8ace591765006c9282a3bea6b2e13	f1fff72d93f454a85692c8d0b7ee00cc	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	3	Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED
 struct_ops_module	5ed65ba8cc91928b794a3de610339cef	4c70dd0334bdd76b1748544020acd14c	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	3	Summary: 1/7 PASSED, 0 SKIPPED, 0/0 FAILED
@@ -409,6 +413,7 @@ struct_ops_private_stack_fail	66ee4b66621850e4fea2a3bd50145c16	d3663d1ee1b6065c6
 struct_ops_private_stack_large	48da5a9f0d277849bb973bf5a2c9ad21	dba146dd944f862dfc43c254782ef98e	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	3	Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED
 struct_ops_private_stack_recur	9fdc8d9638b35bae655a0a647cf6d27f	42e6fd5bc67165f05b0d8fad02bab507	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	3	Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED
 struct_ops_refcounted	16ce1c1a78bf26794bf489bba17f5183	871cec5fba41a66474b3642777be094f	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	3	Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED
+struct_ops_refcounted_fail__global_subprog	e4df6438069545e6c53757540493c27e	bab32632aa222fbd349c3ab87601065c	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	11	Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED
 struct_ops_refcounted_fail__ref_leak	ce14ef7dd44c7567dc048985cdc39246	c748d3c37c30c43e420278da84e08c86	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	11	Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED
 struct_ops_refcounted_fail__tail_call	7d1542d07c86dcd2a6c50d5161b0215a	ef62b3c985630b2ed75e49b60afb3c36	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	11	Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED
 summarization	8e15f9a2b0d247f6a2eb0e613613c0be	ffe94041e8c5fe76d13e9ddf95a217d2	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	3	Summary: 1/6 PASSED, 2 SKIPPED, 0/0 FAILED
@@ -664,6 +669,7 @@ test_tcp_hdr_options	e16510cd8931f40ec8cb826feb0070cb	29fe4961a4179d57b1a188c2bc
 test_tcpbpf_kern	9e36dfa35752b6d9f103d76aed47baaf	93ae30f688b69d83ecb505455f15f03a	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	4	Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED
 test_tcpnotify_kern	7625430e1e012863e6b9edbbe604cb8c	628933d53f1f849e30c3c6c79f485624	001bf3ff93806cfb828ff6d3e9c82b0d	NO-ORACLE	0	no consuming prog_tests
 test_time_tai	41f56a5e1b3fa7b3f687a87c1d207f56	ccedf78fc60d74b234a45548ac6d6067	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	4	Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED
+test_tp_btf_nullable	e5015e2c8d5b93c7854ca5da958f8edf	1af830df607ad0aba3989411d40c33c7	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	12	Summary: 1/2 PASSED, 0 SKIPPED, 0/0 FAILED
 test_trace_ext	7c744ea2a7fdc914155537628231a3e1	79a77e14818db5156843b9f34540b5fb	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	4	Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED
 test_trace_ext_tracing	8861e53a35c984b0d965233d9ed55827	22badf8871671fa5577d091497088710	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	4	Summary: 1/0 PASSED, 0 SKIPPED, 0/0 FAILED
 test_tracepoint	17d927d4819550cd0ab4125ed79e4fde	5265d4a51d35b09b1dabe685baaacc4a	001bf3ff93806cfb828ff6d3e9c82b0d	PASS	2	Summary: 2/0 PASSED, 0 SKIPPED, 0/0 FAILED

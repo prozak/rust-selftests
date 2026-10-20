@@ -17,10 +17,10 @@
 // on the C object's own format strings (the `<prog>.____fmt` statics of
 // the generated file); int arguments are sign-extended as clang does.
 
-use bpf_rs_core::helpers::sink;
+use bpf_rs_core::helpers::{bpf_get_current_comm, bpf_get_prandom_u32, bpf_map_lookup_elem, bpf_probe_read_kernel, sink};
 use core::hint::black_box;
 use core::mem::MaybeUninit;
-use core::ptr::{addr_of, addr_of_mut, read_volatile};
+use core::ptr::{addr_of, addr_of_mut, read_volatile, write_volatile};
 
 // HAND: iter_err_unsafe_c_loop
 //   SEC("?raw_tp")
@@ -866,4 +866,1031 @@ extern "C" fn iter_array_fill(_ctx: *mut c_void) -> i32 {
     }
 
     0
+}
+
+// The %s argument of two bpf_printk()s below: the C's "\n" / "" literals.
+#[link_section = ".rodata.str"]
+static NEWLINE_STR: [i8; 2] = [10, 0];
+#[link_section = ".rodata.str"]
+static EMPTY_STR: [i8; 1] = [0];
+
+// HAND: iter_nested_iters
+//   static int arr2d[4][5];
+//   static int arr2d_row_sums[4];
+//   static int arr2d_col_sums[5];
+//
+//   SEC("raw_tp")
+//   __success
+//   int iter_nested_iters(const void *ctx)
+//   {
+//       int sum, row, col;
+//
+//       MY_PID_GUARD();
+//
+//       bpf_for(row, 0, ARRAY_SIZE(arr2d)) {
+//           bpf_for( col, 0, ARRAY_SIZE(arr2d[0])) {
+//               arr2d[row][col] = row * col;
+//           }
+//       }
+//
+//       /* zero-initialize sums */
+//       sum = 0;
+//       bpf_for(row, 0, ARRAY_SIZE(arr2d)) {
+//           arr2d_row_sums[row] = 0;
+//       }
+//       bpf_for(col, 0, ARRAY_SIZE(arr2d[0])) {
+//           arr2d_col_sums[col] = 0;
+//       }
+//
+//       /* calculate sums */
+//       bpf_for(row, 0, ARRAY_SIZE(arr2d)) {
+//           bpf_for(col, 0, ARRAY_SIZE(arr2d[0])) {
+//               sum += arr2d[row][col];
+//               arr2d_row_sums[row] += arr2d[row][col];
+//               arr2d_col_sums[col] += arr2d[row][col];
+//           }
+//       }
+//
+//       bpf_printk("ITER_NESTED_ITERS: total sum=%d", sum);
+//       bpf_for(row, 0, ARRAY_SIZE(arr2d)) {
+//           bpf_printk("ITER_NESTED_ITERS: row #%d sum=%d", row, arr2d_row_sums[row]);
+//       }
+//       bpf_for(col, 0, ARRAY_SIZE(arr2d[0])) {
+//           bpf_printk("ITER_NESTED_ITERS: col #%d sum=%d%s",
+//                  col, arr2d_col_sums[col],
+//                  col == ARRAY_SIZE(arr2d[0]) - 1 ? "\n" : "");
+//       }
+//
+//       return 0;
+//   }
+// arr2d[row][col] is the row-major element row * 5 + col of the static.
+#[link_section = "raw_tp"]
+#[no_mangle]
+extern "C" fn iter_nested_iters(_ctx: *mut c_void) -> i32 {
+    let mut sum: i32;
+
+    unsafe {
+        let a2d = addr_of_mut!(arr2d).cast::<i32>();
+        let rows = addr_of_mut!(arr2d_row_sums).cast::<i32>();
+        let cols = addr_of_mut!(arr2d_col_sums).cast::<i32>();
+
+        bpf_for!(row, 0, 4, {
+            bpf_for!(col, 0, 5, {
+                a2d.wrapping_offset((row * 5 + col) as isize).write(row.wrapping_mul(col));
+            });
+        });
+
+        /* zero-initialize sums */
+        sum = 0;
+        bpf_for!(row, 0, 4, {
+            rows.wrapping_offset(row as isize).write(0);
+        });
+        bpf_for!(col, 0, 5, {
+            cols.wrapping_offset(col as isize).write(0);
+        });
+
+        /* calculate sums */
+        bpf_for!(row, 0, 4, {
+            bpf_for!(col, 0, 5, {
+                let v = a2d.wrapping_offset((row * 5 + col) as isize).read();
+                sum = sum.wrapping_add(v);
+                let rp = rows.wrapping_offset(row as isize);
+                rp.write(rp.read().wrapping_add(v));
+                let cp = cols.wrapping_offset(col as isize);
+                cp.write(cp.read().wrapping_add(v));
+            });
+        });
+
+        printk1(&iter_nested_iters_____fmt, sum as i64 as u64);
+        bpf_for!(row, 0, 4, {
+            printk2(
+                &iter_nested_iters_____fmt_14,
+                row as i64 as u64,
+                rows.wrapping_offset(row as isize).read() as i64 as u64,
+            );
+        });
+        bpf_for!(col, 0, 5, {
+            printk3(
+                &iter_nested_iters_____fmt_15,
+                col as i64 as u64,
+                cols.wrapping_offset(col as isize).read() as i64 as u64,
+                (if col == 5 - 1 { NEWLINE_STR.as_ptr() } else { EMPTY_STR.as_ptr() }) as u64,
+            );
+        });
+    }
+
+    0
+}
+
+// HAND: iter_nested_deeply_iters
+//   SEC("raw_tp")
+//   __success
+//   int iter_nested_deeply_iters(const void *ctx)
+//   {
+//       int sum = 0;
+//
+//       MY_PID_GUARD();
+//
+//       bpf_repeat(10) {
+//           bpf_repeat(10) {
+//               bpf_repeat(10) {
+//                   bpf_repeat(10) {
+//                       bpf_repeat(10) {
+//                           sum += 1;
+//                       }
+//                   }
+//               }
+//           }
+//           /* validate that we can break from inside bpf_repeat() */
+//           break;
+//       }
+//
+//       return sum;
+//   }
+#[link_section = "raw_tp"]
+#[no_mangle]
+extern "C" fn iter_nested_deeply_iters(_ctx: *mut c_void) -> i32 {
+    let mut sum: i32 = 0;
+
+    unsafe {
+        bpf_repeat!(10, {
+            bpf_repeat!(10, {
+                bpf_repeat!(10, {
+                    bpf_repeat!(10, {
+                        bpf_repeat!(10, {
+                            sum = sum.wrapping_add(1);
+                        });
+                    });
+                });
+            });
+            /* validate that we can break from inside bpf_repeat() */
+            break;
+        });
+    }
+
+    sum
+}
+
+// HAND: fill_inner_dimension
+//   static __noinline void fill_inner_dimension(int row)
+//   {
+//       int col;
+//
+//       bpf_for(col, 0, ARRAY_SIZE(arr2d[0])) {
+//           arr2d[row][col] = row * col;
+//       }
+//   }
+#[no_mangle]
+#[inline(never)]
+extern "C" fn fill_inner_dimension(row: i32) {
+    unsafe {
+        let a2d = addr_of_mut!(arr2d).cast::<i32>();
+
+        bpf_for!(col, 0, 5, {
+            a2d.wrapping_offset((row * 5 + col) as isize).write(row.wrapping_mul(col));
+        });
+    }
+}
+
+// HAND: sum_inner_dimension
+//   static __noinline int sum_inner_dimension(int row)
+//   {
+//       int sum = 0, col;
+//
+//       bpf_for(col, 0, ARRAY_SIZE(arr2d[0])) {
+//           sum += arr2d[row][col];
+//           arr2d_row_sums[row] += arr2d[row][col];
+//           arr2d_col_sums[col] += arr2d[row][col];
+//       }
+//
+//       return sum;
+//   }
+#[no_mangle]
+#[inline(never)]
+extern "C" fn sum_inner_dimension(row: i32) -> i32 {
+    let mut sum: i32 = 0;
+
+    unsafe {
+        let a2d = addr_of_mut!(arr2d).cast::<i32>();
+        let rows = addr_of_mut!(arr2d_row_sums).cast::<i32>();
+        let cols = addr_of_mut!(arr2d_col_sums).cast::<i32>();
+
+        bpf_for!(col, 0, 5, {
+            let v = a2d.wrapping_offset((row * 5 + col) as isize).read();
+            sum = sum.wrapping_add(v);
+            let rp = rows.wrapping_offset(row as isize);
+            rp.write(rp.read().wrapping_add(v));
+            let cp = cols.wrapping_offset(col as isize);
+            cp.write(cp.read().wrapping_add(v));
+        });
+    }
+
+    sum
+}
+
+// HAND: iter_subprog_iters
+//   SEC("raw_tp")
+//   __success
+//   int iter_subprog_iters(const void *ctx)
+//   {
+//       int sum, row, col;
+//
+//       MY_PID_GUARD();
+//
+//       bpf_for(row, 0, ARRAY_SIZE(arr2d)) {
+//           fill_inner_dimension(row);
+//       }
+//
+//       /* zero-initialize sums */
+//       sum = 0;
+//       bpf_for(row, 0, ARRAY_SIZE(arr2d)) {
+//           arr2d_row_sums[row] = 0;
+//       }
+//       bpf_for(col, 0, ARRAY_SIZE(arr2d[0])) {
+//           arr2d_col_sums[col] = 0;
+//       }
+//
+//       /* calculate sums */
+//       bpf_for(row, 0, ARRAY_SIZE(arr2d)) {
+//           sum += sum_inner_dimension(row);
+//       }
+//
+//       bpf_printk("ITER_SUBPROG_ITERS: total sum=%d", sum);
+//       bpf_for(row, 0, ARRAY_SIZE(arr2d)) {
+//           bpf_printk("ITER_SUBPROG_ITERS: row #%d sum=%d",
+//                  row, arr2d_row_sums[row]);
+//       }
+//       bpf_for(col, 0, ARRAY_SIZE(arr2d[0])) {
+//           bpf_printk("ITER_SUBPROG_ITERS: col #%d sum=%d%s",
+//                  col, arr2d_col_sums[col],
+//                  col == ARRAY_SIZE(arr2d[0]) - 1 ? "\n" : "");
+//       }
+//
+//       return 0;
+//   }
+#[link_section = "raw_tp"]
+#[no_mangle]
+extern "C" fn iter_subprog_iters(_ctx: *mut c_void) -> i32 {
+    let mut sum: i32;
+
+    unsafe {
+        let rows = addr_of_mut!(arr2d_row_sums).cast::<i32>();
+        let cols = addr_of_mut!(arr2d_col_sums).cast::<i32>();
+
+        bpf_for!(row, 0, 4, {
+            fill_inner_dimension(row);
+        });
+
+        /* zero-initialize sums */
+        sum = 0;
+        bpf_for!(row, 0, 4, {
+            rows.wrapping_offset(row as isize).write(0);
+        });
+        bpf_for!(col, 0, 5, {
+            cols.wrapping_offset(col as isize).write(0);
+        });
+
+        /* calculate sums */
+        bpf_for!(row, 0, 4, {
+            sum = sum.wrapping_add(sum_inner_dimension(row));
+        });
+
+        printk1(&iter_subprog_iters_____fmt, sum as i64 as u64);
+        bpf_for!(row, 0, 4, {
+            printk2(
+                &iter_subprog_iters_____fmt_17,
+                row as i64 as u64,
+                rows.wrapping_offset(row as isize).read() as i64 as u64,
+            );
+        });
+        bpf_for!(col, 0, 5, {
+            printk3(
+                &iter_subprog_iters_____fmt_18,
+                col as i64 as u64,
+                cols.wrapping_offset(col as isize).read() as i64 as u64,
+                (if col == 5 - 1 { NEWLINE_STR.as_ptr() } else { EMPTY_STR.as_ptr() }) as u64,
+            );
+        });
+    }
+
+    0
+}
+
+// The map_val stores of the four hash_map programs are write_volatile: the
+// expected messages are about the pointer's state at the store, and a plain
+// store through a pointer LLVM can see is NULL on a path is one it may fold
+// (the path would be undefined behaviour); the C compiles the store as is.
+
+// HAND: iter_err_too_permissive1
+//   SEC("?raw_tp")
+//   __failure __msg("invalid mem access 'scalar'")
+//   int iter_err_too_permissive1(const void *ctx)
+//   {
+//       int *map_val = NULL;
+//       int key = 0;
+//
+//       MY_PID_GUARD();
+//
+//       map_val = bpf_map_lookup_elem(&hash_map, &key);
+//       if (!map_val)
+//           return 0;
+//
+//       bpf_repeat(1000000) {
+//           map_val = NULL;
+//       }
+//
+//       *map_val = 123;
+//
+//       return 0;
+//   }
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn iter_err_too_permissive1(_ctx: *mut c_void) -> i32 {
+    let mut map_val: *mut i32;
+    let key: i32 = 0;
+
+    unsafe {
+        map_val = bpf_map_lookup_elem(&hash_map, &key) as *mut i32;
+        if map_val.is_null() {
+            return 0;
+        }
+
+        bpf_repeat!(1000000, {
+            map_val = core::ptr::null_mut();
+        });
+
+        write_volatile(map_val, 123);
+    }
+
+    0
+}
+
+// HAND: iter_err_too_permissive2
+//   SEC("?raw_tp")
+//   __failure __msg("invalid mem access 'map_value_or_null'")
+//   int iter_err_too_permissive2(const void *ctx)
+//   {
+//       int *map_val = NULL;
+//       int key = 0;
+//
+//       MY_PID_GUARD();
+//
+//       map_val = bpf_map_lookup_elem(&hash_map, &key);
+//       if (!map_val)
+//           return 0;
+//
+//       bpf_repeat(1000000) {
+//           map_val = bpf_map_lookup_elem(&hash_map, &key);
+//       }
+//
+//       *map_val = 123;
+//
+//       return 0;
+//   }
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn iter_err_too_permissive2(_ctx: *mut c_void) -> i32 {
+    let mut map_val: *mut i32;
+    let key: i32 = 0;
+
+    unsafe {
+        map_val = bpf_map_lookup_elem(&hash_map, &key) as *mut i32;
+        if map_val.is_null() {
+            return 0;
+        }
+
+        bpf_repeat!(1000000, {
+            map_val = bpf_map_lookup_elem(&hash_map, &key) as *mut i32;
+        });
+
+        write_volatile(map_val, 123);
+    }
+
+    0
+}
+
+// HAND: iter_err_too_permissive3
+//   SEC("?raw_tp")
+//   __failure __msg("invalid mem access 'map_value_or_null'")
+//   int iter_err_too_permissive3(const void *ctx)
+//   {
+//       int *map_val = NULL;
+//       int key = 0;
+//       bool found = false;
+//
+//       MY_PID_GUARD();
+//
+//       bpf_repeat(1000000) {
+//           map_val = bpf_map_lookup_elem(&hash_map, &key);
+//           found = true;
+//       }
+//
+//       if (found)
+//           *map_val = 123;
+//
+//       return 0;
+//   }
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn iter_err_too_permissive3(_ctx: *mut c_void) -> i32 {
+    let mut map_val: *mut i32 = core::ptr::null_mut();
+    let key: i32 = 0;
+    let mut found = false;
+
+    unsafe {
+        bpf_repeat!(1000000, {
+            map_val = bpf_map_lookup_elem(&hash_map, &key) as *mut i32;
+            found = true;
+        });
+
+        if found {
+            write_volatile(map_val, 123);
+        }
+    }
+
+    0
+}
+
+// HAND: iter_tricky_but_fine
+//   SEC("raw_tp")
+//   __success
+//   int iter_tricky_but_fine(const void *ctx)
+//   {
+//       int *map_val = NULL;
+//       int key = 0;
+//       bool found = false;
+//
+//       MY_PID_GUARD();
+//
+//       bpf_repeat(1000000) {
+//           map_val = bpf_map_lookup_elem(&hash_map, &key);
+//           if (map_val) {
+//               found = true;
+//               break;
+//           }
+//       }
+//
+//       if (found)
+//           *map_val = 123;
+//
+//       return 0;
+//   }
+#[link_section = "raw_tp"]
+#[no_mangle]
+extern "C" fn iter_tricky_but_fine(_ctx: *mut c_void) -> i32 {
+    let mut map_val: *mut i32 = core::ptr::null_mut();
+    let key: i32 = 0;
+    let mut found = false;
+
+    unsafe {
+        bpf_repeat!(1000000, {
+            map_val = bpf_map_lookup_elem(&hash_map, &key) as *mut i32;
+            if !map_val.is_null() {
+                found = true;
+                break;
+            }
+        });
+
+        if found {
+            write_volatile(map_val, 123);
+        }
+    }
+
+    0
+}
+
+// HAND: iter_stack_array_loop
+//   #define __bpf_memzero(p, sz) bpf_probe_read_kernel((p), (sz), 0)
+//
+//   SEC("raw_tp")
+//   __success
+//   int iter_stack_array_loop(const void *ctx)
+//   {
+//       long arr1[16], arr2[16], sum = 0;
+//       int i;
+//
+//       MY_PID_GUARD();
+//
+//       /* zero-init arr1 and arr2 in such a way that verifier doesn't know
+//        * it's all zeros; if we don't do that, we'll make BPF verifier track
+//        * all combination of zero/non-zero stack slots for arr1/arr2, which
+//        * will lead to O(2^(ARRAY_SIZE(arr1)+ARRAY_SIZE(arr2))) different
+//        * states
+//        */
+//       __bpf_memzero(arr1, sizeof(arr1));
+//       __bpf_memzero(arr2, sizeof(arr1));
+//
+//       /* validate that we can break and continue when using bpf_for() */
+//       bpf_for(i, 0, ARRAY_SIZE(arr1)) {
+//           if (i & 1) {
+//               arr1[i] = i;
+//               continue;
+//           } else {
+//               arr2[i] = i;
+//               break;
+//           }
+//       }
+//
+//       bpf_for(i, 0, ARRAY_SIZE(arr1)) {
+//           sum += arr1[i] + arr2[i];
+//       }
+//
+//       return sum;
+//   }
+#[link_section = "raw_tp"]
+#[no_mangle]
+extern "C" fn iter_stack_array_loop(_ctx: *mut c_void) -> i32 {
+    let mut arr1 = MaybeUninit::<[i64; 16]>::uninit();
+    let mut arr2 = MaybeUninit::<[i64; 16]>::uninit();
+    let mut sum: i64 = 0;
+
+    unsafe {
+        /* zero-init arr1 and arr2 in such a way that verifier doesn't know
+         * it's all zeros (see the C comment): bpf_probe_read_kernel() from
+         * address 0 fails and zero-fills the destination
+         */
+        bpf_probe_read_kernel(&mut arr1, 128, core::ptr::null());
+        bpf_probe_read_kernel(&mut arr2, 128, core::ptr::null());
+
+        let p1 = arr1.as_mut_ptr().cast::<i64>();
+        let p2 = arr2.as_mut_ptr().cast::<i64>();
+
+        /* validate that we can break and continue when using bpf_for() */
+        bpf_for!(i, 0, 16, {
+            if i & 1 != 0 {
+                p1.wrapping_offset(i as isize).write(i as i64);
+                continue;
+            } else {
+                p2.wrapping_offset(i as isize).write(i as i64);
+                break;
+            }
+        });
+
+        bpf_for!(i, 0, 16, {
+            sum = sum.wrapping_add(
+                p1.wrapping_offset(i as isize).read().wrapping_add(p2.wrapping_offset(i as isize).read()),
+            );
+        });
+    }
+
+    sum as i32
+}
+
+// HAND: fill
+//   static __noinline void fill(struct bpf_iter_num *it, int *arr, __u32 n, int mul)
+//   {
+//       int *t, i;
+//
+//       while ((t = bpf_iter_num_next(it))) {
+//           i = *t;
+//           if (i >= n)
+//               break;
+//           arr[i] =  i * mul;
+//       }
+//   }
+// `i >= n` compares int against __u32: unsigned, as the C's usual arithmetic
+// conversions do. The `arr` parameter is `a` here: a Rust parameter cannot
+// shadow the `arr` static (E0530); the BTF keeps the C's parameter name
+// only through the debug info, so the name differs.
+#[no_mangle]
+#[inline(never)]
+extern "C" fn fill(it: *mut bpf_iter_num, a: *mut i32, n: u32, mul: i32) {
+    unsafe {
+        loop {
+            let t = bpf_iter_num_next(it as *mut c_void) as *mut i32;
+            if t.is_null() {
+                break;
+            }
+            let i = *t;
+            if (i as u32) >= n {
+                break;
+            }
+            a.wrapping_offset(i as isize).write(i.wrapping_mul(mul));
+        }
+    }
+}
+
+// HAND: sum
+//   static __noinline int sum(struct bpf_iter_num *it, int *arr, __u32 n)
+//   {
+//       int *t, i, sum = 0;
+//
+//       while ((t = bpf_iter_num_next(it))) {
+//           i = *t;
+//           if ((__u32)i >= n)
+//               break;
+//           sum += arr[i];
+//       }
+//
+//       return sum;
+//   }
+#[no_mangle]
+#[inline(never)]
+extern "C" fn sum(it: *mut bpf_iter_num, a: *mut i32, n: u32) -> i32 {
+    let mut sum: i32 = 0;
+
+    unsafe {
+        loop {
+            let t = bpf_iter_num_next(it as *mut c_void) as *mut i32;
+            if t.is_null() {
+                break;
+            }
+            let i = *t;
+            if (i as u32) >= n {
+                break;
+            }
+            sum = sum.wrapping_add(a.wrapping_offset(i as isize).read());
+        }
+    }
+
+    sum
+}
+
+// HAND: iter_pass_iter_ptr_to_subprog
+//   SEC("raw_tp")
+//   __success
+//   int iter_pass_iter_ptr_to_subprog(const void *ctx)
+//   {
+//       int arr1[16], arr2[32];
+//       struct bpf_iter_num it;
+//       int n, sum1, sum2;
+//
+//       MY_PID_GUARD();
+//
+//       /* fill arr1 */
+//       n = ARRAY_SIZE(arr1);
+//       bpf_iter_num_new(&it, 0, n);
+//       fill(&it, arr1, n, 2);
+//       bpf_iter_num_destroy(&it);
+//
+//       /* fill arr2 */
+//       n = ARRAY_SIZE(arr2);
+//       bpf_iter_num_new(&it, 0, n);
+//       fill(&it, arr2, n, 10);
+//       bpf_iter_num_destroy(&it);
+//
+//       /* sum arr1 */
+//       n = ARRAY_SIZE(arr1);
+//       bpf_iter_num_new(&it, 0, n);
+//       sum1 = sum(&it, arr1, n);
+//       bpf_iter_num_destroy(&it);
+//
+//       /* sum arr2 */
+//       n = ARRAY_SIZE(arr2);
+//       bpf_iter_num_new(&it, 0, n);
+//       sum2 = sum(&it, arr2, n);
+//       bpf_iter_num_destroy(&it);
+//
+//       bpf_printk("sum1=%d, sum2=%d", sum1, sum2);
+//
+//       return 0;
+//   }
+#[link_section = "raw_tp"]
+#[no_mangle]
+extern "C" fn iter_pass_iter_ptr_to_subprog(_ctx: *mut c_void) -> i32 {
+    let mut arr1 = MaybeUninit::<[i32; 16]>::uninit();
+    let mut arr2 = MaybeUninit::<[i32; 32]>::uninit();
+    let mut it = MaybeUninit::<bpf_iter_num>::uninit();
+    let sum1: i32;
+    let sum2: i32;
+
+    unsafe {
+        let p = it.as_mut_ptr();
+        let a1 = arr1.as_mut_ptr().cast::<i32>();
+        let a2 = arr2.as_mut_ptr().cast::<i32>();
+
+        /* fill arr1 */
+        let n = 16;
+        bpf_iter_num_new(p as *mut c_void, 0, n);
+        fill(p, a1, n as u32, 2);
+        bpf_iter_num_destroy(p as *mut c_void);
+
+        /* fill arr2 */
+        let n = 32;
+        bpf_iter_num_new(p as *mut c_void, 0, n);
+        fill(p, a2, n as u32, 10);
+        bpf_iter_num_destroy(p as *mut c_void);
+
+        /* sum arr1 */
+        let n = 16;
+        bpf_iter_num_new(p as *mut c_void, 0, n);
+        sum1 = sum(p, a1, n as u32);
+        bpf_iter_num_destroy(p as *mut c_void);
+
+        /* sum arr2 */
+        let n = 32;
+        bpf_iter_num_new(p as *mut c_void, 0, n);
+        sum2 = sum(p, a2, n as u32);
+        bpf_iter_num_destroy(p as *mut c_void);
+
+        printk2(&iter_pass_iter_ptr_to_subprog_____fmt, sum1 as i64 as u64, sum2 as i64 as u64);
+    }
+
+    0
+}
+
+// HAND: iter_arr_with_actual_elem_count
+//   struct {
+//       int data[32];
+//       int n;
+//   } loop_data;
+//
+//   SEC("raw_tp")
+//   __success
+//   int iter_arr_with_actual_elem_count(const void *ctx)
+//   {
+//       int i, n = loop_data.n, sum = 0;
+//
+//       if (n > ARRAY_SIZE(loop_data.data))
+//           return 0;
+//
+//       bpf_for(i, 0, n) {
+//           /* no rechecking of i against ARRAY_SIZE(loop_data.n) */
+//           sum += loop_data.data[i];
+//       }
+//
+//       return sum;
+//   }
+// `n > ARRAY_SIZE(...)` compares int against size_t: unsigned, so a negative
+// n returns 0 too.
+#[link_section = "raw_tp"]
+#[no_mangle]
+extern "C" fn iter_arr_with_actual_elem_count(_ctx: *mut c_void) -> i32 {
+    let n: i32 = unsafe { (*addr_of!(loop_data)).n };
+    let mut sum: i32 = 0;
+
+    if (n as i64 as u64) > 32 {
+        return 0;
+    }
+
+    unsafe {
+        let data = addr_of_mut!(loop_data).cast::<i32>();
+        bpf_for!(i, 0, n, {
+            /* no rechecking of i against ARRAY_SIZE(loop_data.n) */
+            sum = sum.wrapping_add(data.wrapping_offset(i as isize).read());
+        });
+    }
+
+    sum
+}
+
+// HAND: nest_2
+//   static __noinline bool nest_2(char *str)
+//   {
+//       /* some insns (including branch insns) to ensure stacksafe() is triggered
+//        * in nest_2(). This way, stacksafe() can compare frame associated with nest_1().
+//        */
+//       if (str[0] == 't')
+//           return true;
+//       if (str[1] == 'e')
+//           return true;
+//       if (str[2] == 's')
+//           return true;
+//       if (str[3] == 't')
+//           return true;
+//       return false;
+//   }
+#[no_mangle]
+#[inline(never)]
+extern "C" fn nest_2(str: *mut i8) -> bool {
+    /* some insns (including branch insns) to ensure stacksafe() is triggered
+     * in nest_2(). This way, stacksafe() can compare frame associated with nest_1().
+     */
+    unsafe {
+        if str.wrapping_offset(0).read() == b't' as i8 {
+            return true;
+        }
+        if str.wrapping_offset(1).read() == b'e' as i8 {
+            return true;
+        }
+        if str.wrapping_offset(2).read() == b's' as i8 {
+            return true;
+        }
+        if str.wrapping_offset(3).read() == b't' as i8 {
+            return true;
+        }
+    }
+    false
+}
+
+// HAND: nest_1
+//   static __noinline bool nest_1(int n)
+//   {
+//       /* case 0: allocate stack, case 1: no allocate stack */
+//       switch (n) {
+//       case 0: {
+//           char comm[16];
+//
+//           if (bpf_get_current_comm(comm, 16))
+//               return false;
+//           return nest_2(comm);
+//       }
+//       case 1:
+//           return nest_2((char *)&global);
+//       default:
+//           return false;
+//       }
+//   }
+#[no_mangle]
+#[inline(never)]
+extern "C" fn nest_1(n: i32) -> bool {
+    /* case 0: allocate stack, case 1: no allocate stack */
+    match n {
+        0 => {
+            let mut comm = MaybeUninit::<[i8; 16]>::uninit();
+
+            unsafe {
+                if bpf_get_current_comm(comm.as_mut_ptr() as *mut c_void, 16) != 0 {
+                    return false;
+                }
+                nest_2(comm.as_mut_ptr().cast::<i8>())
+            }
+        }
+        1 => unsafe { nest_2(addr_of_mut!(global).cast::<i8>()) },
+        _ => false,
+    }
+}
+
+// HAND: iter_subprog_check_stacksafe
+//   __u32 upper, select_n, result;
+//   __u64 global;
+//
+//   SEC("raw_tp")
+//   __success
+//   int iter_subprog_check_stacksafe(const void *ctx)
+//   {
+//       long i;
+//
+//       bpf_for(i, 0, upper) {
+//           if (!nest_1(select_n)) {
+//               result = 1;
+//               return 0;
+//           }
+//       }
+//
+//       result = 2;
+//       return 0;
+//   }
+// bpf_for() spelled out: the loop variable is a long and `upper` is re-read at
+// every step's bounds check (nest_1 is an opaque call), and the `return 0`
+// inside the loop destroys the iterator first (the C's cleanup attribute).
+#[link_section = "raw_tp"]
+#[no_mangle]
+extern "C" fn iter_subprog_check_stacksafe(_ctx: *mut c_void) -> i32 {
+    let mut it = MaybeUninit::<bpf_iter_num>::uninit();
+
+    unsafe {
+        bpf_iter_num_new(it.as_mut_ptr() as *mut c_void, 0, (*addr_of!(upper)) as i32);
+        loop {
+            let t = bpf_iter_num_next(it.as_mut_ptr() as *mut c_void) as *mut i32;
+            if t.is_null() {
+                break;
+            }
+            let i: i64 = *t as i64;
+            if !(i >= 0 && i < (*addr_of!(upper)) as i64) {
+                break;
+            }
+            if !nest_1((*addr_of!(select_n)) as i32) {
+                result = 1;
+                bpf_iter_num_destroy(it.as_mut_ptr() as *mut c_void);
+                return 0;
+            }
+        }
+        bpf_iter_num_destroy(it.as_mut_ptr() as *mut c_void);
+
+        result = 2;
+    }
+    0
+}
+
+// HAND: iter_new_bad_arg
+//   struct bpf_iter_num global_it;
+//
+//   SEC("raw_tp")
+//   __failure __msg("R1 type=map_value expected=fp")
+//   int iter_new_bad_arg(const void *ctx)
+//   {
+//       bpf_iter_num_new(&global_it, 0, 1);
+//       return 0;
+//   }
+#[link_section = "raw_tp"]
+#[no_mangle]
+extern "C" fn iter_new_bad_arg(_ctx: *mut c_void) -> i32 {
+    unsafe {
+        bpf_iter_num_new(addr_of_mut!(global_it) as *mut c_void, 0, 1);
+    }
+    0
+}
+
+// HAND: iter_next_bad_arg
+//   SEC("raw_tp")
+//   __failure __msg("R1 type=map_value expected=fp")
+//   int iter_next_bad_arg(const void *ctx)
+//   {
+//       bpf_iter_num_next(&global_it);
+//       return 0;
+//   }
+#[link_section = "raw_tp"]
+#[no_mangle]
+extern "C" fn iter_next_bad_arg(_ctx: *mut c_void) -> i32 {
+    unsafe {
+        bpf_iter_num_next(addr_of_mut!(global_it) as *mut c_void);
+    }
+    0
+}
+
+// HAND: iter_destroy_bad_arg
+//   SEC("raw_tp")
+//   __failure __msg("R1 type=map_value expected=fp")
+//   int iter_destroy_bad_arg(const void *ctx)
+//   {
+//       bpf_iter_num_destroy(&global_it);
+//       return 0;
+//   }
+#[link_section = "raw_tp"]
+#[no_mangle]
+extern "C" fn iter_destroy_bad_arg(_ctx: *mut c_void) -> i32 {
+    unsafe {
+        bpf_iter_num_destroy(addr_of_mut!(global_it) as *mut c_void);
+    }
+    0
+}
+
+// HAND: clean_live_states
+//   SEC("raw_tp")
+//   __success
+//   int clean_live_states(const void *ctx)
+//   {
+//       char buf[1];
+//       int i, j, k, l, m, n, o;
+//
+//       bpf_for(i, 0, 10)
+//       bpf_for(j, 0, 10)
+//       bpf_for(k, 0, 10)
+//       bpf_for(l, 0, 10)
+//       bpf_for(m, 0, 10)
+//       bpf_for(n, 0, 10)
+//       bpf_for(o, 0, 10) {
+//           if (unlikely(bpf_get_prandom_u32()))
+//               buf[0] = 42;
+//           bpf_printk("%s", buf);
+//       }
+//       return 0;
+//   }
+#[link_section = "raw_tp"]
+#[no_mangle]
+extern "C" fn clean_live_states(_ctx: *mut c_void) -> i32 {
+    let mut buf = MaybeUninit::<[i8; 1]>::uninit();
+
+    unsafe {
+        bpf_for!(_i, 0, 10, {
+            bpf_for!(_j, 0, 10, {
+                bpf_for!(_k, 0, 10, {
+                    bpf_for!(_l, 0, 10, {
+                        bpf_for!(_m, 0, 10, {
+                            bpf_for!(_n, 0, 10, {
+                                bpf_for!(_o, 0, 10, {
+                                    if bpf_get_prandom_u32() != 0 {
+                                        buf.as_mut_ptr().cast::<i8>().write(42);
+                                    }
+                                    printk1(&clean_live_states_____fmt, buf.as_ptr() as u64);
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        });
+    }
+    0
+}
+
+// HAND: iter_nested_remake
+//   /* The inner iterator is created in every iteration of the outer loop */
+//   SEC("socket")
+//   __description("iter: nested loops")
+//   __success __retval(12)
+//   int iter_nested_remake(void *ctx)
+//   {
+//       int i, j, sum = 0;
+//
+//       bpf_for(i, 0, 3) {
+//           bpf_for(j, 0, 4)
+//               sum++;
+//       }
+//       return sum;
+//   }
+#[link_section = "socket"]
+#[no_mangle]
+extern "C" fn iter_nested_remake(_ctx: *mut c_void) -> i32 {
+    let mut sum: i32 = 0;
+
+    unsafe {
+        bpf_for!(_i, 0, 3, {
+            bpf_for!(_j, 0, 4, {
+                sum = sum.wrapping_add(1);
+            });
+        });
+    }
+    sum
 }

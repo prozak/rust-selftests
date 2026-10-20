@@ -3,6 +3,7 @@
 #![no_main]
 #![feature(asm_experimental_arch)]
 #![allow(named_asm_labels)]
+#![allow(function_casts_as_integer)]
 
 // Translation of tools/testing/selftests/bpf/progs/iters.c, GENERATED
 // by scripts/naked_gen.py --with-c-bodies (bpf-rs-core idiom), except the
@@ -19,7 +20,7 @@
 // scripts/translint.py's naked-verbatim check compares the built object
 // with the C object instruction by instruction.
 
-// BPF_PROGRAM_ORDER: iter_err_unsafe_c_loop iter_err_unsafe_asm_loop iter_num_new_inlined iter_while_loop iter_while_loop_auto_cleanup iter_for_loop iter_bpf_for_each_macro iter_bpf_for_macro iter_pragma_unroll_loop iter_manual_unroll_loop iter_multiple_sequential_loops iter_limit_cond_break_loop iter_obfuscate_counter iter_search_loop iter_array_fill delayed_read_mark delayed_precision_mark loop_state_deps1 loop_state_deps2 loop_state_deps3 triple_continue widen_spill checkpoint_states_deletion absent_mark_in_the_middle_state noop absent_mark_in_the_middle_state2 absent_mark_in_the_middle_state3 loop1 loop1_wrapper absent_mark_in_the_middle_state4 loop_cb4 stack_misc_vs_scalar_in_a_loop loop_cb5 loop_counter_precision_2nd_iter iter_remake_jmp iter_remake iter_remake_callee_jmp iter_remake_after_next_jmp iter_remake_two_jmp iter_remake_inline iter_remake_callee iter_remake_after_next iter_remake_drained
+// BPF_PROGRAM_ORDER: iter_err_unsafe_c_loop iter_err_unsafe_asm_loop iter_num_new_inlined iter_while_loop iter_while_loop_auto_cleanup iter_for_loop iter_bpf_for_each_macro iter_bpf_for_macro iter_pragma_unroll_loop iter_manual_unroll_loop iter_multiple_sequential_loops iter_limit_cond_break_loop iter_obfuscate_counter iter_search_loop iter_array_fill iter_nested_iters iter_nested_deeply_iters fill_inner_dimension sum_inner_dimension iter_subprog_iters iter_err_too_permissive1 iter_err_too_permissive2 iter_err_too_permissive3 iter_tricky_but_fine iter_stack_array_loop fill sum iter_pass_iter_ptr_to_subprog delayed_read_mark delayed_precision_mark loop_state_deps1 loop_state_deps2 loop_state_deps3 triple_continue widen_spill checkpoint_states_deletion iter_arr_with_actual_elem_count nest_2 nest_1 iter_subprog_check_stacksafe iter_new_bad_arg iter_next_bad_arg iter_destroy_bad_arg clean_live_states absent_mark_in_the_middle_state noop absent_mark_in_the_middle_state2 absent_mark_in_the_middle_state3 loop1 loop1_wrapper absent_mark_in_the_middle_state4 loop_cb4 stack_misc_vs_scalar_in_a_loop loop_cb5 loop_counter_precision_2nd_iter iter_remake_jmp iter_remake iter_remake_callee_jmp iter_remake_after_next_jmp iter_remake_two_jmp iter_remake_inline iter_remake_callee iter_remake_after_next iter_remake_drained iter_nested_remake
 
 // the C's anonymous types, named here; scripts/btf_anon.py clears
 // the names in the object's BTF
@@ -102,6 +103,27 @@ test_tags! {
         __success;
     iter_array_fill:
         __success;
+    iter_nested_iters:
+        __success;
+    iter_nested_deeply_iters:
+        __success;
+    iter_subprog_iters:
+        __success;
+    iter_err_too_permissive1:
+        __failure,
+        __msg("invalid mem access 'scalar'");
+    iter_err_too_permissive2:
+        __failure,
+        __msg("invalid mem access 'map_value_or_null'");
+    iter_err_too_permissive3:
+        __failure,
+        __msg("invalid mem access 'map_value_or_null'");
+    iter_tricky_but_fine:
+        __success;
+    iter_stack_array_loop:
+        __success;
+    iter_pass_iter_ptr_to_subprog:
+        __success;
     delayed_read_mark:
         __failure,
         __msg("R1 type=scalar expected=fp");
@@ -125,6 +147,21 @@ test_tags! {
     widen_spill:
         __success;
     checkpoint_states_deletion:
+        __success;
+    iter_arr_with_actual_elem_count:
+        __success;
+    iter_subprog_check_stacksafe:
+        __success;
+    iter_new_bad_arg:
+        __failure,
+        __msg("R1 type=map_value expected=fp");
+    iter_next_bad_arg:
+        __failure,
+        __msg("R1 type=map_value expected=fp");
+    iter_destroy_bad_arg:
+        __failure,
+        __msg("R1 type=map_value expected=fp");
+    clean_live_states:
         __success;
     absent_mark_in_the_middle_state:
         __flag("BPF_F_TEST_STATE_FREQ"),
@@ -184,6 +221,10 @@ test_tags! {
         __failure,
         __msg("infinite loop detected"),
         __flag("BPF_F_TEST_STATE_FREQ");
+    iter_nested_remake:
+        __description("iter: nested loops"),
+        __success,
+        __retval("12");
 }
 
 // Map key/value types, shaped like the C object's BTF (the kernel

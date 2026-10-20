@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 #![no_std]
 #![no_main]
+#![feature(asm_experimental_arch)]
+#![allow(named_asm_labels)]
 
 // Direct translation of tools/testing/selftests/bpf/progs/dynptr_fail.c
 // (bpf-rs-core idiom): the verifier's rejections of misused dynptrs --
@@ -23,23 +25,28 @@
 // BTF_C_CHAR: u8
 // BTF_C_VOID: c_void
 
+use core::arch::asm;
 use core::ffi::c_void;
 use core::mem::MaybeUninit;
 use core::ptr::{addr_of_mut, read_volatile, write_volatile};
 
 use bpf_rs_core::ctx::__sk_buff;
 use bpf_rs_core::helpers::{
-    bpf_dynptr_data, bpf_dynptr_from_mem, bpf_dynptr_read, bpf_loop, bpf_map_lookup_elem,
-    bpf_map_update_elem, bpf_ringbuf_discard_dynptr, bpf_ringbuf_reserve_dynptr,
-    bpf_ringbuf_submit, bpf_ringbuf_submit_dynptr, bpf_strncmp, sink,
+    bpf_dynptr_data, bpf_dynptr_from_mem, bpf_dynptr_read, bpf_dynptr_write, bpf_get_current_comm,
+    bpf_loop, bpf_map_lookup_elem, bpf_map_update_elem, bpf_ringbuf_discard_dynptr,
+    bpf_ringbuf_reserve_dynptr, bpf_ringbuf_submit, bpf_ringbuf_submit_dynptr, bpf_skb_pull_data,
+    bpf_strncmp, bpf_this_cpu_ptr, bpf_xdp_adjust_head, sink,
 };
 use bpf_rs_core::maps::{self, BpfMap};
+use bpf_rs_core::progs::fentry_arg;
 use bpf_rs_core::test_tags;
 use bpf_rs_core::{bpf_map, bpf_object};
 
 const ENOENT: i32 = 2;
 const SK_DROP: i32 = 0;
 const SK_PASS: i32 = 1;
+const XDP_DROP: i32 = 1;
+const XDP_PASS: i32 = 2;
 
 #[allow(non_camel_case_types)]
 #[repr(C, align(8))]
@@ -69,6 +76,17 @@ struct ethhdr {
     h_dest: [u8; 6],
     h_source: [u8; 6],
     h_proto: u16,
+}
+
+#[allow(non_camel_case_types)]
+#[repr(C)]
+pub struct xdp_md {
+    pub data: u32,
+    pub data_end: u32,
+    pub data_meta: u32,
+    pub ingress_ifindex: u32,
+    pub rx_queue_index: u32,
+    pub egress_ifindex: u32,
 }
 
 #[link_section = ".maps"]
@@ -102,6 +120,13 @@ static mut val: i32 = 0;
 extern "C" {
     fn bpf_dynptr_from_skb(skb: *mut c_void, flags: u64, ptr__uninit: *mut bpf_dynptr) -> i32;
     fn bpf_dynptr_from_skb_meta(skb: *mut c_void, flags: u64, ptr__uninit: *mut bpf_dynptr) -> i32;
+    fn bpf_dynptr_from_xdp(xdp: *mut xdp_md, flags: u64, ptr__uninit: *mut bpf_dynptr) -> i32;
+    fn bpf_dynptr_slice(
+        ptr: *const bpf_dynptr,
+        offset: u32,
+        buffer__opt: *mut c_void,
+        buffer__szk: u32,
+    ) -> *mut c_void;
     fn bpf_dynptr_slice_rdwr(
         ptr: *const bpf_dynptr,
         offset: u32,
@@ -182,6 +207,45 @@ test_tags! {
     dynptr_from_mem_invalid_api: __failure, __msg("Unsupported reg type fp for bpf_dynptr_from_mem data");
     dynptr_from_dynptr_data: __failure, __msg("Unsupported reg type mem for bpf_dynptr_from_mem data");
     dynptr_from_dynptr_slice: __failure, __msg("Unsupported reg type mem for bpf_dynptr_from_mem data");
+    dynptr_pruning_overwrite: __failure, __msg("cannot overwrite referenced dynptr"), __log_level(2);
+    dynptr_pruning_stacksafe: __success, __msg("12: safe"), __log_level(2);
+    dynptr_pruning_type_confusion: __failure, __msg("cannot overwrite referenced dynptr"), __log_level(2);
+    dynptr_var_off_overwrite: __failure, __msg("dynptr has to be at a constant offset"), __log_level(2);
+    dynptr_partial_slot_invalidate: __failure, __msg("cannot overwrite referenced dynptr"), __log_level(2);
+    dynptr_overwrite_unref: __success;
+    dynptr_invalidate_slice_reinit: __failure, __msg("invalid mem access 'scalar'");
+    dynptr_invalidate_slice_or_null: __failure, __msg("R{{[0-9]+}} type=scalar expected=percpu_ptr_");
+    dynptr_invalidate_slice_failure: __failure, __msg("R{{[0-9]+}} invalid mem access 'scalar'");
+    dynptr_invalidate_slice_success: __success;
+    dynptr_overwrite_ref: __failure, __msg("cannot overwrite referenced dynptr");
+    dynptr_read_into_slot: __failure, __msg("cannot overwrite referenced dynptr");
+    skb_invalid_slice_write: __failure, __msg("R{{[0-9]+}} cannot write into rdonly_mem");
+    skb_meta_invalid_slice_write: __failure, __msg("R{{[0-9]+}} cannot write into rdonly_mem");
+    skb_invalid_data_slice1: __failure, __msg("invalid mem access 'scalar'");
+    skb_invalid_data_slice2: __failure, __msg("invalid mem access 'scalar'");
+    skb_invalid_data_slice3: __failure, __msg("invalid mem access 'scalar'");
+    skb_invalid_data_slice4: __failure, __msg("invalid mem access 'scalar'");
+    ro_skb_slice_invalid_after_metadata_write: __failure, __msg("invalid mem access 'scalar'");
+    rw_skb_slice_invalid_after_metadata_write: __failure, __msg("invalid mem access 'scalar'");
+    ro_skb_meta_slice_invalid_after_payload_write: __failure, __msg("invalid mem access 'scalar'");
+    rw_skb_meta_slice_invalid_after_payload_write: __failure, __msg("invalid mem access 'scalar'");
+    ro_skb_meta_slice_invalid_after_payload_helper: __failure, __msg("invalid mem access 'scalar'");
+    rw_skb_meta_slice_invalid_after_payload_helper: __failure, __msg("invalid mem access 'scalar'");
+    ro_skb_meta_slice_invalid_after_metadata_write: __failure, __msg("invalid mem access 'scalar'");
+    rw_skb_meta_slice_invalid_after_metadata_write: __failure, __msg("invalid mem access 'scalar'");
+    xdp_invalid_data_slice1: __failure, __msg("invalid mem access 'scalar'");
+    xdp_invalid_data_slice2: __failure, __msg("invalid mem access 'scalar'");
+    skb_invalid_ctx: __failure, __msg("calling kernel function bpf_dynptr_from_skb is not allowed");
+    skb_meta_invalid_ctx: __failure, __msg("calling kernel function bpf_dynptr_from_skb_meta is not allowed");
+    skb_invalid_ctx_fentry: __failure, __msg("must be referenced or trusted");
+    skb_invalid_ctx_fexit: __failure, __msg("must be referenced or trusted");
+    uninit_write_into_slot: __failure, __msg("cannot overwrite referenced dynptr");
+    xdp_invalid_ctx: __failure, __msg("calling kernel function bpf_dynptr_from_xdp is not allowed");
+    dynptr_slice_var_len1: __failure, __msg("must be a known constant"), __msg("requires this memory size to be a verifier-known constant");
+    dynptr_slice_var_len2: __failure, __msg("must be a known constant"), __msg("requires this memory size to be a verifier-known constant");
+    dynptr_slice_commuted_invalidate: __failure, __msg("invalid mem access 'scalar'");
+    invalid_data_slices: __failure, __msg("invalid mem access 'scalar'");
+    invalid_slice_rdwr_rdonly: __failure, __msg("the prog does not allow writes to packet data");
 }
 
 /* Every bpf_ringbuf_reserve_dynptr call must have a corresponding
@@ -870,6 +934,1086 @@ extern "C" fn dynptr_from_dynptr_slice(skb: *mut __sk_buff) -> i32 {
     bpf_dynptr_from_mem(hdr as *mut c_void, 14, 0, dpv(&ptr2));
 
     SK_PASS
+}
+
+/* The five hand-written asm programs of the C: BPF_NAKED copies of the C
+ * object's instruction sequence (maps by `sym`, helpers by number, the
+ * C's labels, `w0 = 0; exit` for its `return 0`). */
+#[link_section = "?tc"]
+#[no_mangle]
+#[inline(never)]
+// BPF_NAKED: dynptr_pruning_overwrite
+extern "C" fn dynptr_pruning_overwrite(_ctx: *mut __sk_buff) -> i32 {
+    unsafe {
+        asm!(
+            "r9 = 0xeB9F;",
+            "r6 = {ringbuf} ll;",
+            "r1 = r6;",
+            "r2 = 8;",
+            "r3 = 0;",
+            "r4 = r10;",
+            "r4 += -16;",
+            "call 198;",
+            "if r0 == 0 goto pjmp1;",
+            "goto pjmp2;",
+            "pjmp1:",
+            "*(u64 *)(r10 - 16) = r9;",
+            "pjmp2:",
+            "r1 = r10;",
+            "r1 += -16;",
+            "r2 = 0;",
+            "call 200;",
+            "w0 = 0;",
+            "exit;",
+            ringbuf = sym ringbuf,
+            options(noreturn)
+        );
+    }
+}
+
+#[link_section = "?tc"]
+#[no_mangle]
+#[inline(never)]
+// BPF_NAKED: dynptr_pruning_stacksafe
+extern "C" fn dynptr_pruning_stacksafe(_ctx: *mut __sk_buff) -> i32 {
+    unsafe {
+        asm!(
+            "r9 = 0xeB9F;",
+            "r6 = {ringbuf} ll;",
+            "r1 = r6;",
+            "r2 = 8;",
+            "r3 = 0;",
+            "r4 = r10;",
+            "r4 += -16;",
+            "call 198;",
+            "if r0 == 0 goto stjmp1;",
+            "goto stjmp2;",
+            "stjmp1:",
+            "r9 = r9;",
+            "stjmp2:",
+            "r1 = r10;",
+            "r1 += -16;",
+            "r2 = 0;",
+            "call 200;",
+            "w0 = 0;",
+            "exit;",
+            ringbuf = sym ringbuf,
+            options(noreturn)
+        );
+    }
+}
+
+#[link_section = "?tc"]
+#[no_mangle]
+#[inline(never)]
+// BPF_NAKED: dynptr_pruning_type_confusion
+extern "C" fn dynptr_pruning_type_confusion(_ctx: *mut __sk_buff) -> i32 {
+    unsafe {
+        asm!(
+            "r6 = {array_map4} ll;",
+            "r7 = {ringbuf} ll;",
+            "r1 = r6;",
+            "r2 = r10;",
+            "r2 += -8;",
+            "r9 = 0;",
+            "*(u64 *)(r2 + 0) = r9;",
+            "r3 = r10;",
+            "r3 += -24;",
+            "r9 = 0xeB9FeB9F;",
+            "*(u64 *)(r10 - 16) = r9;",
+            "*(u64 *)(r10 - 24) = r9;",
+            "r9 = 0;",
+            "r4 = 0;",
+            "r8 = r2;",
+            "call 2;",
+            "r1 = r6;",
+            "r2 = r8;",
+            "call 1;",
+            "if r0 != 0 goto tjmp1;",
+            "exit;",
+            "tjmp1:",
+            "r8 = r0;",
+            "r1 = r7;",
+            "r2 = 8;",
+            "r3 = 0;",
+            "r4 = r10;",
+            "r4 += -16;",
+            "r0 = *(u64 *)(r0 + 0);",
+            "call 198;",
+            "if r0 == 0 goto tjmp2;",
+            "r8 = r8;",
+            "r8 = r8;",
+            "r8 = r8;",
+            "r8 = r8;",
+            "r8 = r8;",
+            "r8 = r8;",
+            "r8 = r8;",
+            "goto tjmp3;",
+            "tjmp2:",
+            "*(u64 *)(r10 - 8) = r9;",
+            "*(u64 *)(r10 - 16) = r9;",
+            "r1 = r8;",
+            "r1 += 8;",
+            "r2 = 0;",
+            "r3 = 0;",
+            "r4 = r10;",
+            "r4 += -16;",
+            "call 197;",
+            "tjmp3:",
+            "r1 = r10;",
+            "r1 += -16;",
+            "r2 = 0;",
+            "call 200;",
+            "w0 = 0;",
+            "exit;",
+            array_map4 = sym array_map4,
+            ringbuf = sym ringbuf,
+            options(noreturn)
+        );
+    }
+}
+
+#[link_section = "?tc"]
+#[no_mangle]
+#[inline(never)]
+// BPF_NAKED: dynptr_var_off_overwrite
+extern "C" fn dynptr_var_off_overwrite(_ctx: *mut __sk_buff) -> i32 {
+    unsafe {
+        asm!(
+            "r9 = 16;",
+            "*(u32 *)(r10 - 4) = r9;",
+            "r8 = *(u32 *)(r10 - 4);",
+            "if r8 >= 0 goto vjmp1;",
+            "r0 = 1;",
+            "exit;",
+            "vjmp1:",
+            "if r8 <= 16 goto vjmp2;",
+            "r0 = 1;",
+            "exit;",
+            "vjmp2:",
+            "r8 &= 16;",
+            "r1 = {ringbuf} ll;",
+            "r2 = 8;",
+            "r3 = 0;",
+            "r4 = r10;",
+            "r4 += -32;",
+            "r4 += r8;",
+            "call 198;",
+            "r9 = 0xeB9F;",
+            "*(u64 *)(r10 - 16) = r9;",
+            "r1 = r10;",
+            "r1 += -32;",
+            "r1 += r8;",
+            "r2 = 0;",
+            "call 200;",
+            "w0 = 0;",
+            "exit;",
+            ringbuf = sym ringbuf,
+            options(noreturn)
+        );
+    }
+}
+
+#[link_section = "?tc"]
+#[no_mangle]
+#[inline(never)]
+// BPF_NAKED: dynptr_partial_slot_invalidate
+extern "C" fn dynptr_partial_slot_invalidate(_ctx: *mut __sk_buff) -> i32 {
+    unsafe {
+        asm!(
+            "r6 = {ringbuf} ll;",
+            "r7 = {array_map4} ll;",
+            "r1 = r7;",
+            "r2 = r10;",
+            "r2 += -8;",
+            "r9 = 0;",
+            "*(u64 *)(r2 + 0) = r9;",
+            "r3 = r2;",
+            "r4 = 0;",
+            "r8 = r2;",
+            "call 2;",
+            "r1 = r7;",
+            "r2 = r8;",
+            "call 1;",
+            "if r0 != 0 goto sjmp1;",
+            "exit;",
+            "sjmp1:",
+            "r7 = r0;",
+            "r1 = r6;",
+            "r2 = 8;",
+            "r3 = 0;",
+            "r4 = r10;",
+            "r4 += -24;",
+            "call 198;",
+            "*(u64 *)(r10 - 16) = r9;",
+            "r1 = r7;",
+            "r2 = 8;",
+            "r3 = 0;",
+            "r4 = r10;",
+            "r4 += -16;",
+            "call 197;",
+            "r1 = r10;",
+            "r1 += -512;",
+            "r2 = 488;",
+            "r3 = r10;",
+            "r3 += -24;",
+            "r4 = 0;",
+            "r5 = 0;",
+            "call 201;",
+            "r8 = 1;",
+            "if r0 != 0 goto sjmp2;",
+            "r8 = 0;",
+            "sjmp2:",
+            "r1 = r10;",
+            "r1 += -24;",
+            "r2 = 0;",
+            "call 200;",
+            "w0 = 0;",
+            "exit;",
+            ringbuf = sym ringbuf,
+            array_map4 = sym array_map4,
+            options(noreturn)
+        );
+    }
+}
+
+/* Test that it is allowed to overwrite unreferenced dynptr. */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_overwrite_unref(_ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    if get_map_val_dynptr(dpm(&ptr)) != 0 {
+        return 0;
+    }
+    if get_map_val_dynptr(dpm(&ptr)) != 0 {
+        return 0;
+    }
+    if get_map_val_dynptr(dpm(&ptr)) != 0 {
+        return 0;
+    }
+
+    0
+}
+
+/* Test that slices are invalidated on reinitializing a dynptr. */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_invalidate_slice_reinit(_ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    if get_map_val_dynptr(dpm(&ptr)) != 0 {
+        return 0;
+    }
+    let p = bpf_dynptr_data(dpv(&ptr), 0, 1) as *mut u8;
+    if p.is_null() {
+        return 0;
+    }
+    if get_map_val_dynptr(dpm(&ptr)) != 0 {
+        return 0;
+    }
+    /* this should fail */
+    (unsafe { *p }) as i32
+}
+
+/* Invalidation of dynptr slices on destruction of dynptr should not miss
+ * mem_or_null pointers.
+ */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_invalidate_slice_or_null(_ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    if get_map_val_dynptr(dpm(&ptr)) != 0 {
+        return 0;
+    }
+
+    let p = bpf_dynptr_data(dpv(&ptr), 0, 1) as *mut u8;
+    /* C: *(__u8 *)&ptr = 0; */
+    unsafe {
+        write_volatile(dpv(&ptr) as *mut u8, 0);
+    }
+    /* this should fail */
+    bpf_this_cpu_ptr(p as *const c_void);
+    0
+}
+
+/* Destruction of dynptr should also any slices obtained from it */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_invalidate_slice_failure(_ctx: *mut c_void) -> i32 {
+    let ptr1 = MaybeUninit::<bpf_dynptr>::uninit();
+    let ptr2 = MaybeUninit::<bpf_dynptr>::uninit();
+
+    if get_map_val_dynptr(dpm(&ptr1)) != 0 {
+        return 0;
+    }
+    if get_map_val_dynptr(dpm(&ptr2)) != 0 {
+        return 0;
+    }
+
+    let p1 = bpf_dynptr_data(dpv(&ptr1), 0, 1) as *mut u8;
+    if p1.is_null() {
+        return 0;
+    }
+    let p2 = bpf_dynptr_data(dpv(&ptr2), 0, 1) as *mut u8;
+    if p2.is_null() {
+        return 0;
+    }
+
+    /* C: *(__u8 *)&ptr1 = 0; */
+    unsafe {
+        write_volatile(dpv(&ptr1) as *mut u8, 0);
+    }
+    /* this should fail */
+    (unsafe { *p1 }) as i32
+}
+
+/* Invalidation of slices should be scoped and should not prevent dereferencing
+ * slices of another dynptr after destroying unrelated dynptr
+ */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_invalidate_slice_success(_ctx: *mut c_void) -> i32 {
+    let ptr1 = MaybeUninit::<bpf_dynptr>::uninit();
+    let ptr2 = MaybeUninit::<bpf_dynptr>::uninit();
+
+    if get_map_val_dynptr(dpm(&ptr1)) != 0 {
+        return 1;
+    }
+    if get_map_val_dynptr(dpm(&ptr2)) != 0 {
+        return 1;
+    }
+
+    let p1 = bpf_dynptr_data(dpv(&ptr1), 0, 1) as *mut u8;
+    if p1.is_null() {
+        return 1;
+    }
+    let p2 = bpf_dynptr_data(dpv(&ptr2), 0, 1) as *mut u8;
+    if p2.is_null() {
+        return 1;
+    }
+
+    /* C: *(__u8 *)&ptr1 = 0; */
+    unsafe {
+        write_volatile(dpv(&ptr1) as *mut u8, 0);
+    }
+    (unsafe { *p2 }) as i32
+}
+
+/* Overwriting referenced dynptr should be rejected */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_overwrite_ref(_ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, 64, 0, dpv(&ptr));
+    /* this should fail */
+    if get_map_val_dynptr(dpm(&ptr)) != 0 {
+        bpf_ringbuf_discard_dynptr(dpv(&ptr), 0);
+    }
+    0
+}
+
+/* C: union { struct { char _pad[48]; struct bpf_dynptr ptr; }; char buf[64]; } */
+#[allow(non_camel_case_types)]
+#[repr(C)]
+struct pad_then_dynptr {
+    _pad: [u8; 48],
+    ptr: bpf_dynptr,
+}
+
+/* Reject writes to dynptr slot from bpf_dynptr_read */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_read_into_slot(_ctx: *mut c_void) -> i32 {
+    let mut data = MaybeUninit::<pad_then_dynptr>::uninit();
+    let dptr = unsafe { addr_of_mut!((*data.as_mut_ptr()).ptr) };
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, 64, 0, dptr as *mut c_void);
+    /* this should fail */
+    bpf_dynptr_read(data.as_mut_ptr() as *mut c_void, 64, dptr as *const bpf_dynptr, 0, 0);
+
+    0
+}
+
+/* bpf_dynptr_slice()s are read-only and cannot be written to */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn skb_invalid_slice_write(skb: *mut __sk_buff) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let mut buffer: [u8; 14] = [0; 14];
+
+    unsafe {
+        bpf_dynptr_from_skb(skb as *mut c_void, 0, dpm(&ptr));
+    }
+
+    let hdr = unsafe { bpf_dynptr_slice(dp(&ptr), 0, buffer.as_mut_ptr() as *mut c_void, 14) }
+        as *mut ethhdr;
+    if hdr.is_null() {
+        return SK_DROP;
+    }
+
+    /* this should fail */
+    unsafe {
+        (*hdr).h_proto = 1;
+    }
+
+    SK_PASS
+}
+
+/* bpf_dynptr_slice()s are read-only and cannot be written to */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn skb_meta_invalid_slice_write(skb: *mut __sk_buff) -> i32 {
+    let meta = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        bpf_dynptr_from_skb_meta(skb as *mut c_void, 0, dpm(&meta));
+    }
+
+    let md = unsafe { bpf_dynptr_slice(dp(&meta), 0, core::ptr::null_mut(), 1) } as *mut u8;
+    if md.is_null() {
+        return SK_DROP;
+    }
+
+    /* this should fail */
+    unsafe {
+        *md = 42;
+    }
+
+    SK_PASS
+}
+
+/* The read-only data slice is invalidated whenever a helper changes packet data */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn skb_invalid_data_slice1(skb: *mut __sk_buff) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let mut buffer: [u8; 14] = [0; 14];
+
+    unsafe {
+        bpf_dynptr_from_skb(skb as *mut c_void, 0, dpm(&ptr));
+    }
+
+    let hdr = unsafe { bpf_dynptr_slice(dp(&ptr), 0, buffer.as_mut_ptr() as *mut c_void, 14) }
+        as *mut ethhdr;
+    if hdr.is_null() {
+        return SK_DROP;
+    }
+
+    set_val(unsafe { (*hdr).h_proto } as i32);
+
+    if bpf_skb_pull_data(skb as *const c_void, unsafe { (*skb).len }) != 0 {
+        return SK_DROP;
+    }
+
+    /* this should fail */
+    set_val(unsafe { (*hdr).h_proto } as i32);
+
+    SK_PASS
+}
+
+/* The read-write data slice is invalidated whenever a helper changes packet data */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn skb_invalid_data_slice2(skb: *mut __sk_buff) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let mut buffer: [u8; 14] = [0; 14];
+
+    unsafe {
+        bpf_dynptr_from_skb(skb as *mut c_void, 0, dpm(&ptr));
+    }
+
+    let hdr = unsafe { bpf_dynptr_slice_rdwr(dp(&ptr), 0, buffer.as_mut_ptr() as *mut c_void, 14) }
+        as *mut ethhdr;
+    if hdr.is_null() {
+        return SK_DROP;
+    }
+
+    unsafe {
+        (*hdr).h_proto = 123;
+    }
+
+    if bpf_skb_pull_data(skb as *const c_void, unsafe { (*skb).len }) != 0 {
+        return SK_DROP;
+    }
+
+    /* this should fail */
+    unsafe {
+        (*hdr).h_proto = 1;
+    }
+
+    SK_PASS
+}
+
+/* The read-only data slice is invalidated whenever bpf_dynptr_write() is called */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn skb_invalid_data_slice3(skb: *mut __sk_buff) -> i32 {
+    /* char write_data[64] = "hello there, world!!"; */
+    let mut write_data = [0u64; 8];
+    write_data[0] = 0x6874206f6c6c6568;
+    write_data[1] = 0x726f77202c657265;
+    write_data[2] = 0x2121646c;
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let mut buffer: [u8; 14] = [0; 14];
+
+    unsafe {
+        bpf_dynptr_from_skb(skb as *mut c_void, 0, dpm(&ptr));
+    }
+
+    let hdr = unsafe { bpf_dynptr_slice(dp(&ptr), 0, buffer.as_mut_ptr() as *mut c_void, 14) }
+        as *mut ethhdr;
+    if hdr.is_null() {
+        return SK_DROP;
+    }
+
+    set_val(unsafe { (*hdr).h_proto } as i32);
+
+    bpf_dynptr_write(dp(&ptr), 0, write_data.as_mut_ptr() as *mut c_void, 64, 0);
+
+    /* this should fail */
+    set_val(unsafe { (*hdr).h_proto } as i32);
+
+    SK_PASS
+}
+
+/* The read-write data slice is invalidated whenever bpf_dynptr_write() is called */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn skb_invalid_data_slice4(skb: *mut __sk_buff) -> i32 {
+    /* char write_data[64] = "hello there, world!!"; */
+    let mut write_data = [0u64; 8];
+    write_data[0] = 0x6874206f6c6c6568;
+    write_data[1] = 0x726f77202c657265;
+    write_data[2] = 0x2121646c;
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let mut buffer: [u8; 14] = [0; 14];
+
+    unsafe {
+        bpf_dynptr_from_skb(skb as *mut c_void, 0, dpm(&ptr));
+    }
+    let hdr = unsafe { bpf_dynptr_slice_rdwr(dp(&ptr), 0, buffer.as_mut_ptr() as *mut c_void, 14) }
+        as *mut ethhdr;
+    if hdr.is_null() {
+        return SK_DROP;
+    }
+
+    unsafe {
+        (*hdr).h_proto = 123;
+    }
+
+    bpf_dynptr_write(dp(&ptr), 0, write_data.as_mut_ptr() as *mut c_void, 64, 0);
+
+    /* this should fail */
+    unsafe {
+        (*hdr).h_proto = 1;
+    }
+
+    SK_PASS
+}
+
+#[link_section = ".rodata.str1.1"]
+static STR_X: [u8; 2] = *b"x\0";
+
+/* Read-only skb data slice is invalidated on write to skb metadata */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn ro_skb_slice_invalid_after_metadata_write(skb: *mut __sk_buff) -> i32 {
+    let data = MaybeUninit::<bpf_dynptr>::uninit();
+    let meta = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        bpf_dynptr_from_skb(skb as *mut c_void, 0, dpm(&data));
+        bpf_dynptr_from_skb_meta(skb as *mut c_void, 0, dpm(&meta));
+    }
+
+    let d = unsafe { bpf_dynptr_slice(dp(&data), 0, core::ptr::null_mut(), 1) } as *mut u8;
+    if d.is_null() {
+        return SK_DROP;
+    }
+
+    bpf_dynptr_write(dp(&meta), 0, STR_X.as_ptr() as *mut c_void, 1, 0);
+
+    /* this should fail */
+    set_val(unsafe { *d } as i32);
+
+    SK_PASS
+}
+
+/* Read-write skb data slice is invalidated on write to skb metadata */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn rw_skb_slice_invalid_after_metadata_write(skb: *mut __sk_buff) -> i32 {
+    let data = MaybeUninit::<bpf_dynptr>::uninit();
+    let meta = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        bpf_dynptr_from_skb(skb as *mut c_void, 0, dpm(&data));
+        bpf_dynptr_from_skb_meta(skb as *mut c_void, 0, dpm(&meta));
+    }
+
+    let d = unsafe { bpf_dynptr_slice_rdwr(dp(&data), 0, core::ptr::null_mut(), 1) } as *mut u8;
+    if d.is_null() {
+        return SK_DROP;
+    }
+
+    bpf_dynptr_write(dp(&meta), 0, STR_X.as_ptr() as *mut c_void, 1, 0);
+
+    /* this should fail */
+    unsafe {
+        *d = 42;
+    }
+
+    SK_PASS
+}
+
+/* Read-only skb metadata slice is invalidated on write to skb data */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn ro_skb_meta_slice_invalid_after_payload_write(skb: *mut __sk_buff) -> i32 {
+    let data = MaybeUninit::<bpf_dynptr>::uninit();
+    let meta = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        bpf_dynptr_from_skb(skb as *mut c_void, 0, dpm(&data));
+        bpf_dynptr_from_skb_meta(skb as *mut c_void, 0, dpm(&meta));
+    }
+
+    let md = unsafe { bpf_dynptr_slice(dp(&meta), 0, core::ptr::null_mut(), 1) } as *mut u8;
+    if md.is_null() {
+        return SK_DROP;
+    }
+
+    bpf_dynptr_write(dp(&data), 0, STR_X.as_ptr() as *mut c_void, 1, 0);
+
+    /* this should fail */
+    set_val(unsafe { *md } as i32);
+
+    SK_PASS
+}
+
+/* Read-write skb metadata slice is invalidated on write to skb data slice */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn rw_skb_meta_slice_invalid_after_payload_write(skb: *mut __sk_buff) -> i32 {
+    let data = MaybeUninit::<bpf_dynptr>::uninit();
+    let meta = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        bpf_dynptr_from_skb(skb as *mut c_void, 0, dpm(&data));
+        bpf_dynptr_from_skb_meta(skb as *mut c_void, 0, dpm(&meta));
+    }
+
+    let md = unsafe { bpf_dynptr_slice_rdwr(dp(&meta), 0, core::ptr::null_mut(), 1) } as *mut u8;
+    if md.is_null() {
+        return SK_DROP;
+    }
+
+    bpf_dynptr_write(dp(&data), 0, STR_X.as_ptr() as *mut c_void, 1, 0);
+
+    /* this should fail */
+    unsafe {
+        *md = 42;
+    }
+
+    SK_PASS
+}
+
+/* Read-only skb metadata slice is invalidated whenever a helper changes packet data */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn ro_skb_meta_slice_invalid_after_payload_helper(skb: *mut __sk_buff) -> i32 {
+    let meta = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        bpf_dynptr_from_skb_meta(skb as *mut c_void, 0, dpm(&meta));
+    }
+
+    let md = unsafe { bpf_dynptr_slice(dp(&meta), 0, core::ptr::null_mut(), 1) } as *mut u8;
+    if md.is_null() {
+        return SK_DROP;
+    }
+
+    if bpf_skb_pull_data(skb as *const c_void, unsafe { (*skb).len }) != 0 {
+        return SK_DROP;
+    }
+
+    /* this should fail */
+    set_val(unsafe { *md } as i32);
+
+    SK_PASS
+}
+
+/* Read-write skb metadata slice is invalidated whenever a helper changes packet data */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn rw_skb_meta_slice_invalid_after_payload_helper(skb: *mut __sk_buff) -> i32 {
+    let meta = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        bpf_dynptr_from_skb_meta(skb as *mut c_void, 0, dpm(&meta));
+    }
+
+    let md = unsafe { bpf_dynptr_slice_rdwr(dp(&meta), 0, core::ptr::null_mut(), 1) } as *mut u8;
+    if md.is_null() {
+        return SK_DROP;
+    }
+
+    if bpf_skb_pull_data(skb as *const c_void, unsafe { (*skb).len }) != 0 {
+        return SK_DROP;
+    }
+
+    /* this should fail */
+    unsafe {
+        *md = 42;
+    }
+
+    SK_PASS
+}
+
+/* Read-only skb metadata slice is invalidated on write to skb metadata */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn ro_skb_meta_slice_invalid_after_metadata_write(skb: *mut __sk_buff) -> i32 {
+    let meta = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        bpf_dynptr_from_skb_meta(skb as *mut c_void, 0, dpm(&meta));
+    }
+
+    let md = unsafe { bpf_dynptr_slice(dp(&meta), 0, core::ptr::null_mut(), 1) } as *mut u8;
+    if md.is_null() {
+        return SK_DROP;
+    }
+
+    bpf_dynptr_write(dp(&meta), 0, STR_X.as_ptr() as *mut c_void, 1, 0);
+
+    /* this should fail */
+    set_val(unsafe { *md } as i32);
+
+    SK_PASS
+}
+
+/* Read-write skb metadata slice is invalidated on write to skb metadata */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn rw_skb_meta_slice_invalid_after_metadata_write(skb: *mut __sk_buff) -> i32 {
+    let meta = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        bpf_dynptr_from_skb_meta(skb as *mut c_void, 0, dpm(&meta));
+    }
+
+    let md = unsafe { bpf_dynptr_slice_rdwr(dp(&meta), 0, core::ptr::null_mut(), 1) } as *mut u8;
+    if md.is_null() {
+        return SK_DROP;
+    }
+
+    bpf_dynptr_write(dp(&meta), 0, STR_X.as_ptr() as *mut c_void, 1, 0);
+
+    /* this should fail */
+    unsafe {
+        *md = 42;
+    }
+
+    SK_PASS
+}
+
+/* The read-only data slice is invalidated whenever a helper changes packet data */
+#[link_section = "?xdp"]
+#[no_mangle]
+extern "C" fn xdp_invalid_data_slice1(xdp: *mut xdp_md) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let mut buffer: [u8; 14] = [0; 14];
+
+    unsafe {
+        bpf_dynptr_from_xdp(xdp, 0, dpm(&ptr));
+    }
+    let hdr = unsafe { bpf_dynptr_slice(dp(&ptr), 0, buffer.as_mut_ptr() as *mut c_void, 14) }
+        as *mut ethhdr;
+    if hdr.is_null() {
+        return SK_DROP;
+    }
+
+    set_val(unsafe { (*hdr).h_proto } as i32);
+
+    if bpf_xdp_adjust_head(xdp, 0 - 14) != 0 {
+        return XDP_DROP;
+    }
+
+    /* this should fail */
+    set_val(unsafe { (*hdr).h_proto } as i32);
+
+    XDP_PASS
+}
+
+/* The read-write data slice is invalidated whenever a helper changes packet data */
+#[link_section = "?xdp"]
+#[no_mangle]
+extern "C" fn xdp_invalid_data_slice2(xdp: *mut xdp_md) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let mut buffer: [u8; 14] = [0; 14];
+
+    unsafe {
+        bpf_dynptr_from_xdp(xdp, 0, dpm(&ptr));
+    }
+    let hdr = unsafe { bpf_dynptr_slice_rdwr(dp(&ptr), 0, buffer.as_mut_ptr() as *mut c_void, 14) }
+        as *mut ethhdr;
+    if hdr.is_null() {
+        return SK_DROP;
+    }
+
+    unsafe {
+        (*hdr).h_proto = 9;
+    }
+
+    if bpf_xdp_adjust_head(xdp, 0 - 14) != 0 {
+        return XDP_DROP;
+    }
+
+    /* this should fail */
+    unsafe {
+        (*hdr).h_proto = 1;
+    }
+
+    XDP_PASS
+}
+
+/* Only supported prog type can create skb-type dynptrs */
+#[link_section = "?xdp"]
+#[no_mangle]
+extern "C" fn skb_invalid_ctx(ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    /* this should fail */
+    unsafe {
+        bpf_dynptr_from_skb(ctx, 0, dpm(&ptr));
+    }
+
+    0
+}
+
+/* Only supported prog type can create skb_meta-type dynptrs */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn skb_meta_invalid_ctx(ctx: *mut c_void) -> i32 {
+    let meta = MaybeUninit::<bpf_dynptr>::uninit();
+
+    /* this should fail */
+    unsafe {
+        bpf_dynptr_from_skb_meta(ctx, 0, dpm(&meta));
+    }
+
+    0
+}
+
+#[link_section = "fentry/skb_tx_error"]
+#[no_mangle]
+extern "C" fn skb_invalid_ctx_fentry(ctx: *const u64) -> i32 {
+    let skb = fentry_arg(ctx, 0) as *mut c_void;
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    /* this should fail */
+    unsafe {
+        bpf_dynptr_from_skb(skb, 0, dpm(&ptr));
+    }
+
+    0
+}
+
+#[link_section = "fexit/skb_tx_error"]
+#[no_mangle]
+extern "C" fn skb_invalid_ctx_fexit(ctx: *const u64) -> i32 {
+    let skb = fentry_arg(ctx, 0) as *mut c_void;
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    /* this should fail */
+    unsafe {
+        bpf_dynptr_from_skb(skb, 0, dpm(&ptr));
+    }
+
+    0
+}
+
+/* C: struct { char buf[64]; struct bpf_dynptr ptr; } data; */
+#[allow(non_camel_case_types)]
+#[repr(C)]
+struct buf_then_dynptr {
+    buf: [u8; 64],
+    ptr: bpf_dynptr,
+}
+
+/* Reject writes to dynptr slot for uninit arg */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn uninit_write_into_slot(_ctx: *mut c_void) -> i32 {
+    let mut data = MaybeUninit::<buf_then_dynptr>::uninit();
+    let dptr = unsafe { addr_of_mut!((*data.as_mut_ptr()).ptr) };
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, 80, 0, dptr as *mut c_void);
+    /* this should fail */
+    bpf_get_current_comm(data.as_mut_ptr() as *mut c_void, 80);
+
+    0
+}
+
+/* Only supported prog type can create xdp-type dynptrs */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn xdp_invalid_ctx(ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    /* this should fail */
+    unsafe {
+        bpf_dynptr_from_xdp(ctx as *mut xdp_md, 0, dpm(&ptr));
+    }
+
+    0
+}
+
+/* C: __u32 hdr_size = sizeof(struct ethhdr); */
+#[no_mangle]
+static mut hdr_size: u32 = 14;
+
+/* Can't pass in variable-sized len to bpf_dynptr_slice */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn dynptr_slice_var_len1(skb: *mut __sk_buff) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+    let mut buffer: [u8; 14] = [0; 14];
+
+    unsafe {
+        bpf_dynptr_from_skb(skb as *mut c_void, 0, dpm(&ptr));
+    }
+
+    /* this should fail */
+    let hdr = unsafe {
+        bpf_dynptr_slice(dp(&ptr), 0, buffer.as_mut_ptr() as *mut c_void, hdr_size)
+    } as *mut ethhdr;
+    if hdr.is_null() {
+        return SK_DROP;
+    }
+
+    SK_PASS
+}
+
+/* Can't pass in variable-sized len to bpf_dynptr_slice */
+#[link_section = "?tc"]
+#[no_mangle]
+extern "C" fn dynptr_slice_var_len2(skb: *mut __sk_buff) -> i32 {
+    let mut buffer: [u8; 14] = [0; 14];
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        bpf_dynptr_from_skb(skb as *mut c_void, 0, dpm(&ptr));
+    }
+
+    if unsafe { hdr_size } <= 14 {
+        /* this should fail */
+        let hdr = unsafe {
+            bpf_dynptr_slice_rdwr(dp(&ptr), 0, buffer.as_mut_ptr() as *mut c_void, hdr_size)
+        } as *mut ethhdr;
+        if hdr.is_null() {
+            return SK_DROP;
+        }
+        unsafe {
+            (*hdr).h_proto = 12;
+        }
+    }
+
+    SK_PASS
+}
+
+#[export_name = "callback"]
+extern "C" fn callback(_index: u64, data: *mut u32) -> i64 {
+    unsafe {
+        *data = 123;
+    }
+
+    0
+}
+
+/* A commuted add should preserve the parent id of a dynptr data slice. */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn dynptr_slice_commuted_invalidate(_ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    bpf_ringbuf_reserve_dynptr(&ringbuf, 4, 0, dpv(&ptr));
+
+    let mut slice = bpf_dynptr_data(dpv(&ptr), 0, 4) as *mut u32;
+    if slice.is_null() {
+        bpf_ringbuf_discard_dynptr(dpv(&ptr), 0);
+        return 0;
+    }
+
+    let derived: *mut u32;
+    unsafe {
+        asm!(
+            "{dst} = 0;",
+            "{dst} += {src};",
+            "{src} = 0;",
+            dst = out(reg) derived,
+            src = inout(reg) slice,
+        );
+    }
+    let _ = slice;
+
+    bpf_ringbuf_discard_dynptr(dpv(&ptr), 0);
+    set_val(unsafe { *derived } as i32);
+    0
+}
+
+/* If the dynptr is written into in a callback function, its data
+ * slices should be invalidated as well.
+ */
+#[link_section = "?raw_tp"]
+#[no_mangle]
+extern "C" fn invalid_data_slices(_ctx: *mut c_void) -> i32 {
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    if get_map_val_dynptr(dpm(&ptr)) != 0 {
+        return 0;
+    }
+
+    let slice = bpf_dynptr_data(dpv(&ptr), 0, 4) as *mut u32;
+    if slice.is_null() {
+        return 0;
+    }
+
+    bpf_loop(10, callback, dpv(&ptr) as *mut u32, 0);
+
+    /* this should fail */
+    unsafe {
+        *slice = 1;
+    }
+
+    0
+}
+
+/* Program types that don't allow writes to packet data should fail if
+ * bpf_dynptr_slice_rdwr is called
+ */
+#[link_section = "cgroup_skb/ingress"]
+#[no_mangle]
+extern "C" fn invalid_slice_rdwr_rdonly(skb: *mut __sk_buff) -> i32 {
+    let mut buffer: [u8; 14] = [0; 14];
+    let ptr = MaybeUninit::<bpf_dynptr>::uninit();
+
+    unsafe {
+        bpf_dynptr_from_skb(skb as *mut c_void, 0, dpm(&ptr));
+    }
+
+    /* this should fail since cgroup_skb doesn't allow
+     * changing packet data
+     */
+    let mut hdr = unsafe { bpf_dynptr_slice_rdwr(dp(&ptr), 0, buffer.as_mut_ptr() as *mut c_void, 14) }
+        as *mut ethhdr;
+    sink(&mut hdr);
+
+    0
 }
 
 bpf_object!("GPL");

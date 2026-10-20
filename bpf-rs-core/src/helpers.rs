@@ -1566,3 +1566,29 @@ pub fn bpf_xdp_load_bytes<T>(xdp: *mut T, offset: u32, buf: *mut c_void, len: u3
 pub fn bpf_xdp_store_bytes<C>(xdp: *mut C, offset: u32, buf: *const c_void, len: u32) -> i64 {
     thunk!(190, fn(*mut C, u32, *const c_void, u32) -> i64)(xdp, offset, buf, len)
 }
+
+/// `s64 bpf_tcp_raw_gen_syncookie_ipv4(struct iphdr *iph, struct tcphdr *th,
+/// u32 th_len)`. Generic over the caller's header types.
+#[inline(always)]
+pub fn bpf_tcp_raw_gen_syncookie_ipv4<I, T>(iph: *mut I, th: *mut T, th_len: u32) -> i64 {
+    thunk!(204, fn(*mut I, *mut T, u32) -> i64)(iph, th, th_len)
+}
+
+/// `s64 bpf_tcp_raw_gen_syncookie_ipv6(struct ipv6hdr *iph, struct tcphdr *th,
+/// u32 th_len)`. Generic over the caller's header types.
+#[inline(always)]
+pub fn bpf_tcp_raw_gen_syncookie_ipv6<I, T>(iph: *mut I, th: *mut T, th_len: u32) -> i64 {
+    thunk!(205, fn(*mut I, *mut T, u32) -> i64)(iph, th, th_len)
+}
+
+/// `long bpf_tcp_raw_check_syncookie_ipv4(struct iphdr *iph, struct tcphdr *th)`.
+#[inline(always)]
+pub fn bpf_tcp_raw_check_syncookie_ipv4<I, T>(iph: *mut I, th: *mut T) -> i64 {
+    thunk!(206, fn(*mut I, *mut T) -> i64)(iph, th)
+}
+
+/// `long bpf_tcp_raw_check_syncookie_ipv6(struct ipv6hdr *iph, struct tcphdr *th)`.
+#[inline(always)]
+pub fn bpf_tcp_raw_check_syncookie_ipv6<I, T>(iph: *mut I, th: *mut T) -> i64 {
+    thunk!(207, fn(*mut I, *mut T) -> i64)(iph, th)
+}

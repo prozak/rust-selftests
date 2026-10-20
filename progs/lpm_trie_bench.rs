@@ -14,7 +14,10 @@
 // bpf_map, work), BPF_CORE_READ(map, map_type) and
 // BPF_CORE_READ_STR_INTO(&name, map, name) are CO-RE field offsets of the
 // `#[btf]` bpf_map view (the container_of subtracts the view's offset of
-// `work` from the argument), the reads probe reads as in the C. `random`
+// `work` from the argument), the reads probe reads as in the C. The
+// `map_type` view field is the UAPI enum (map_ptr_kern.rs): libbpf matches a
+// CO-RE field by kind, and a u32 against the kernel's enum does not resolve
+// ("invalid CO-RE relocation" at load). `random`
 // is the C's `bool` global, declared u8 and tested `== 1` as clang does
 // (lesson 32). `cur_key`
 // and `latency_free_start` are the C's statics (`#[export_name]`); the
@@ -36,18 +39,18 @@ use core::ptr::{addr_of, addr_of_mut, read_volatile};
 
 use bpf_rs_core::helpers::{
     bpf_get_prandom_u32, bpf_ktime_get_ns, bpf_loop, bpf_map_delete_elem, bpf_map_lookup_elem,
-    bpf_map_update_elem, bpf_probe_read_kernel, bpf_probe_read_kernel_str, bpf_strncmp,
+    bpf_map_update_elem, bpf_probe_read_kernel_raw, bpf_probe_read_kernel_str, bpf_strncmp,
     bpf_trace_printk, sync_fetch_and_add,
 };
 use bpf_rs_core::progs::fentry_arg as arg;
 use bpf_rs_core::{bpf_map, bpf_object};
+use btf::{BtfType, Field};
 use btf_macros::btf;
 
 const BPF_OBJ_NAME_LEN: usize = 16;
 const MAX_ENTRIES: usize = 100000000;
 const NR_LOOPS: u32 = 10000;
 
-const BPF_MAP_TYPE_LPM_TRIE: u32 = 11;
 const BPF_NOEXIST: u64 = 1;
 const BPF_EXIST: u64 = 2;
 const ENOENT: i32 = 2;
@@ -98,6 +101,72 @@ static mut op: u8 = 0;
 #[export_name = "latency_free_start"]
 static mut latency_free_start: u64 = 0;
 
+// The UAPI enum (the deprecated aliases share a value and cannot be Rust
+// variants; the kernel field is matched by kind and name).
+#[repr(u32)]
+#[allow(non_camel_case_types, dead_code)]
+#[derive(Clone, Copy)]
+enum bpf_map_type {
+    BPF_MAP_TYPE_UNSPEC = 0,
+    BPF_MAP_TYPE_HASH = 1,
+    BPF_MAP_TYPE_ARRAY = 2,
+    BPF_MAP_TYPE_PROG_ARRAY = 3,
+    BPF_MAP_TYPE_PERF_EVENT_ARRAY = 4,
+    BPF_MAP_TYPE_PERCPU_HASH = 5,
+    BPF_MAP_TYPE_PERCPU_ARRAY = 6,
+    BPF_MAP_TYPE_STACK_TRACE = 7,
+    BPF_MAP_TYPE_CGROUP_ARRAY = 8,
+    BPF_MAP_TYPE_LRU_HASH = 9,
+    BPF_MAP_TYPE_LRU_PERCPU_HASH = 10,
+    BPF_MAP_TYPE_LPM_TRIE = 11,
+    BPF_MAP_TYPE_ARRAY_OF_MAPS = 12,
+    BPF_MAP_TYPE_HASH_OF_MAPS = 13,
+    BPF_MAP_TYPE_DEVMAP = 14,
+    BPF_MAP_TYPE_SOCKMAP = 15,
+    BPF_MAP_TYPE_CPUMAP = 16,
+    BPF_MAP_TYPE_XSKMAP = 17,
+    BPF_MAP_TYPE_SOCKHASH = 18,
+    BPF_MAP_TYPE_CGROUP_STORAGE = 19,
+    BPF_MAP_TYPE_REUSEPORT_SOCKARRAY = 20,
+    BPF_MAP_TYPE_PERCPU_CGROUP_STORAGE = 21,
+    BPF_MAP_TYPE_QUEUE = 22,
+    BPF_MAP_TYPE_STACK = 23,
+    BPF_MAP_TYPE_SK_STORAGE = 24,
+    BPF_MAP_TYPE_DEVMAP_HASH = 25,
+    BPF_MAP_TYPE_STRUCT_OPS = 26,
+    BPF_MAP_TYPE_RINGBUF = 27,
+    BPF_MAP_TYPE_INODE_STORAGE = 28,
+    BPF_MAP_TYPE_TASK_STORAGE = 29,
+    BPF_MAP_TYPE_BLOOM_FILTER = 30,
+    BPF_MAP_TYPE_USER_RINGBUF = 31,
+    BPF_MAP_TYPE_CGRP_STORAGE = 32,
+    BPF_MAP_TYPE_ARENA = 33,
+    BPF_MAP_TYPE_INSN_ARRAY = 34,
+    BPF_MAP_TYPE_RHASH = 35,
+    __MAX_BPF_MAP_TYPE = 36,
+}
+
+impl BtfType for bpf_map_type {
+    type Carrier = Self;
+
+    type View<'a, Root, Path, Mode>
+        = Field<'a, Root, Self, Path, Mode>
+    where
+        Self: 'a,
+        Root: BtfType + 'a;
+
+    #[inline(always)]
+    fn __btf_view<'a, Root, Path, Mode>(
+        field: Field<'a, Root, Self, Path, Mode>,
+    ) -> Self::View<'a, Root, Path, Mode>
+    where
+        Self: 'a,
+        Root: BtfType + 'a,
+    {
+        field
+    }
+}
+
 #[btf]
 struct work_struct {
     _priv: [u8; 0],
@@ -105,7 +174,7 @@ struct work_struct {
 
 #[btf]
 struct bpf_map {
-    map_type: u32,
+    map_type: bpf_map_type,
     name: [u8; BPF_OBJ_NAME_LEN],
     work: work_struct,
 }
@@ -117,19 +186,26 @@ static TRIE_FREE_MAP: [u8; 14] = *b"trie_free_map\0";
 #[no_mangle]
 extern "C" fn trie_free_entry(ctx: *const u64) -> i32 {
     let work = arg(ctx, 0) as *const u8;
-    let mut name = MaybeUninit::<[u8; BPF_OBJ_NAME_LEN]>::uninit();
-    let mut map_type: u32 = 0;
 
     unsafe {
         /* container_of(work, struct bpf_map, work) */
         let work_off = (&*(work as *const bpf_map)).work().field.as_ptr() as usize - work as usize;
         let map = work.sub(work_off) as *const bpf_map;
 
-        bpf_probe_read_kernel(&mut map_type, 4, (&*map).map_type().as_ptr() as *const c_void);
-        if map_type != BPF_MAP_TYPE_LPM_TRIE {
+        /* clang's frame has `map_type` and `name` share fp-16 (their
+         * lifetimes are disjoint); scoping `map_type` lets LLVM colour the
+         * two slots the same way (lesson 25: the prover pins the probe
+         * reads by frame address) */
+        let map_type: u32 = {
+            let mut map_type = MaybeUninit::<u32>::uninit();
+            bpf_probe_read_kernel_raw(map_type.as_mut_ptr() as *mut c_void, 4, (&*map).map_type().as_ptr() as *const c_void);
+            map_type.assume_init()
+        };
+        if map_type != bpf_map_type::BPF_MAP_TYPE_LPM_TRIE as u32 {
             return 0;
         }
 
+        let mut name = MaybeUninit::<[u8; BPF_OBJ_NAME_LEN]>::uninit();
         /*
          * Ideally we'd have access to the map ID but that's already
          * freed before we enter trie_free().

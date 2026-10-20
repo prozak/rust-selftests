@@ -12,7 +12,11 @@
 // next slot. The map is declared with its type only (the driver sets
 // key/value sizes and max_entries). The C's .bss layout, with
 // `percpu_times_index` and `percpu_times` 256-byte aligned, is kept
-// (`// C_LAYOUT:`).
+// (`// C_LAYOUT:`). Those two are `usize` (BTF `unsigned long`): the C's
+// `u64` typedef resolves in the driver's own translation unit, where
+// bench.h's u64 is uint64_t = unsigned long, and the driver passes
+// `skel->bss->percpu_times[i]` to a `u64 *` parameter under -Werror
+// (lesson 11 for u64).
 // C_LAYOUT: .bss
 
 #![allow(non_upper_case_globals)]
@@ -44,9 +48,9 @@ static mut key: [u32; NR_CPUS] = [0; NR_CPUS];
 
 /* filled by us */
 #[no_mangle]
-static mut percpu_times_index: [u64; NR_CPUS] = [0; NR_CPUS];
+static mut percpu_times_index: [usize; NR_CPUS] = [0; NR_CPUS];
 #[no_mangle]
-static mut percpu_times: [[u64; NR_SLOTS]; NR_CPUS] = [[0; NR_SLOTS]; NR_CPUS];
+static mut percpu_times: [[usize; NR_SLOTS]; NR_CPUS] = [[0; NR_SLOTS]; NR_CPUS];
 
 #[inline(always)]
 fn patch_key(i: u32) {
@@ -78,15 +82,15 @@ extern "C" fn benchmark(_ctx: *mut c_void) -> i32 {
     let cpu = bpf_get_smp_processor_id();
 
     unsafe {
-        let times_index = (*addr_of!(percpu_times_index).cast::<u64>().add((cpu & CPU_MASK) as usize)
-            % NR_SLOTS as u64) as u32;
+        let times_index = (*addr_of!(percpu_times_index).cast::<usize>().add((cpu & CPU_MASK) as usize)
+            % NR_SLOTS) as u32;
         let start_time = bpf_ktime_get_ns();
         bpf_loop(nr_loops as u32, loop_lookup_callback, core::ptr::null_mut(), 0);
         *addr_of_mut!(percpu_times)
-            .cast::<u64>()
+            .cast::<usize>()
             .add((cpu & CPU_MASK) as usize * NR_SLOTS + times_index as usize) =
-            bpf_ktime_get_ns().wrapping_sub(start_time);
-        *addr_of_mut!(percpu_times_index).cast::<u64>().add((cpu & CPU_MASK) as usize) += 1;
+            bpf_ktime_get_ns().wrapping_sub(start_time) as usize;
+        *addr_of_mut!(percpu_times_index).cast::<usize>().add((cpu & CPU_MASK) as usize) += 1;
     }
     0
 }

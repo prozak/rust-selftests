@@ -19,7 +19,7 @@
 // scripts/translint.py's naked-verbatim check compares the built object
 // with the C object instruction by instruction.
 
-// BPF_PROGRAM_ORDER: iter_err_unsafe_c_loop iter_num_new_inlined delayed_read_mark delayed_precision_mark loop_state_deps1 loop_state_deps2 loop_state_deps3 triple_continue widen_spill checkpoint_states_deletion absent_mark_in_the_middle_state noop absent_mark_in_the_middle_state2 absent_mark_in_the_middle_state3 loop1 loop1_wrapper absent_mark_in_the_middle_state4 loop_cb4 stack_misc_vs_scalar_in_a_loop loop_cb5 loop_counter_precision_2nd_iter iter_remake_jmp iter_remake iter_remake_callee_jmp iter_remake_after_next_jmp iter_remake_two_jmp iter_remake_inline iter_remake_callee iter_remake_after_next iter_remake_drained
+// BPF_PROGRAM_ORDER: iter_err_unsafe_c_loop iter_err_unsafe_asm_loop iter_num_new_inlined iter_while_loop iter_while_loop_auto_cleanup iter_for_loop iter_bpf_for_each_macro iter_bpf_for_macro iter_pragma_unroll_loop iter_manual_unroll_loop iter_multiple_sequential_loops iter_limit_cond_break_loop iter_obfuscate_counter iter_search_loop iter_array_fill delayed_read_mark delayed_precision_mark loop_state_deps1 loop_state_deps2 loop_state_deps3 triple_continue widen_spill checkpoint_states_deletion absent_mark_in_the_middle_state noop absent_mark_in_the_middle_state2 absent_mark_in_the_middle_state3 loop1 loop1_wrapper absent_mark_in_the_middle_state4 loop_cb4 stack_misc_vs_scalar_in_a_loop loop_cb5 loop_counter_precision_2nd_iter iter_remake_jmp iter_remake iter_remake_callee_jmp iter_remake_after_next_jmp iter_remake_two_jmp iter_remake_inline iter_remake_callee iter_remake_after_next iter_remake_drained
 
 // the C's anonymous types, named here; scripts/btf_anon.py clears
 // the names in the object's BTF
@@ -35,6 +35,9 @@ test_tags! {
     iter_err_unsafe_c_loop:
         __failure,
         __msg("math between map_value pointer and register with unbounded min value is not allowed");
+    iter_err_unsafe_asm_loop:
+        __failure,
+        __msg("unbounded memory access");
     iter_num_new_inlined:
         __arch_x86_64,
         __arch_arm64,
@@ -75,6 +78,30 @@ test_tags! {
         __xlated("goto pc+0"),
         __xlated("r0 = 0"),
         __xlated("exit");
+    iter_while_loop:
+        __success;
+    iter_while_loop_auto_cleanup:
+        __success;
+    iter_for_loop:
+        __success;
+    iter_bpf_for_each_macro:
+        __success;
+    iter_bpf_for_macro:
+        __success;
+    iter_pragma_unroll_loop:
+        __success;
+    iter_manual_unroll_loop:
+        __success;
+    iter_multiple_sequential_loops:
+        __success;
+    iter_limit_cond_break_loop:
+        __success;
+    iter_obfuscate_counter:
+        __success;
+    iter_search_loop:
+        __success;
+    iter_array_fill:
+        __success;
     delayed_read_mark:
         __failure,
         __msg("R1 type=scalar expected=fp");

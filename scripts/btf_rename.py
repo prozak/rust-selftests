@@ -27,6 +27,9 @@ this object's byte storage as the pinned x86 C ABI's signed `char`.
 Pointers to Rust's `char` (a 4-byte INT 'char' in BTF since LLVM 23; LLVM 22
 dropped the DW_ATE_UTF base type, which left `void *`) always become C void
 pointers: translations spell `void *` as `*mut char` for that reason.
+`// BTF_FWD: S` turns the memberless STRUCT/UNION 'S' (what rustc emits for
+an `extern type`) into the BTF FWD a C incomplete type (`struct S;`) is: the
+rewrite is in place, since neither kind carries extra bytes at vlen 0.
 
 Usage: btf_rename.py <obj.o> [prog.rs]
 """
@@ -104,6 +107,8 @@ def main(path, objcopy=None, source=None):
     c_void = re.search(r'^// BTF_C_VOID: c_void\s*$', source_text, re.M)
     anonymous = set(re.findall(r'^// BTF_ANON: ([A-Za-z_]\w*)\s*$', source_text, re.M))
     found_anonymous = set()
+    forward = set(re.findall(r'^// BTF_FWD: ([A-Za-z_]\w*)\s*$', source_text, re.M))
+    found_forward = set()
     buf = bytearray(open(path, "rb").read())
     shdr_base, btf_off, btf_size, btf_align = elf_find_section(buf, ".BTF")
     data = bytearray(buf[btf_off:btf_off + btf_size])
@@ -154,6 +159,12 @@ def main(path, objcopy=None, source=None):
                 struct.pack_into("<I", data, pos, 0)
                 found_anonymous.add(name)
                 renamed += 1
+            elif name in forward and kind in (4, 5) and vlen == 0:
+                # FWD: kind 7, kind_flag (bit 31) 1 for a union, size/type 0.
+                struct.pack_into("<II", data, pos + 4,
+                                 (7 << 24) | ((kind == 5) << 31), 0)
+                found_forward.add(name)
+                renamed += 1
             elif kind == BTF_KIND_INT and name in RENAME:
                 struct.pack_into("<I", data, pos, intern("char" if c_char and name == "u8" else RENAME[name]))
                 if c_char and name == "u8":
@@ -186,6 +197,9 @@ def main(path, objcopy=None, source=None):
         raise ValueError("BTF_C_VOID requires a pointer to the c_void enum")
     if anonymous - found_anonymous:
         raise ValueError(f"missing BTF struct/union for BTF_ANON: {sorted(anonymous - found_anonymous)}")
+    if forward - found_forward:
+        raise ValueError("missing memberless BTF struct/union for BTF_FWD: "
+                         f"{sorted(forward - found_forward)}")
     if not renamed and not sanitized and not void_pointers:
         return
 

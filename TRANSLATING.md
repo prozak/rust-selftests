@@ -652,6 +652,14 @@ add `// BTF_ANON: RustTypeName`. This removes only the BTF struct's name so
 the generated skeleton embeds its definition instead of referring to an
 undefined named C type. Members, offsets and references stay unchanged.
 
+For a C incomplete type (`struct S;`, a BTF FWD) declare an `extern type`
+(`#![feature(extern_types)]`, `extern "C" { type S; }`) and add
+`// BTF_FWD: S`. rustc emits the extern type as a memberless STRUCT of size
+0; the normalizer rewrites that type's kind to FWD in place (a union's
+kind flag included). A verifier message that names the kind, such as
+`test_global_func14`'s "reference type('FWD S') size cannot be
+determined", needs this; a type the program only points at does not.
+
 For C `void *` globals, use a `*mut c_void` declaration and add
 `// BTF_C_VOID: c_void`. Rust emits `c_void` as an enum; the annotation
 repoints pointers to that enum to BTF type ID zero (void), allowing the

@@ -390,6 +390,40 @@ before code generation, preserving their bodies and debug info. List
 every program in each selected section. `test_log_buf.rs` uses this to
 load its valid program before its deliberately invalid one.
 
+### Type existence, size, match and enum values
+
+C's `bpf_core_type_exists(T)` / `bpf_core_type_size(T)` /
+`bpf_core_type_matches(T)` are `// BTF_TYPE_INFO:` externs returning
+`u32`, and `bpf_core_enum_value_exists(E, V)` / `bpf_core_enum_value(E, V)`
+are `// BTF_ENUM_VALUE:` externs returning `u64`:
+
+```rust
+// BTF_TYPE_INFO: struct_sz size struct a_struct
+// BTF_TYPE_INFO: typedef_func_proto_matches matches typedef func_proto_typedef
+// BTF_ENUM_VALUE: named_val2_exists exists enum named_enum NAMED_ENUM_VAL2
+// BTF_ENUM_VALUE: anon_val1 value typedef anon_enum ANON_ENUM_VAL1
+extern "C" {
+    fn struct_sz() -> u32;
+    fn typedef_func_proto_matches() -> u32;
+    fn named_val2_exists() -> u64;
+    fn anon_val1() -> u64;
+}
+```
+
+`scripts/type_id.py` lowers them to `llvm.bpf.preserve.type.info` /
+`llvm.bpf.preserve.enum.value` (TYPE_EXISTS / TYPE_SIZE / TYPE_MATCHES /
+ENUMVAL_EXISTS / ENUMVAL_VALUE relocations). libbpf answers these by
+walking INTO the local type (member names, func-proto arity, enum
+members), so unlike the shallow TYPE_ID descriptors the local type is a
+full copy of the pristine C object's BTF type, which must carry a
+relocation of the same kind on a type of that kind and name (and on that
+enumerator). `enum` covers BTF ENUM64; a typedef'd anonymous enum is named
+through its typedef. Compare the two objects' relocations with
+`equiv/bpfcore.py core_relo_records` when in doubt.
+`test_core_reloc_type_based.rs`, `test_core_reloc_enumval.rs` and
+`core_kern.rs` are the examples; the prover's `--kernel-btf` option takes
+a core_reloc test's own `btf__core_reloc_*.bpf.o` as the target.
+
 ## Kernel-struct field access (CO-RE)
 
 Only when the C source reads kernel struct fields via BTF pointers /

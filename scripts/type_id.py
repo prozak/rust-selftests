@@ -182,8 +182,9 @@ def lower(ir, types, btf):
 
     def enum(t):
         wide = t.kind == 19
+        # a value past int64 needs the unsigned form, as clang writes it
         elements = add('!{' + ', '.join(
-            add(f'!DIEnumerator(name: {quoted(n)}, value: {v}' + (', isUnsigned: true' if not t.kflag else '') + ')')
+            add(f'!DIEnumerator(name: {quoted(n)}, value: {v}' + (', isUnsigned: true' if v >= 1 << 63 else '') + ')')
             for n, v in t.enums) + '}')
         cname = ('long' if wide else 'int') if t.kflag else ('unsigned long' if wide else 'unsigned int')
         base = add(f'!DIBasicType(name: "{cname}", size: {t.size * 8}, '

@@ -63,7 +63,7 @@ per-worker overlays instead and needs no restore.
 `// BTF_EXTERN: name` (cross-object extern), `// BTF_C_MEMBERS: struct`,
 `// BTF_ANON: Type`, `// BTF_C_VOID: c_void`, `// BTF_C_CHAR: u8`,
 `// BTF_FWD: S` (incomplete type from an `extern type`), `// BTF_FN_PTR:
-struct.member = fn`, `// BTF_TYPE_ID:`, `// BPF_NAKED: fn`, `// BPF_PROGRAM_ORDER:`,
+struct.member = fn`, `// BTF_TYPE_ID:`, `// BTF_TYPE_INFO:`, `// BTF_ENUM_VALUE:`, `// BPF_NAKED: fn`, `// BPF_PROGRAM_ORDER:`,
 `// C_LAYOUT: .data .bss`, `// BTF_WEAK_KFUNC: name`, `// translint: allow(class)`
 plus reason. Test-loader expectations: `test_tags! { prog: __failure, __msg("...") }`
 copied from the C, relaxing only register/`fp-`/`off=`/insn tokens with `{{regex}}`.

@@ -353,9 +353,9 @@ def match_spec(lspec, tbtf, t_root):
     if lroot.kind in (K_ENUM, K_ENUM64):
         if troot.kind not in (K_ENUM, K_ENUM64):
             return None
-        want = essential_name(lacc0.name)  # local enumerator may be flavored
+        want = essential_name(lacc0.name)  # either enumerator may be flavored
         for i, (n, _v) in enumerate(troot.enums):
-            if n == want:
+            if essential_name(n) == want:
                 tspec.accessors.append(Accessor(i, n, troot.id))
                 return tspec
         return None

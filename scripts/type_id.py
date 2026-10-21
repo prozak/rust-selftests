@@ -127,8 +127,9 @@ def contract(elf, btf, names):
             result[function] = (d, matches.pop())
         else:
             want = ENUM_OPS[d.op[5:]][0]
+            kinds = (6, 19) if d.kind == 6 else (d.kind,)  # `enum` covers ENUM64 too
             matches = {(tid, int(acc)) for tid, k, acc in relos
-                       if k == want and btf.types[tid].kind == d.kind and btf.types[tid].name == d.name
+                       if k == want and btf.types[tid].kind in kinds and btf.types[tid].name == d.name
                        and enum_of(btf, tid) and int(acc) < len(enum_of(btf, tid).enums)
                        and enum_of(btf, tid).enums[int(acc)][0] == d.member}
             if len(matches) != 1:

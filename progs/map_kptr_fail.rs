@@ -11,14 +11,15 @@
 // #[btf] view of bpf_testmod's struct, with the memb field the C object
 // also carries (32 bytes, as the module's).
 //
-// bpf_core_type_size(struct prog_test_ref_kfunc) is a BPF_CORE_TYPE_SIZE
-// relocation this pipeline does not emit (#45); the module struct is 32
-// bytes, which is what the test's message names ("at off 32 size 4").
-// The C object was built for a BPF CPU without BPF_ST, so the scalar store
+// bpf_core_type_size(struct prog_test_ref_kfunc) is the BTF_TYPE_INFO
+// extern below (scripts/type_id.py, a TYPE_SIZE relocation on a full copy
+// of the C object's local struct; the module's is 32 bytes, "at off 32
+// size 4" in the test's message). The C object was built for a BPF CPU without BPF_ST, so the scalar store
 // to a kptr in reject_scalar_store_to_kptr goes through a register (the
 // store-immediate form is rejected with a different message); the value is
 // produced by one asm move so llc cannot fold it into a BPF_ST.
 // reject_imprecise_scalar_store_to_kptr is the C's __naked body verbatim.
+// BTF_TYPE_INFO: prog_test_ref_kfunc_size size struct prog_test_ref_kfunc
 
 use core::arch::asm;
 use core::ffi::c_void;
@@ -89,6 +90,7 @@ bpf_map! {
 extern "C" {
     fn bpf_kfunc_call_test_acquire(scalar_ptr: *mut u64) -> *mut prog_test_ref_kfunc;
     fn bpf_kfunc_call_test_release(p: *mut prog_test_ref_kfunc);
+    fn prog_test_ref_kfunc_size() -> u32;
 }
 
 // v = bpf_map_lookup_elem(&array_map, &key) with key = 0, as every program
@@ -243,8 +245,8 @@ extern "C" fn correct_btf_id_check_size(_ctx: *mut __sk_buff) -> i32 {
         if p.is_null() {
             return 0;
         }
-        // (void *)p + bpf_core_type_size(struct prog_test_ref_kfunc): 32 (header)
-        *((p as *mut u8).add(32) as *mut i32)
+        // (void *)p + bpf_core_type_size(struct prog_test_ref_kfunc)
+        *((p as *mut u8).add(prog_test_ref_kfunc_size() as usize) as *mut i32)
     }
 }
 

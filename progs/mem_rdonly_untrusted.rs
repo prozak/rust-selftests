@@ -12,12 +12,11 @@
 // (r7/r8/r9 clobbered as in the C, the inputs in compiler-chosen regs).
 //
 // bpf_core_type_id_kernel(struct sock) is the BTF_TYPE_ID extern below
-// (scripts/type_id.py). bpf_core_enum_value_exists(enum bpf_features,
-// BPF_FEAT_RDONLY_CAST_TO_VOID) is a BPF_CORE_ENUMVAL_EXISTS relocation
-// this pipeline does not emit (#45, test_tc_tunnel.rs); the pinned kernel
-// defines the value, so ldx_is_ok_bad_addr keeps the constant it resolves to
-// (the C object's `r1 = 1 ll; if r1 == 0 goto` is a dead branch there).
+// (scripts/type_id.py), bpf_core_enum_value_exists(enum bpf_features,
+// BPF_FEAT_RDONLY_CAST_TO_VOID) the BTF_ENUM_VALUE one (an ENUMVAL_EXISTS
+// relocation on the C object's copy of the enum).
 // BTF_TYPE_ID: tid_sock struct sock
+// BTF_ENUM_VALUE: feat_rdonly_cast_to_void_exists exists enum bpf_features BPF_FEAT_RDONLY_CAST_TO_VOID
 
 use core::arch::asm;
 use core::ffi::c_void;
@@ -58,6 +57,7 @@ struct bpf_iter_num {
 
 extern "C" {
     fn tid_sock() -> u64;
+    fn feat_rdonly_cast_to_void_exists() -> u64;
     fn bpf_rdonly_cast(obj: *const c_void, btf_id: u32) -> *mut c_void;
     fn bpf_iter_num_new(it: *mut bpf_iter_num, start: i32, end: i32) -> i32;
     fn bpf_iter_num_next(it: *mut bpf_iter_num) -> *mut i32;
@@ -129,8 +129,9 @@ extern "C" fn btf_id_to_ptr_mem(_ctx: *const c_void) -> i32 {
 #[no_mangle]
 extern "C" fn ldx_is_ok_bad_addr(_ctx: *const c_void) -> i32 {
     unsafe {
-        // if (!bpf_core_enum_value_exists(enum bpf_features,
-        //     BPF_FEAT_RDONLY_CAST_TO_VOID)) return 42;  -- see the header
+        if feat_rdonly_cast_to_void_exists() == 0 {
+            return 42;
+        }
         let p = bpf_rdonly_cast(null(), 0) as *const i8;
         *p.add(0x7fff) as i32
     }

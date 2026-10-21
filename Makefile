@@ -188,7 +188,7 @@ $(BLDDIR)/%-reloc.bc: $(BLDDIR)/%-linked.bc
 # --- Internalize (keep = C object ABI) + optimize ---
 KSYM_VAR_SRCS := $(shell grep -l '^// BTF_KSYM:\|^// BTF_KCONFIG:\|^// BTF_EXTERN:' progs/*.rs)
 $(patsubst progs/%.rs,$(BLDDIR)/%-opt.bc,$(KSYM_VAR_SRCS)): scripts/ksym_vars.py
-TYPE_ID_SRCS := $(shell grep -l '^// BTF_TYPE_ID:' progs/*.rs)
+TYPE_ID_SRCS := $(shell grep -l '^// BTF_TYPE_ID:\|^// BTF_TYPE_INFO:\|^// BTF_ENUM_VALUE:' progs/*.rs)
 $(patsubst progs/%.rs,$(BLDDIR)/%-opt.bc,$(TYPE_ID_SRCS)): scripts/type_id.py
 # `// BTF_WEAK_KFUNC: name` marks a kfunc the C declares `__ksym __weak` (one
 # that may not exist in the running kernel, like test_ksyms_weak.c's
@@ -208,7 +208,7 @@ $(BLDDIR)/%-opt.bc: $(BLDDIR)/%-reloc.bc $(BLDDIR)/%.keep
 		python3 scripts/ksym_vars.py $@.ksyms.ll progs/$*.rs $(SELFTESTS_OUTPUT)/$*.bpf.o; \
 		src=$@.ksyms.ll; \
 	fi; \
-	if grep -q '^// BTF_TYPE_ID:' progs/$*.rs; then \
+	if grep -q '^// BTF_TYPE_ID:\|^// BTF_TYPE_INFO:\|^// BTF_ENUM_VALUE:' progs/$*.rs; then \
 		if [ "$$src" = "$<" ]; then $(LLVM_DIS) $$src -o $@.types.ll; \
 		else cp $$src $@.types.ll; fi; \
 		python3 scripts/type_id.py $@.types.ll progs/$*.rs $(SELFTESTS_OUTPUT)/$*.bpf.o; \

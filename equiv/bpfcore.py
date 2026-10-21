@@ -55,7 +55,7 @@ class BtfMember:
 class BtfType:
     __slots__ = ("id", "kind", "name", "size", "type", "vlen", "kflag",
                  "members", "enums", "array", "int_bits", "int_signed",
-                 "fwd_union", "proto", "param_names")
+                 "int_enc", "fwd_union", "proto", "param_names")
 
     def __init__(self, tid, kind, name, kflag, vlen):
         self.id, self.kind, self.name, self.kflag, self.vlen = \
@@ -65,6 +65,7 @@ class BtfType:
         self.enums = None     # [(name, value)] for ENUM/ENUM64
         self.array = None     # (elem_type, nelems)
         self.int_bits = self.int_signed = 0
+        self.int_enc = 0      # BTF_INT_SIGNED | CHAR | BOOL encoding byte
         self.fwd_union = False
         self.proto = None     # (ret_type, [param types]) for FUNC_PROTO
         self.param_names = ()  # FUNC_PROTO parameter names (kfunc ABI suffixes)
@@ -110,6 +111,7 @@ class Btf:
                 enc, = struct.unpack_from("<I", data, pos)
                 t.int_bits = enc & 0xFF
                 t.int_signed = bool(enc & 0x01000000)
+                t.int_enc = (enc >> 24) & 0xF
                 pos += 4
             elif kind == K_ARRAY:
                 et, _it, ne = struct.unpack_from("<III", data, pos)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lower explicit Rust type-ID polyfills to LLVM's CO-RE target-ID intrinsic.
+"""Lower explicit Rust CO-RE type polyfills to LLVM's CO-RE intrinsics.
 
 `// BTF_TYPE_ID: function KIND NAME` declares an extern fn() -> u64.
 KIND is struct, union, enum, typedef, or int. The pristine C object's
@@ -21,6 +21,18 @@ names the Rust type NAME standing in for a C type that has no name
 relocation for an anonymous type of that kind, but as several may share the
 kind nothing further is checked. The verifier's messages for the negative
 tests these serve never print the type's name.
+
+`// BTF_TYPE_INFO: function exists|size|matches KIND NAME` declares an extern
+fn() -> u32 standing for bpf_core_type_exists / bpf_core_type_size /
+bpf_core_type_matches (TYPE_EXISTS / TYPE_SIZE / TYPE_MATCHES relocations).
+`// BTF_ENUM_VALUE: function exists|value enum|typedef NAME MEMBER` declares an
+extern fn() -> u64 for bpf_core_enum_value_exists / bpf_core_enum_value
+(ENUMVAL_EXISTS / ENUMVAL_VALUE). libbpf answers these by walking INTO the
+local type (member names, func-proto arity, enum members ...), so the local
+type is synthesized in full from the pristine C object's BTF, which must carry
+a relocation of the same kind on a type of that kind and name (and, for enums,
+on that member). The TYPE_ID kinds above keep their shallow (name-only)
+descriptors: only the name and kind reach the kernel there.
 """
 from pathlib import Path
 import re
@@ -35,46 +47,95 @@ from btf_rename import RENAME
 KINDS = {'int': 1, 'struct': 4, 'union': 5, 'enum': 6, 'typedef': 8}
 # C integer type name -> rustc's debug-info name (btf_rename.py's inverse)
 RUST_INT = {c: rust for rust, c in RENAME.items()}
+# op -> (bpf_core_relo_kind of the C object, llvm intrinsic flag)
+TYPE_INFO_OPS = {'exists': (8, 0), 'size': (9, 1), 'matches': (12, 2)}
+ENUM_OPS = {'exists': (10, 0), 'value': (11, 1)}
+
+
+class Decl:
+    """One polyfill: op is id / local (BTF_TYPE_ID), exists / size / matches
+    (BTF_TYPE_INFO) or enum_exists / enum_value (BTF_ENUM_VALUE)."""
+
+    def __init__(self, op, kind, name, member=None, anon=False):
+        self.op, self.kind, self.name, self.member, self.anon = op, kind, name, member, anon
 
 
 def declarations(source):
-    """function -> (BTF kind, name, local, anonymous in C)."""
+    """function -> Decl."""
     result = {}
     for line in source.splitlines():
-        if not line.startswith('// BTF_TYPE_ID:'):
-            continue
-        m = re.fullmatch(r'// BTF_TYPE_ID: ([A-Za-z_]\w*) (local )?(int|struct|union|enum|typedef) '
-                         r'([A-Za-z_][\w ]*?)( \(anonymous\))?', line)
-        if not m or m[1] in result:
-            raise ValueError(f'invalid or duplicate type-ID declaration: {line}')
-        if m[2] and m[3] not in ('struct', 'union', 'int'):
-            raise ValueError(f'a local type ID must name a struct, union or int: {line}')
-        if m[5] and not (m[2] and m[3] in ('struct', 'union')):
-            raise ValueError(f'only a local struct or union can be anonymous in C: {line}')
-        if m[2] and m[3] == 'int' and m[4] not in RUST_INT:
-            raise ValueError(f'unknown C integer type {m[4]!r} (one of {sorted(RUST_INT)}): {line}')
-        result[m[1]] = (KINDS[m[3]], m[4], bool(m[2]), bool(m[5]))
+        if line.startswith('// BTF_TYPE_ID:'):
+            m = re.fullmatch(r'// BTF_TYPE_ID: ([A-Za-z_]\w*) (local )?(int|struct|union|enum|typedef) '
+                             r'([A-Za-z_][\w ]*?)( \(anonymous\))?', line)
+            if not m or m[1] in result:
+                raise ValueError(f'invalid or duplicate type-ID declaration: {line}')
+            if m[2] and m[3] not in ('struct', 'union', 'int'):
+                raise ValueError(f'a local type ID must name a struct, union or int: {line}')
+            if m[5] and not (m[2] and m[3] in ('struct', 'union')):
+                raise ValueError(f'only a local struct or union can be anonymous in C: {line}')
+            if m[2] and m[3] == 'int' and m[4] not in RUST_INT:
+                raise ValueError(f'unknown C integer type {m[4]!r} (one of {sorted(RUST_INT)}): {line}')
+            result[m[1]] = Decl('local' if m[2] else 'id', KINDS[m[3]], m[4], anon=bool(m[5]))
+        elif line.startswith('// BTF_TYPE_INFO:'):
+            m = re.fullmatch(r'// BTF_TYPE_INFO: ([A-Za-z_]\w*) (exists|size|matches) '
+                             r'(struct|union|enum|typedef) ([A-Za-z_]\w*)', line)
+            if not m or m[1] in result:
+                raise ValueError(f'invalid or duplicate type-info declaration: {line}')
+            result[m[1]] = Decl(m[2], KINDS[m[3]], m[4])
+        elif line.startswith('// BTF_ENUM_VALUE:'):
+            m = re.fullmatch(r'// BTF_ENUM_VALUE: ([A-Za-z_]\w*) (exists|value) (enum|typedef) '
+                             r'([A-Za-z_]\w*) ([A-Za-z_]\w*)', line)
+            if not m or m[1] in result:
+                raise ValueError(f'invalid or duplicate enum-value declaration: {line}')
+            result[m[1]] = Decl('enum_' + m[2], KINDS[m[3]], m[4], member=m[5])
     return result
 
 
+def enum_of(btf, tid):
+    """The ENUM/ENUM64 behind a (possibly typedef'd) type, or None."""
+    while btf.types[tid].kind in (8, 9, 10, 11):
+        tid = btf.types[tid].type
+    return btf.types[tid] if btf.types[tid].kind in (6, 19) else None
+
+
 def contract(elf, btf, names):
-    """function -> C type id, or -> (kind, name) for a local type ID."""
-    relos = [(tid, kind) for records in core_relo_records(elf).values()
-             for _, tid, _, kind in records]
+    """function -> (Decl, target): the C type id, or (kind, name) for a
+    local type ID, or (type id, member index, value) for an enum value."""
+    relos = [(tid, kind, acc) for records in core_relo_records(elf).values()
+             for _, tid, acc, kind in records]
     result = {}
-    for function, (kind, name, local, anon) in names.items():
-        want = 6 if local else 7
-        ids = {tid for tid, k in relos if k == want}
-        if anon:
-            if not any(btf.types[tid].kind == kind and not btf.types[tid].name for tid in ids):
-                raise ValueError(f'{function}: expected a C TYPE_ID_LOCAL anonymous type of kind {kind}')
-            result[function] = (kind, name)
-            continue
-        matches = [tid for tid in ids if btf.types[tid].kind == kind and btf.types[tid].name == name]
-        if len(matches) != 1:
-            raise ValueError(f'{function}: expected one C TYPE_ID_{"LOCAL" if local else "TARGET"} '
-                             f'type for {name}')
-        result[function] = (kind, name) if local else matches[0]
+    for function, d in names.items():
+        if d.op in ('id', 'local'):
+            want = 6 if d.op == 'local' else 7
+            ids = {tid for tid, k, _ in relos if k == want}
+            if d.anon:
+                if not any(btf.types[tid].kind == d.kind and not btf.types[tid].name for tid in ids):
+                    raise ValueError(f'{function}: expected a C TYPE_ID_LOCAL anonymous type of kind {d.kind}')
+                result[function] = (d, (d.kind, d.name))
+                continue
+            matches = [tid for tid in ids if btf.types[tid].kind == d.kind and btf.types[tid].name == d.name]
+            if len(matches) != 1:
+                raise ValueError(f'{function}: expected one C TYPE_ID_{"LOCAL" if d.op == "local" else "TARGET"} '
+                                 f'type for {d.name}')
+            result[function] = (d, (d.kind, d.name) if d.op == 'local' else matches[0])
+        elif d.op in TYPE_INFO_OPS:
+            want = TYPE_INFO_OPS[d.op][0]
+            matches = {tid for tid, k, _ in relos
+                       if k == want and btf.types[tid].kind == d.kind and btf.types[tid].name == d.name}
+            if len(matches) != 1:
+                raise ValueError(f'{function}: expected one C TYPE_{d.op.upper()} relocation on {d.name}')
+            result[function] = (d, matches.pop())
+        else:
+            want = ENUM_OPS[d.op[5:]][0]
+            matches = {(tid, int(acc)) for tid, k, acc in relos
+                       if k == want and btf.types[tid].kind == d.kind and btf.types[tid].name == d.name
+                       and enum_of(btf, tid) and int(acc) < len(enum_of(btf, tid).enums)
+                       and enum_of(btf, tid).enums[int(acc)][0] == d.member}
+            if len(matches) != 1:
+                raise ValueError(f'{function}: expected one C ENUMVAL_{d.op[5:].upper()} relocation '
+                                 f'on {d.name}.{d.member}')
+            tid, idx = matches.pop()
+            result[function] = (d, (tid, idx, enum_of(btf, tid).enums[idx][1]))
     return result
 
 
@@ -86,11 +147,16 @@ def lower(ir, types, btf):
         raise ValueError('type-ID relocations require debug info')
     next_id = max(map(int, re.findall(r'!(\d+)', ir)), default=0) + 1
     metadata = []
+    globals_ = []
 
-    def add(value):
+    def reserve():
         nonlocal next_id
         ref = f'!{next_id}'
         next_id += 1
+        return ref
+
+    def add(value, ref=None):
+        ref = ref or reserve()
         metadata.append(f'{ref} = {value}')
         return ref
 
@@ -101,13 +167,36 @@ def lower(ir, types, btf):
         return '"' + ''.join(chr(c) if 32 <= c < 127 and c not in (34, 92)
                              else f'\\{c:02X}' for c in name.encode()) + '"'
 
+    def named(t):
+        return f'name: {quoted(t.name)}, ' if t.name else ''
+
+    def basic(t):
+        if t.kind == 16:
+            return f'!DIBasicType(name: {quoted(t.name)}, size: {t.size * 8}, encoding: DW_ATE_float)'
+        enc = t.int_enc
+        encoding = ('DW_ATE_boolean' if enc & 4 else 'DW_ATE_signed_char' if enc == 3
+                    else 'DW_ATE_unsigned_char' if enc & 2 else 'DW_ATE_signed' if enc & 1
+                    else 'DW_ATE_unsigned')
+        return f'!DIBasicType(name: {quoted(t.name)}, size: {t.size * 8}, encoding: {encoding})'
+
+    def enum(t):
+        wide = t.kind == 19
+        elements = add('!{' + ', '.join(
+            add(f'!DIEnumerator(name: {quoted(n)}, value: {v}' + (', isUnsigned: true' if not t.kflag else '') + ')')
+            for n, v in t.enums) + '}')
+        cname = ('long' if wide else 'int') if t.kflag else ('unsigned long' if wide else 'unsigned int')
+        base = add(f'!DIBasicType(name: "{cname}", size: {t.size * 8}, '
+                   f'encoding: DW_ATE_{"signed" if t.kflag else "unsigned"})')
+        return (f'!DICompositeType(tag: DW_TAG_enumeration_type, {named(t)}'
+                f'file: {file[1]}, baseType: {base}, size: {t.size * 8}, elements: {elements})')
+
     def typ(tid):
+        """Shallow descriptor (TYPE_ID_TARGET): name and kind only."""
         if tid in emitted:
             return emitted[tid]
         t = btf.types[tid]
         if t.kind == 1:
-            value = (f'!DIBasicType(name: {quoted(t.name)}, size: {t.size * 8}, '
-                     f'encoding: DW_ATE_{"signed" if t.int_signed else "unsigned"})')
+            value = basic(t)
         elif t.kind in (4, 5):
             tag = 'structure' if t.kind == 4 else 'union'
             value = (f'distinct !DICompositeType(tag: DW_TAG_{tag}_type, '
@@ -115,16 +204,71 @@ def lower(ir, types, btf):
         elif t.kind == 8:
             value = f'!DIDerivedType(tag: DW_TAG_typedef, name: {quoted(t.name)}, baseType: {typ(t.type)})'
         elif t.kind == 6:
-            elements = add('!{' + ', '.join(add(f'!DIEnumerator(name: {quoted(n)}, value: {v})')
-                                          for n, v in t.enums) + '}')
-            base = add(f'!DIBasicType(name: "{ "int" if t.kflag else "unsigned int"}", '
-                       f'size: {t.size * 8}, encoding: DW_ATE_{"signed" if t.kflag else "unsigned"})')
-            value = (f'!DICompositeType(tag: DW_TAG_enumeration_type, name: {quoted(t.name)}, '
-                     f'file: {file[1]}, baseType: {base}, size: {t.size * 8}, elements: {elements})')
+            value = enum(t)
         else:
             raise ValueError(f'unsupported type-ID BTF kind {t.kind}')
         emitted[tid] = add(value)
         return emitted[tid]
+
+    deep_emitted = {}
+    MODS = {9: 'volatile', 10: 'const', 11: 'restrict'}
+
+    def deep(tid):
+        """Full descriptor (TYPE_EXISTS / SIZE / MATCHES / ENUMVAL): the C
+        BTF type with everything it reaches, as clang's debug info has it."""
+        if tid == 0:
+            return 'null'
+        if tid in deep_emitted:
+            return deep_emitted[tid]
+        t = btf.types[tid]
+        if t.kind in (1, 16):
+            return add_deep(tid, basic(t))
+        if t.kind == 2:
+            ref = deep_emitted[tid] = reserve()
+            return add(f'!DIDerivedType(tag: DW_TAG_pointer_type, baseType: {deep(t.type)}, size: 64)', ref)
+        if t.kind == 3:
+            et, n = t.array
+            ref = deep_emitted[tid] = reserve()
+            sub = add(f'!{{{add(f"!DISubrange(count: {n})")}}}')
+            return add(f'!DICompositeType(tag: DW_TAG_array_type, baseType: {deep(et)}, '
+                       f'size: {btf.type_size(tid) * 8}, elements: {sub})', ref)
+        if t.kind in (4, 5):
+            tag = 'structure' if t.kind == 4 else 'union'
+            ref = deep_emitted[tid] = reserve()
+            members = []
+            for m in t.members:
+                size = m.bitfield_size if m.bitfield_size else btf.type_size(m.type) * 8
+                extra = f', flags: DIFlagBitField, extraData: i64 {m.bit_offset // 8 * 8}' if m.bitfield_size else ''
+                offset = f', offset: {m.bit_offset}' if m.bit_offset else ''
+                members.append(add(f'!DIDerivedType(tag: DW_TAG_member, {named(m)}scope: {ref}, '
+                                   f'file: {file[1]}, baseType: {deep(m.type)}, size: {size}{offset}{extra})'))
+            elements = add('!{' + ', '.join(members) + '}') if members else empty
+            return add(f'distinct !DICompositeType(tag: DW_TAG_{tag}_type, {named(t)}file: {file[1]}, '
+                       f'size: {t.size * 8}, elements: {elements})', ref)
+        if t.kind in (6, 19):
+            ref = deep_emitted[tid] = reserve()
+            return add(enum(t), ref)
+        if t.kind == 7:
+            tag = 'union' if t.fwd_union else 'structure'
+            return add_deep(tid, f'!DICompositeType(tag: DW_TAG_{tag}_type, name: {quoted(t.name)}, '
+                                 f'file: {file[1]}, flags: DIFlagFwdDecl)')
+        if t.kind == 8:
+            ref = deep_emitted[tid] = reserve()
+            return add(f'!DIDerivedType(tag: DW_TAG_typedef, name: {quoted(t.name)}, file: {file[1]}, '
+                       f'baseType: {deep(t.type)})', ref)
+        if t.kind in MODS:
+            ref = deep_emitted[tid] = reserve()
+            return add(f'!DIDerivedType(tag: DW_TAG_{MODS[t.kind]}_type, baseType: {deep(t.type)})', ref)
+        if t.kind == 13:
+            ref = deep_emitted[tid] = reserve()
+            ret, params = t.proto
+            types = add('!{' + ', '.join([deep(ret)] + [deep(p) for p in params]) + '}')
+            return add(f'!DISubroutineType(types: {types})', ref)
+        raise ValueError(f'unsupported BTF kind {t.kind} reached from a type-info polyfill')
+
+    def add_deep(tid, value):
+        deep_emitted[tid] = add(value)
+        return deep_emitted[tid]
 
     def local(kind, name):
         if kind == 1:
@@ -141,29 +285,46 @@ def lower(ir, types, btf):
         return found[0]
 
     call_id = 0
-    for name, tid in types.items():
-        if isinstance(tid, tuple):
-            flag, target = 0, local(*tid)
+    used = set()
+    for name, (d, target) in types.items():
+        if d.op == 'local':
+            ret, intrinsic, args, node = 'i64', 'llvm.bpf.btf.type.id', lambda: 'i64 0', local(*target)
+        elif d.op == 'id':
+            ret, intrinsic, args, node = 'i64', 'llvm.bpf.btf.type.id', lambda: 'i64 1', typ(target)
+        elif d.op in TYPE_INFO_OPS:
+            flag = TYPE_INFO_OPS[d.op][1]
+            ret, intrinsic, args, node = 'i32', 'llvm.bpf.preserve.type.info', lambda: f'i64 {flag}', deep(target)
         else:
-            flag, target = 1, None
-        declaration = r'^declare (?:noundef )?i64 @' + re.escape(name) + r'\(\)[^\n]*\n'
+            tid, _idx, value = target
+            flag = ENUM_OPS[d.op[5:]][1]
+            text = f'{d.member}:{value}'
+            glob = f'@.core_enum.{len(globals_)}'
+            globals_.append(f'{glob} = private unnamed_addr constant [{len(text) + 1} x i8] '
+                            f'c"{text}\\00", align 1')
+            ret, intrinsic, node = 'i64', 'llvm.bpf.preserve.enum.value', deep(tid)
+            args = lambda glob=glob, flag=flag: f'ptr {glob}, i64 {flag}'
+        used.add((ret, intrinsic))
+        declaration = r'^declare (?:noundef )?' + ret + r' @' + re.escape(name) + r'\(\)[^\n]*\n'
         if len(re.findall(declaration, ir, re.M)) != 1:
-            raise ValueError(f'{name}: expected an extern fn() -> u64')
+            raise ValueError(f'{name}: expected an extern fn() -> {"u32" if ret == "i32" else "u64"}')
         ir = re.sub(declaration, '', ir, flags=re.M)
-        pattern = r'((?:tail )?call )(?:noundef )?i64 @' + re.escape(name) + r'\(\)([^\n]*)'
+        pattern = r'((?:tail )?call )(?:noundef )?' + ret + r' @' + re.escape(name) + r'\(\)([^\n]*)'
         count = 0
 
         def replace(m):
             nonlocal call_id, count
             count += 1
             call_id += 1
-            return (f'{m[1]}i64 @llvm.bpf.btf.type.id(i32 {call_id}, i64 {flag}){m[2]}, '
-                    f'!llvm.preserve.access.index {target or typ(tid)}')
+            return (f'{m[1]}{ret} @{intrinsic}(i32 {call_id}, {args()}){m[2]}, '
+                    f'!llvm.preserve.access.index {node}')
 
         ir = re.sub(pattern, replace, ir)
         if not count or re.search(r'@' + re.escape(name) + r'\b', ir):
             raise ValueError(f'{name}: missing calls or unsupported use of type-ID polyfill')
-    ir += '\ndeclare i64 @llvm.bpf.btf.type.id(i32, i64)\n'
+    decls = {'llvm.bpf.btf.type.id': 'declare i64 @llvm.bpf.btf.type.id(i32, i64)',
+             'llvm.bpf.preserve.type.info': 'declare i32 @llvm.bpf.preserve.type.info(i32, i64)',
+             'llvm.bpf.preserve.enum.value': 'declare i64 @llvm.bpf.preserve.enum.value(i32, ptr, i64)'}
+    ir += '\n' + '\n'.join(globals_ + [decls[i] for _, i in sorted(used)]) + '\n'
     return ir + '\n'.join(metadata) + '\n'
 
 

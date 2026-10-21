@@ -2,64 +2,95 @@
 #![no_std]
 #![no_main]
 
-// Direct translation of
-// tools/testing/selftests/bpf/progs/test_core_reloc_type_based.c,
-// bpf-rs-core idiom.
+// Translation of progs/test_core_reloc_type_based.c (bpf-rs-core idiom).
 //
-// The C original calls bpf_core_type_exists()/bpf_core_type_matches()/
-// bpf_core_type_size() on bare type names (struct a_struct, union a_union,
-// enum an_enum, several typedefs...). Each of those macros lowers to
-// __builtin_preserve_type_info(), which LLVM turns into a
-// llvm.bpf.preserve.type.info intrinsic carrying CO-RE relocation kind
-// TYPE_EXISTS (6), TYPE_SIZE (8) or TYPE_ID_TARGET-adjacent TYPE_MATCHES
-// (10) — see enum bpf_core_relo_kind in include/uapi/linux/bpf.h and
-// BPF_CORE_TYPE_EXISTS/_MATCHES/_SIZE in bpf_core_read.h. These are
-// *type-level* relocations: they reference a standalone local type, not a
-// field path off a root, and are resolved by the loader against whatever
-// target BTF is attached at bpf_object__load() time.
-//
-// This crate's only CO-RE machinery is the `#[btf]` proc-macro (rust-bpf/
-// btf-macros/src/lib.rs) plus its runtime support in rust-bpf/btf/src/
-// lib.rs, and both exist solely to build *field paths* off a root value
-// (`Field::exists()` / `Field::get()` / `.as_ptr()`), which the postproc
-// FieldRelocPass lowers to just two of LLVM's six field-info kinds:
-// BYTE_OFFSET (0) and EXISTENCE (2) (rust-bpf/bpf-postproc/src/
-// field_reloc.rs, `field_info_kind`). There is no API anywhere in this
-// pipeline for a bare-type relocation (no field, no root value to walk),
-// and the postproc backend has no case for kinds 6/8/10 even if one could
-// be emitted. So none of the exists/matches/size values below can be made
-// genuinely target-adaptive; they are hardcoded to what's true only when
-// the *target* BTF is this object's own BTF (the plain "type_based" case
-// in tools/testing/selftests/bpf/prog_tests/core_reloc.c).
-//
-// core_reloc.c reuses this *same* compiled object against five more
-// target-BTF variants generated from btf__core_reloc_type_based___all_missing
-// .c / ___diff.c / ___diff_sz.c / ___incompat.c / ___fn_wrong_args.c, each
-// expecting a different combination of exists/matches/sizeof results
-// (e.g. ___all_missing expects every output field to read back as zero;
-// ___diff expects typedef_int_matches/typedef_func_proto_matches/
-// typedef_arr_matches to flip to false while struct_matches stays true).
-// A single fixed binary cannot reproduce six different outputs for six
-// different target BTFs without the missing relocations, so no static
-// (nor identity-case-hardcoded) output can satisfy all six subtests: only
-// hardcoding the identity case makes *that one* match while the other five
-// mismatch (FAIL), and there is no combination that does better since the
-// binary can't tell which target BTF it was loaded against.
-//
-// The C original has an escape hatch for exactly this situation: on a
-// compiler too old for __builtin_preserve_type_info, it sets `data.skip =
-// true` instead of computing anything (see the #else branch below). The
-// userspace harness (run_core_reloc_tests() in prog_tests/core_reloc.c)
-// checks `data->skip` right after triggering the program and calls
-// test__skip() — which does *not* count as a failure — before ever
-// memcmp-ing the output. That's the faithful behavior for this pipeline,
-// which genuinely lacks the TYPE_EXISTS/TYPE_MATCHES/TYPE_SIZE relocation
-// kinds (bpf-postproc's FieldRelocPass only ever lowers field-info kinds 0
-// BYTE_OFFSET and 2 EXISTENCE; it has no case for the type-level kinds 6/8/
-// 10 that these macros lower to), so this translation always takes that
-// same fallback for all six variants, uniformly.
+// The C's bpf_core_type_exists() / bpf_core_type_matches() /
+// bpf_core_type_size() on bare type names are TYPE_EXISTS / TYPE_MATCHES /
+// TYPE_SIZE CO-RE relocations the loader resolves against whatever target
+// BTF prog_tests/core_reloc.c attaches (six variants of this one object).
+// Each is a `// BTF_TYPE_INFO:` extern below: scripts/type_id.py replaces
+// the call by LLVM's preserve.type.info intrinsic on a full copy of the C
+// object's local type (members, func protos, qualifiers), so the Rust
+// object carries the same 37 relocations on the same type shapes.
+// BTF_TYPE_INFO: struct_exists exists struct a_struct
+// BTF_TYPE_INFO: complex_struct_exists exists struct a_complex_struct
+// BTF_TYPE_INFO: union_exists exists union a_union
+// BTF_TYPE_INFO: enum_exists exists enum an_enum
+// BTF_TYPE_INFO: typedef_named_struct_exists exists typedef named_struct_typedef
+// BTF_TYPE_INFO: typedef_anon_struct_exists exists typedef anon_struct_typedef
+// BTF_TYPE_INFO: typedef_struct_ptr_exists exists typedef struct_ptr_typedef
+// BTF_TYPE_INFO: typedef_int_exists exists typedef int_typedef
+// BTF_TYPE_INFO: typedef_enum_exists exists typedef enum_typedef
+// BTF_TYPE_INFO: typedef_void_ptr_exists exists typedef void_ptr_typedef
+// BTF_TYPE_INFO: typedef_restrict_ptr_exists exists typedef restrict_ptr_typedef
+// BTF_TYPE_INFO: typedef_func_proto_exists exists typedef func_proto_typedef
+// BTF_TYPE_INFO: typedef_arr_exists exists typedef arr_typedef
+// BTF_TYPE_INFO: struct_matches matches struct a_struct
+// BTF_TYPE_INFO: complex_struct_matches matches struct a_complex_struct
+// BTF_TYPE_INFO: union_matches matches union a_union
+// BTF_TYPE_INFO: enum_matches matches enum an_enum
+// BTF_TYPE_INFO: typedef_named_struct_matches matches typedef named_struct_typedef
+// BTF_TYPE_INFO: typedef_anon_struct_matches matches typedef anon_struct_typedef
+// BTF_TYPE_INFO: typedef_struct_ptr_matches matches typedef struct_ptr_typedef
+// BTF_TYPE_INFO: typedef_int_matches matches typedef int_typedef
+// BTF_TYPE_INFO: typedef_enum_matches matches typedef enum_typedef
+// BTF_TYPE_INFO: typedef_void_ptr_matches matches typedef void_ptr_typedef
+// BTF_TYPE_INFO: typedef_restrict_ptr_matches matches typedef restrict_ptr_typedef
+// BTF_TYPE_INFO: typedef_func_proto_matches matches typedef func_proto_typedef
+// BTF_TYPE_INFO: typedef_arr_matches matches typedef arr_typedef
+// BTF_TYPE_INFO: struct_sz size struct a_struct
+// BTF_TYPE_INFO: union_sz size union a_union
+// BTF_TYPE_INFO: enum_sz size enum an_enum
+// BTF_TYPE_INFO: typedef_named_struct_sz size typedef named_struct_typedef
+// BTF_TYPE_INFO: typedef_anon_struct_sz size typedef anon_struct_typedef
+// BTF_TYPE_INFO: typedef_struct_ptr_sz size typedef struct_ptr_typedef
+// BTF_TYPE_INFO: typedef_int_sz size typedef int_typedef
+// BTF_TYPE_INFO: typedef_enum_sz size typedef enum_typedef
+// BTF_TYPE_INFO: typedef_void_ptr_sz size typedef void_ptr_typedef
+// BTF_TYPE_INFO: typedef_func_proto_sz size typedef func_proto_typedef
+// BTF_TYPE_INFO: typedef_arr_sz size typedef arr_typedef
 
 use bpf_rs_core::bpf_object;
+
+extern "C" {
+    fn struct_exists() -> u32;
+    fn complex_struct_exists() -> u32;
+    fn union_exists() -> u32;
+    fn enum_exists() -> u32;
+    fn typedef_named_struct_exists() -> u32;
+    fn typedef_anon_struct_exists() -> u32;
+    fn typedef_struct_ptr_exists() -> u32;
+    fn typedef_int_exists() -> u32;
+    fn typedef_enum_exists() -> u32;
+    fn typedef_void_ptr_exists() -> u32;
+    fn typedef_restrict_ptr_exists() -> u32;
+    fn typedef_func_proto_exists() -> u32;
+    fn typedef_arr_exists() -> u32;
+    fn struct_matches() -> u32;
+    fn complex_struct_matches() -> u32;
+    fn union_matches() -> u32;
+    fn enum_matches() -> u32;
+    fn typedef_named_struct_matches() -> u32;
+    fn typedef_anon_struct_matches() -> u32;
+    fn typedef_struct_ptr_matches() -> u32;
+    fn typedef_int_matches() -> u32;
+    fn typedef_enum_matches() -> u32;
+    fn typedef_void_ptr_matches() -> u32;
+    fn typedef_restrict_ptr_matches() -> u32;
+    fn typedef_func_proto_matches() -> u32;
+    fn typedef_arr_matches() -> u32;
+    fn struct_sz() -> u32;
+    fn union_sz() -> u32;
+    fn enum_sz() -> u32;
+    fn typedef_named_struct_sz() -> u32;
+    fn typedef_anon_struct_sz() -> u32;
+    fn typedef_struct_ptr_sz() -> u32;
+    fn typedef_int_sz() -> u32;
+    fn typedef_enum_sz() -> u32;
+    fn typedef_void_ptr_sz() -> u32;
+    fn typedef_func_proto_sz() -> u32;
+    fn typedef_arr_sz() -> u32;
+}
 
 #[repr(C)]
 struct Data {
@@ -121,13 +152,46 @@ struct Output {
 #[link_section = "raw_tracepoint/sys_enter"]
 #[no_mangle]
 extern "C" fn test_core_type_based(_ctx: *const core::ffi::c_void) -> i32 {
-    // Mirrors the C original's #else branch (no __builtin_preserve_type_info
-    // support): skip instead of guessing, uniformly across all six target-BTF
-    // variants this same object is loaded against.
     unsafe {
-        data.skip = true;
+        let out = core::ptr::addr_of_mut!(data.output) as *mut Output;
+        (*out).struct_exists = struct_exists() != 0;
+        (*out).complex_struct_exists = complex_struct_exists() != 0;
+        (*out).union_exists = union_exists() != 0;
+        (*out).enum_exists = enum_exists() != 0;
+        (*out).typedef_named_struct_exists = typedef_named_struct_exists() != 0;
+        (*out).typedef_anon_struct_exists = typedef_anon_struct_exists() != 0;
+        (*out).typedef_struct_ptr_exists = typedef_struct_ptr_exists() != 0;
+        (*out).typedef_int_exists = typedef_int_exists() != 0;
+        (*out).typedef_enum_exists = typedef_enum_exists() != 0;
+        (*out).typedef_void_ptr_exists = typedef_void_ptr_exists() != 0;
+        (*out).typedef_restrict_ptr_exists = typedef_restrict_ptr_exists() != 0;
+        (*out).typedef_func_proto_exists = typedef_func_proto_exists() != 0;
+        (*out).typedef_arr_exists = typedef_arr_exists() != 0;
+        (*out).struct_matches = struct_matches() != 0;
+        (*out).complex_struct_matches = complex_struct_matches() != 0;
+        (*out).union_matches = union_matches() != 0;
+        (*out).enum_matches = enum_matches() != 0;
+        (*out).typedef_named_struct_matches = typedef_named_struct_matches() != 0;
+        (*out).typedef_anon_struct_matches = typedef_anon_struct_matches() != 0;
+        (*out).typedef_struct_ptr_matches = typedef_struct_ptr_matches() != 0;
+        (*out).typedef_int_matches = typedef_int_matches() != 0;
+        (*out).typedef_enum_matches = typedef_enum_matches() != 0;
+        (*out).typedef_void_ptr_matches = typedef_void_ptr_matches() != 0;
+        (*out).typedef_restrict_ptr_matches = typedef_restrict_ptr_matches() != 0;
+        (*out).typedef_func_proto_matches = typedef_func_proto_matches() != 0;
+        (*out).typedef_arr_matches = typedef_arr_matches() != 0;
+        (*out).struct_sz = struct_sz() as i32;
+        (*out).union_sz = union_sz() as i32;
+        (*out).enum_sz = enum_sz() as i32;
+        (*out).typedef_named_struct_sz = typedef_named_struct_sz() as i32;
+        (*out).typedef_anon_struct_sz = typedef_anon_struct_sz() as i32;
+        (*out).typedef_struct_ptr_sz = typedef_struct_ptr_sz() as i32;
+        (*out).typedef_int_sz = typedef_int_sz() as i32;
+        (*out).typedef_enum_sz = typedef_enum_sz() as i32;
+        (*out).typedef_void_ptr_sz = typedef_void_ptr_sz() as i32;
+        (*out).typedef_func_proto_sz = typedef_func_proto_sz() as i32;
+        (*out).typedef_arr_sz = typedef_arr_sz() as i32;
     }
-
     0
 }
 

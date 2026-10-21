@@ -31,6 +31,7 @@ the part that was being re-derived at the start of every session.
 | C objects + built selftests (the oracle's tree) | `.build/selftests-output-qemu/` (`SELFTESTS_OUTPUT`); kernel pin in `kernel-commit` |
 | LLVM 23 (llc/opt), bpftool | `.build/llvm/bin/`, `.build/bpftool-output-qemu/bpftool` |
 | rust-bpf (add_ksyms.py, btf crate) | `../rust-bpf` (`RUSTBPF`) |
+| helper / map / ctx / prog-type bindings (NOT in rust-bpf) | `bpf-rs-core/src/{helpers,maps,ctx,progs}.rs`; `command grep -n 'fn bpf_<name>' bpf-rs-core/src/helpers.rs` |
 | built Rust objects | `bld/<name>.bpf.o` |
 | gate baseline / logs | `qemu/gate/baseline.tsv` (name, rust_md5, c_md5, env_md5, verdict PASS/FAIL/NO-ORACLE, seconds, test_progs summary), `qemu/gate/logs/<name>.log` (Rust) and `<name>.c.log` (C re-check) |
 | prover baseline / waivers | `equiv/results/baseline.tsv`, `equiv/waivers.tsv` (in the toolchain hash: adding a waiver = full re-sweep) |
@@ -48,8 +49,10 @@ python3 scripts/translint.py <name>                 # mechanical lints; test-tag
 make ci-fast                                         # hermetic: pytest equiv/tests, compileall, SEMANTICS.md freshness
 ```
 
-Survey of what is untranslated: `progs/*.c` in the C tree minus `progs/*.rs`,
-minus `scripts/non-targets.tsv`; `__failure` count marks a negative object.
+Survey of what is untranslated: `scripts/survey.sh [-f|-s|-m]` (C progs minus
+`progs/*.rs` minus `scripts/non-targets.tsv`; one line per object: lines,
+`__failure` count, `__success|__retval` count, SEC count, name, includes;
+`-f` pure-failure only, `-s` no `__failure`, `-m` mixed).
 `make test-<name>` swaps one object into the shared tree (always `make
 restore-all`, then `make restore-<name>` to relink); `gate.py` uses private
 per-worker overlays instead and needs no restore.
@@ -64,6 +67,12 @@ struct.member = fn`, `// BTF_TYPE_ID:`, `// BPF_NAKED: fn`, `// BPF_PROGRAM_ORDE
 `// C_LAYOUT: .data .bss`, `// BTF_WEAK_KFUNC: name`, `// translint: allow(class)`
 plus reason. Test-loader expectations: `test_tags! { prog: __failure, __msg("...") }`
 copied from the C, relaxing only register/`fp-`/`off=`/insn tokens with `{{regex}}`.
+Tags `scripts/btf_test_tags.py` accepts (same spelling as `bpf_misc.h`):
+`__failure/__success[_unpriv]`, `__msg/__not_msg/__msg_next[_unpriv]`,
+`__retval[_unpriv]`, `__flag`, `__log_level`, `__description`, `__xlated/__jited[_unpriv]`,
+`__arch*`, `__auxiliary[_unpriv]`, `__caps_unpriv`, `__skip`, `__stdout/__stderr[_unpriv]`,
+`__linear_size`, `__load_if_[no_]large_stack`, `__btf_path/__btf_func_path`,
+`__prepare_priv`. Anything else: the C object's BTF decl_tags are the ground truth.
 
 ## Standing constraints
 

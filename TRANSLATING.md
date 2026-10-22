@@ -383,6 +383,25 @@ lowered call points at rustc's own debug info for it, so llc emits the
 struct with its real members, which the kernel reads to size and lay out
 the allocation. Never hardcode the id. `normal_map_btf.rs` is the example.
 
+When the Rust object has no type of its own to point at (a C typedef, a
+pointer, an array, an anonymous aggregate, or a named type the program
+only asks the id of), add `(copy)`: the C object's TYPE_ID_LOCAL type of
+that kind and name is synthesized in full, so it occurs exactly once in
+the Rust BTF with the C shape. `ptr` and `array` are kinds too, and an
+anonymous type is named by its C spelling:
+
+```rust
+// BTF_TYPE_ID: local_struct_typedef local typedef named_struct_typedef (copy)
+// BTF_TYPE_ID: local_anon_func_proto_ptr local ptr _Bool (*)(int) (copy)
+// BTF_TYPE_ID: local_anon_arr local array _Bool[47] (copy)
+// BTF_TYPE_ID: local_anon_struct local struct struct { int marker_field; } (copy)
+```
+
+`int` stays without `(copy)`: rustc's own `i32` (renamed `int`) is the
+first `int` in the table, which is what `btf__find_by_name_kind` returns.
+`test_core_reloc_type_id.rs` is the example: its consumer checks every
+local id against the object's own BTF.
+
 When the consumer depends on program load order (libbpf stops at the first
 rejection), add `// BPF_PROGRAM_ORDER: first_prog second_prog`.
 `scripts/program_order.py` reorders whole LLVM definitions immediately

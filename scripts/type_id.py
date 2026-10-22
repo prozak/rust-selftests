@@ -22,6 +22,14 @@ relocation for an anonymous type of that kind, but as several may share the
 kind nothing further is checked. The verifier's messages for the negative
 tests these serve never print the type's name.
 
+`// BTF_TYPE_ID: function local KIND NAME (copy)` is bpf_core_type_id_local()
+on a type the Rust object does not define: the C object's TYPE_ID_LOCAL type of
+that kind and name is synthesized in full (as the type-info markers below do),
+so the object's BTF carries one type of exactly the C shape and the relocation
+points at it. KIND adds ptr and array; for an anonymous type NAME is its C
+spelling (`void *`, `_Bool (*)(int)`, `_Bool[47]`, `struct { int marker_field; }`,
+`enum { MARKER_ENUM_VAL }`), matched by cspell() below.
+
 `// BTF_TYPE_INFO: function exists|size|matches KIND NAME` declares an extern
 fn() -> u32 standing for bpf_core_type_exists / bpf_core_type_size /
 bpf_core_type_matches (TYPE_EXISTS / TYPE_SIZE / TYPE_MATCHES relocations).
@@ -44,7 +52,7 @@ from bpfelf import BpfElf
 from bpfcore import Btf, core_relo_records
 from btf_rename import RENAME
 
-KINDS = {'int': 1, 'struct': 4, 'union': 5, 'enum': 6, 'typedef': 8}
+KINDS = {'int': 1, 'ptr': 2, 'array': 3, 'struct': 4, 'union': 5, 'enum': 6, 'typedef': 8}
 # C integer type name -> rustc's debug-info name (btf_rename.py's inverse)
 RUST_INT = {c: rust for rust, c in RENAME.items()}
 # op -> (bpf_core_relo_kind of the C object, llvm intrinsic flag)
@@ -56,8 +64,9 @@ class Decl:
     """One polyfill: op is id / local (BTF_TYPE_ID), exists / size / matches
     (BTF_TYPE_INFO) or enum_exists / enum_value (BTF_ENUM_VALUE)."""
 
-    def __init__(self, op, kind, name, member=None, anon=False):
-        self.op, self.kind, self.name, self.member, self.anon = op, kind, name, member, anon
+    def __init__(self, op, kind, name, member=None, anon=False, copy=False):
+        self.op, self.kind, self.name, self.member = op, kind, name, member
+        self.anon, self.copy = anon, copy
 
 
 def declarations(source):
@@ -65,17 +74,23 @@ def declarations(source):
     result = {}
     for line in source.splitlines():
         if line.startswith('// BTF_TYPE_ID:'):
-            m = re.fullmatch(r'// BTF_TYPE_ID: ([A-Za-z_]\w*) (local )?(int|struct|union|enum|typedef) '
-                             r'([A-Za-z_][\w ]*?)( \(anonymous\))?', line)
+            m = re.fullmatch(r'// BTF_TYPE_ID: ([A-Za-z_]\w*) (local )?(int|ptr|array|struct|union|enum|typedef) '
+                             r'([A-Za-z_][\w \*\(\)\[\]{};]*?)( \(anonymous\)| \(copy\))?', line)
             if not m or m[1] in result:
                 raise ValueError(f'invalid or duplicate type-ID declaration: {line}')
-            if m[2] and m[3] not in ('struct', 'union', 'int'):
-                raise ValueError(f'a local type ID must name a struct, union or int: {line}')
-            if m[5] and not (m[2] and m[3] in ('struct', 'union')):
+            copy = m[5] == ' (copy)'
+            if copy and not m[2]:
+                raise ValueError(f'only a local type ID can be a copy of the C type: {line}')
+            if m[3] in ('ptr', 'array') and not copy:
+                raise ValueError(f'a ptr or array type ID must be a local copy: {line}')
+            if m[2] and not copy and m[3] not in ('struct', 'union', 'int'):
+                raise ValueError(f'a local type ID must name a struct, union or int, or be a copy: {line}')
+            if m[5] == ' (anonymous)' and not (m[2] and m[3] in ('struct', 'union')):
                 raise ValueError(f'only a local struct or union can be anonymous in C: {line}')
-            if m[2] and m[3] == 'int' and m[4] not in RUST_INT:
+            if m[2] and not copy and m[3] == 'int' and m[4] not in RUST_INT:
                 raise ValueError(f'unknown C integer type {m[4]!r} (one of {sorted(RUST_INT)}): {line}')
-            result[m[1]] = Decl('local' if m[2] else 'id', KINDS[m[3]], m[4], anon=bool(m[5]))
+            result[m[1]] = Decl('local' if m[2] else 'id', KINDS[m[3]], m[4],
+                                anon=m[5] == ' (anonymous)', copy=copy)
         elif line.startswith('// BTF_TYPE_INFO:'):
             m = re.fullmatch(r'// BTF_TYPE_INFO: ([A-Za-z_]\w*) (exists|size|matches) '
                              r'(struct|union|enum|typedef) ([A-Za-z_]\w*)', line)
@@ -98,6 +113,35 @@ def enum_of(btf, tid):
     return btf.types[tid] if btf.types[tid].kind in (6, 19) else None
 
 
+def cspell(btf, tid):
+    """The C spelling of a BTF type, enough to tell anonymous TYPE_ID_LOCAL
+    types apart (a named aggregate is `struct NAME`, an anonymous one is
+    `struct { <first member> }`)."""
+    if tid == 0:
+        return 'void'
+    t = btf.types[tid]
+    if t.kind in (1, 16, 8) or (t.kind in (4, 5, 6, 19, 7) and t.name):
+        prefix = {4: 'struct ', 5: 'union ', 6: 'enum ', 19: 'enum ', 7: 'union ' if t.fwd_union else 'struct '}
+        return prefix.get(t.kind, '') + t.name
+    if t.kind == 2:
+        if t.type and btf.types[t.type].kind == 13:
+            ret, params = btf.types[t.type].proto
+            return f'{cspell(btf, ret)} (*)({", ".join(cspell(btf, p) for p in params) or "void"})'
+        return cspell(btf, t.type) + ' *'
+    if t.kind == 3:
+        et, n = t.array
+        return f'{cspell(btf, et)}[{n}]'
+    if t.kind in (4, 5):
+        tag = 'struct' if t.kind == 4 else 'union'
+        m = t.members[0] if t.members else None
+        return f'{tag} {{ {cspell(btf, m.type)} {m.name}; }}' if m else f'{tag} {{ }}'
+    if t.kind in (6, 19):
+        return f'enum {{ {t.enums[0][0]} }}' if t.enums else 'enum { }'
+    if t.kind in (9, 10, 11):
+        return {9: 'volatile ', 10: 'const ', 11: 'restrict '}[t.kind] + cspell(btf, t.type)
+    raise ValueError(f'no C spelling for BTF kind {t.kind}')
+
+
 def contract(elf, btf, names):
     """function -> (Decl, target): the C type id, or (kind, name) for a
     local type ID, or (type id, member index, value) for an enum value."""
@@ -108,6 +152,15 @@ def contract(elf, btf, names):
         if d.op in ('id', 'local'):
             want = 6 if d.op == 'local' else 7
             ids = {tid for tid, k, _ in relos if k == want}
+            if d.copy:
+                matches = [tid for tid in ids if btf.types[tid].kind == d.kind
+                           and (btf.types[tid].name == d.name if btf.types[tid].name
+                                else cspell(btf, tid) == d.name)]
+                if len(matches) != 1:
+                    raise ValueError(f'{function}: expected one C TYPE_ID_LOCAL type spelled {d.name!r} '
+                                     f'of kind {d.kind}, found {len(matches)}')
+                result[function] = (d, matches[0])
+                continue
             if d.anon:
                 if not any(btf.types[tid].kind == d.kind and not btf.types[tid].name for tid in ids):
                     raise ValueError(f'{function}: expected a C TYPE_ID_LOCAL anonymous type of kind {d.kind}')
@@ -204,7 +257,10 @@ def lower(ir, types, btf):
             value = (f'distinct !DICompositeType(tag: DW_TAG_{tag}_type, '
                      f'name: {quoted(t.name)}, file: {file[1]}, size: {t.size * 8}, elements: {empty})')
         elif t.kind == 8:
-            value = f'!DIDerivedType(tag: DW_TAG_typedef, name: {quoted(t.name)}, baseType: {typ(t.type)})'
+            # the target is matched by name and kind only; a ptr / array base
+            # just has to be a valid node, and deep() is the one that has them
+            base = typ(t.type) if btf.types[t.type].kind in (1, 4, 5, 6, 8) else deep(t.type)
+            value = f'!DIDerivedType(tag: DW_TAG_typedef, name: {quoted(t.name)}, baseType: {base})'
         elif t.kind == 6:
             value = enum(t)
         else:
@@ -290,7 +346,8 @@ def lower(ir, types, btf):
     used = set()
     for name, (d, target) in types.items():
         if d.op == 'local':
-            ret, intrinsic, args, node = 'i64', 'llvm.bpf.btf.type.id', lambda: 'i64 0', local(*target)
+            node = deep(target) if d.copy else local(*target)
+            ret, intrinsic, args = 'i64', 'llvm.bpf.btf.type.id', lambda: 'i64 0'
         elif d.op == 'id':
             ret, intrinsic, args, node = 'i64', 'llvm.bpf.btf.type.id', lambda: 'i64 1', typ(target)
         elif d.op in TYPE_INFO_OPS:

@@ -55,6 +55,22 @@ such swap ran all 145 of them. `-t` is a substring match in `test_progs`,
 so a filter can select tests whose names extend it: a superset, never a
 miss.
 
+A `benchs/` object has no `prog_tests` consumer: only the `bench` driver
+includes its skeleton. `scripts/bench-consumers` maps such an object to
+its bench names and arguments, one run per line; the swap relinks `bench`
+instead of `test_progs` (a driver that no longer compiles against the
+Rust skeleton is a FAIL) and writes the rows to `.bench-runs` in the
+worker's layer, and the guest runs `scripts/gate-bench-run` in place of
+`test_progs`: `bench -w1 -d2 -a <row>` per row, PASS when every run exits
+0 and reports a non-zero rate (`Summary:`, `RESULT`, `median ... ns/op`,
+`events per sec`). It is a does-it-run oracle, not a performance one:
+guest timings are too noisy to gate on; the rates are in the log.
+`xdp_lb_bench` is the strongest case, the driver validates each scenario's
+output packet and counters before timing it. Two bench objects stay
+NO-ORACLE with reasons in the table (`bench_sockmap_prog`,
+`local_storage_rcu_tasks_trace_bench`: their drivers fail with the C
+object in this guest too).
+
 Each row records the wall seconds its last run took, and the parallel
 queue runs the translations without a record first (new ones) and then
 longest first, so a long object cannot land last and hold the makespan.

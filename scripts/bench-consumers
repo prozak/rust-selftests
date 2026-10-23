@@ -48,7 +48,8 @@ bench_local_storage_create local-storage-create
 
 local_storage_bench local-storage-cache-seq-get
 local_storage_bench local-storage-cache-int-get
-local_storage_bench local-storage-cache-hashmap-control
+# local-storage-cache-hashmap-control: "Error creating map 18: -12"
+# (ENOMEM) in the 4 GB guest, with the C object too.
 
 htab_mem_bench htab-mem
 htab_mem_bench rhtab-mem
@@ -65,13 +66,14 @@ bloom_filter_bench hashmap-with-bloom
 # lpm_trie_bench holds the lookup/insert/update/delete programs,
 # lpm_trie_map the map lpm-trie-free loads and frees in a loop; the
 # noop/baseline benches run no program but load the first skeleton.
-lpm_trie_bench lpm-trie-noop
-lpm_trie_bench lpm-trie-baseline
-lpm_trie_bench lpm-trie-lookup
-lpm_trie_bench lpm-trie-insert
-lpm_trie_bench lpm-trie-update
-lpm_trie_bench lpm-trie-delete
-lpm_trie_map lpm-trie-free
+# --nr_entries is mandatory (keys [0, N) with 2^prefix_len >= N).
+lpm_trie_bench lpm-trie-noop --nr_entries 10000 --prefix_len 24
+lpm_trie_bench lpm-trie-baseline --nr_entries 10000 --prefix_len 24
+lpm_trie_bench lpm-trie-lookup --nr_entries 10000 --prefix_len 24
+lpm_trie_bench lpm-trie-insert --nr_entries 10000 --prefix_len 24
+lpm_trie_bench lpm-trie-update --nr_entries 10000 --prefix_len 24
+lpm_trie_bench lpm-trie-delete --nr_entries 10000 --prefix_len 24
+lpm_trie_map lpm-trie-free --nr_entries 10000 --prefix_len 24
 
 # xdp_lb_bench: the driver validates each scenario (packet bytes and
 # counters) before timing it and exits 1 on a mismatch, so every scenario

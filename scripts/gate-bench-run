@@ -31,9 +31,11 @@ while read -r row; do
     printf '%s\n' "${out}" | sed 's/^/    /'
     result="$(printf '%s\n' "${out}" \
         | grep -E '^(Summary:|SUMMARY |RESULT |[^ ]+: median )|events per sec|events/sec' | tail -1)"
-    # a non-zero rate: some number in the result line other than 0/0.0
+    # a non-zero rate: some number after a rate word other than 0/0.0
+    # (hashmap-without-bloom: hits 0, drops 18M; bloom-false-positive: 0
+    # false hits of N total operations)
     rate="$(printf '%s\n' "${result}" \
-        | grep -oE '(median|hits|throughput|creates|per-prod-op|=|lookup|total trans|avg|of)[ =]*[0-9]+(\.[0-9]+)?|[0-9]+(\.[0-9]+)? events' \
+        | grep -oE '(median|hits|drops|throughput|creates|per-prod-op|=|lookup|total (trans|operations)|avg|of)[ =]*[0-9]+(\.[0-9]+)?|[0-9]+(\.[0-9]+)? events' \
         | grep -oE '[0-9]+(\.[0-9]+)?' | grep -vE '^0+(\.0+)?$' | head -1)"
     if [ "${rc}" -eq 0 ] && [ -n "${rate}" ]; then
         ok=$((ok + 1))

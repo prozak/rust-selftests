@@ -98,9 +98,12 @@ static stacktrace: i32 = 0;
 #[allow(non_camel_case_types)]
 type stack_trace_t = [u64; 128];
 
+// `static mut`, like the two usdt maps above: an immutable static lands in
+// a second, read-only `.maps` section and libbpf, which finds the first
+// `.maps` by name, cannot find the symbol there (skeleton generation fails).
 #[link_section = ".maps"]
 #[no_mangle]
-static stack_heap: BpfMap<u32, stack_trace_t, { maps::PERCPU_ARRAY }, 1> = BpfMap::new();
+static mut stack_heap: BpfMap<u32, stack_trace_t, { maps::PERCPU_ARRAY }, 1> = BpfMap::new();
 
 #[inline(always)]
 fn do_stacktrace(ctx: *const c_void) {
@@ -109,7 +112,7 @@ fn do_stacktrace(ctx: *const c_void) {
     }
 
     let zero: u32 = 0;
-    let ptr = bpf_map_lookup_elem(&stack_heap, &zero);
+    let ptr = bpf_map_lookup_elem(addr_of!(stack_heap), &zero);
 
     if !ptr.is_null() {
         bpf_get_stack(ctx, ptr, core::mem::size_of::<stack_trace_t>() as u32, 0);

@@ -16,7 +16,7 @@ use core::ffi::c_void;
 #[no_mangle]
 static mut nr_loops: u32 = 0;
 #[no_mangle]
-static mut hits: i64 = 0;
+static mut hits: isize = 0; // C `long`: benchs/bench_bpf_loop.c swaps it through a `long *`
 
 extern "C" fn empty_callback(_index: u64, _data: *mut c_void) -> i64 {
     0

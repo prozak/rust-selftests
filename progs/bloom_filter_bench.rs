@@ -89,7 +89,11 @@ struct callback_ctx {
     update: bool,
 }
 
-/* Tracks the number of hits, drops, and false hits */
+/* Tracks the number of hits, drops, and false hits. Anonymous in the C
+ * (`struct { ... } percpu_stats[256]`): the bench driver's skeleton
+ * must embed the definition, not name an undefined `struct percpu_stats_t`.
+ */
+// BTF_ANON: percpu_stats_t
 #[allow(non_camel_case_types)]
 #[repr(C, align(256))]
 struct percpu_stats_t {

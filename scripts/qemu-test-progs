@@ -132,6 +132,13 @@ cp -p '${OUT}/${PROG}' /run/gate/ && \
 cd '${OUT}' && "
     RUN_PROGS="/run/gate/${PROG}"
 fi
+# A benchs/ object (scripts/bench-consumers): swap-and-test.sh wrote the
+# bench rows to .bench-runs (in the worker's layer under GATE_UPPER) and
+# the guest runs scripts/gate-bench-run instead of test_progs.
+if [ -s "${GATE_UPPER:-${OUT}}/.bench-runs" ]; then
+    RUN_PROGS="${HERE}/scripts/gate-bench-run"
+    TEST_ARG=""
+fi
 
 # vng: boot the kernel, share host fs, run the command in $OUT, propagate
 # the exit status. --verbose keeps kernel oops visible in the log.

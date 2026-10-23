@@ -49,7 +49,8 @@ ENV_FILES = ["scripts/swap-and-test.sh", "scripts/affected_tests.py",
              "scripts/qemu-test-progs", "scripts/gate-overlay.sh",
              "scripts/gate-record-filter", "scripts/known-bad-tests",
              "scripts/gate-serial", "scripts/extra-consumers",
-             "scripts/gate-guest-loop"]
+             "scripts/gate-guest-loop", "scripts/bench-consumers",
+             "scripts/gate-bench-run"]
 
 
 def stop_children():

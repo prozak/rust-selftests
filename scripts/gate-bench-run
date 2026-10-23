@@ -1,0 +1,47 @@
+#!/bin/bash
+# gate-bench-run [runs-file] [per-run-seconds]
+#
+# Guest-side runner of a benchs/ object (scripts/bench-consumers): in the
+# selftests output (cwd), run `./bench -w1 -d2 -a <row>` for every row of
+# .bench-runs (what scripts/swap-and-test.sh wrote: `<bench-name>
+# [arguments...]`) and judge each by its exit status and its result line:
+# the driver's final report (`Summary: ...`, `RESULT scenario=...`,
+# `<name>: median X ns/op`, `N events per sec`, `cpuNN: lookup XM`,
+# `SUMMARY ...`) must carry a non-zero number. The output ends with a
+# test_progs-shaped `Summary: k/n PASSED, m FAILED` line, which is what
+# scripts/qemu_gate.py's runtime_result reads, and the exit status is 0
+# only when every run passed. stderr is merged: the guest's is lost
+# otherwise. A run past the per-run timeout (default 300 s; the timing
+# benches stop at their sample target, the others after -d2 seconds plus
+# setup) is a FAIL.
+set -u
+
+RUNS="${1:-.bench-runs}"
+LIMIT="${2:-300}"
+[ -x ./bench ] || { echo "gate-bench-run: no ./bench in $(pwd)"; echo "Summary: 0/0 PASSED, 1 FAILED"; exit 1; }
+[ -s "${RUNS}" ] || { echo "gate-bench-run: no runs in ${RUNS}"; echo "Summary: 0/0 PASSED, 1 FAILED"; exit 1; }
+
+n=0; ok=0; bad=0
+while read -r row; do
+    [ -n "${row}" ] || continue
+    n=$((n + 1))
+    echo "#${n} bench:${row}"
+    out="$(timeout "${LIMIT}" ./bench -w1 -d2 -a ${row} 2>&1)"
+    rc=$?
+    printf '%s\n' "${out}" | sed 's/^/    /'
+    result="$(printf '%s\n' "${out}" \
+        | grep -E '^(Summary:|SUMMARY |RESULT |[^ ]+: median )|events per sec|events/sec' | tail -1)"
+    # a non-zero rate: some number in the result line other than 0/0.0
+    rate="$(printf '%s\n' "${result}" \
+        | grep -oE '(median|hits|throughput|creates|per-prod-op|=|lookup|total trans|avg|of)[ =]*[0-9]+(\.[0-9]+)?|[0-9]+(\.[0-9]+)? events' \
+        | grep -oE '[0-9]+(\.[0-9]+)?' | grep -vE '^0+(\.0+)?$' | head -1)"
+    if [ "${rc}" -eq 0 ] && [ -n "${rate}" ]; then
+        ok=$((ok + 1))
+        echo "#${n} bench:${row}:OK (${result})"
+    else
+        bad=$((bad + 1))
+        echo "#${n} bench:${row}:FAIL (rc ${rc}; ${result:-no result line})"
+    fi
+done < "${RUNS}"
+echo "Summary: ${ok}/${n} PASSED, ${bad} FAILED"
+[ "${bad}" -eq 0 ] && [ "${n}" -gt 0 ]

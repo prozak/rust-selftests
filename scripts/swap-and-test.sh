@@ -55,6 +55,10 @@ esac
 
 cp "${SRC}" "${OUT}/${NAME}.bpf.o"
 echo "[swap] installed $(basename "${SRC}") as ${NAME}.bpf.o (${WHICH})"
+# A stale bench job file would make the guest run benches instead of
+# test_progs (scripts/gate-bench-run); under the gate's overlay the
+# deletion is a whiteout the guest replays.
+rm -f "${OUT}/.bench-runs"
 
 # The selftests make invocation, mirroring build-qemu-selftests.sh (and
 # bpf-uml-selftests build.sh under FLAVOR=uml).
@@ -183,6 +187,40 @@ while read -r obj base; do
     [ "${obj}" = "${NAME}" ] || continue
     case " ${TESTS[*]-} " in *" ${base} "*) ;; *) TESTS+=("${base}") ;; esac
 done < "${HERE}/scripts/extra-consumers"
+
+# A benchs/ object: its only consumer is the `bench` driver, and
+# scripts/bench-consumers says which bench names (and arguments) exercise
+# it. Relink bench the way test_progs is relinked above (the Makefile's
+# bench_<x>.o rules name the skeletons they include, so the regenerated
+# skeleton recompiles the driver's object), write the rows to .bench-runs
+# for the guest (scripts/gate-bench-run; under the gate's overlay the
+# file lands in the worker's layer) and run the guest with a filter that
+# names the object. A driver that no longer compiles against the
+# skeleton (a type the Rust BTF spells differently; -Werror) is a FAIL
+# here, which the C re-run then classifies.
+if [ "${#TESTS[@]}" -eq 0 ]; then
+    BENCH_ROWS=()
+    while read -r obj rest; do
+        case "${obj}" in ''|'#'*) continue ;; esac
+        [ "${obj}" = "${NAME}" ] || continue
+        BENCH_ROWS+=("${rest}")
+    done < "${HERE}/scripts/bench-consumers"
+    if [ "${#BENCH_ROWS[@]}" -gt 0 ]; then
+        rm -f "${OUT}/bench"
+        sfmake "${OUT}//bench" > /dev/null
+        # bench_<x>.o rules: one line each, '\'-continued (bench_ringbufs)
+        for o in $(sed -e ':a' -e '/\\$/N; s/\\\n//; ta' "${SELFTESTS_SRC}/Makefile" \
+                   | sed -n "s|^\$(OUTPUT)/\(bench_[a-z_0-9]*\.o\):.*/${NAME}\.skel\.h.*|\1|p"); do
+            [ "${OUT}/${o}" -nt "${OUT}/${NAME}.skel.h" ] || \
+                { echo "failed to rebuild ${o}" >&2; exit 1; }
+        done
+        [ -x "${OUT}/bench" ] || { echo "bench relink failed" >&2; exit 1; }
+        echo "[swap] bench relinked"
+        printf '%s\n' "${BENCH_ROWS[@]}" > "${OUT}/.bench-runs"
+        echo "[swap] bench runs: $(printf '%s; ' "${BENCH_ROWS[@]}")"
+        TESTS=("bench:${NAME}")
+    fi
+fi
 [ "${#TESTS[@]}" -gt 0 ] || { echo "no prog_tests consume ${NAME}" >&2; exit 1; }
 
 # The names collected above are prog_tests FILE basenames, but the -t
@@ -196,39 +234,44 @@ done < "${HERE}/scripts/extra-consumers"
 # test the file defines, and to the basename when it defines none. -t is
 # a substring match in test_progs, so a name may select tests whose name
 # extends it: a superset, never a miss.
-SRCS=()
-for t in "${TESTS[@]}"; do SRCS+=("${SELFTESTS_SRC}/prog_tests/${t}.c"); done
-NAMES="${NAME}"
-for h in ${SKELS[@]+"${SKELS[@]}"}; do
-    stem="$(basename "${h}")"; stem="${stem%.lskel.h}"; stem="${stem%.skel.h}"
-    [ "${stem}" = "${NAME}" ] || NAMES="${NAMES},${stem}"
-done
-EXPANDED=()
-for n in $(python3 "${HERE}/scripts/affected_tests.py" "${NAMES}" "${SRCS[@]}"); do
-    case " ${EXPANDED[*]-} " in *" ${n} "*) ;; *) EXPANDED+=("${n}") ;; esac
-done
-# Subtract tests known to fail with pristine C objects (kernel limits /
-# environment) so bundled always-broken tests can't fail a translation.
-# known-bad-tests: exact test names leave the -t list (an object whose every
-# consumer is denied has no oracle), and every entry - a test name or
-# test/subtest - also goes to test_progs as its -d glob denylist, which
-# matches whole names: a -t name is a substring match and can pull a denied
-# test back in (stack_arg selects verifier_stack_arg).
-DENY_FILE="$(dirname "${BASH_SOURCE[0]}")/known-bad-tests"
 DENY=""
-if [ -f "${DENY_FILE}" ]; then
-    DENY="$(grep -v '^#' "${DENY_FILE}" | grep -v '^[[:space:]]*$' | paste -sd, -)"
-    KEPT=()
-    for n in "${EXPANDED[@]}"; do
-        grep -qxF "${n}" <(grep -v '^#' "${DENY_FILE}") || KEPT+=("${n}")
+if [ "${TESTS[0]}" = "bench:${NAME}" ]; then
+    # a bench run has no registered test to expand or deny
+    echo "[swap] affected tests: ${TESTS[*]}"
+else
+    SRCS=()
+    for t in "${TESTS[@]}"; do SRCS+=("${SELFTESTS_SRC}/prog_tests/${t}.c"); done
+    NAMES="${NAME}"
+    for h in ${SKELS[@]+"${SKELS[@]}"}; do
+        stem="$(basename "${h}")"; stem="${stem%.lskel.h}"; stem="${stem%.skel.h}"
+        [ "${stem}" = "${NAME}" ] || NAMES="${NAMES},${stem}"
     done
-    [ "${#KEPT[@]}" -lt "${#EXPANDED[@]}" ] && \
-        echo "[swap] denylisted: $(( ${#EXPANDED[@]} - ${#KEPT[@]} )) test(s)"
-    EXPANDED=("${KEPT[@]}")
-fi
+    EXPANDED=()
+    for n in $(python3 "${HERE}/scripts/affected_tests.py" "${NAMES}" "${SRCS[@]}"); do
+        case " ${EXPANDED[*]-} " in *" ${n} "*) ;; *) EXPANDED+=("${n}") ;; esac
+    done
+    # Subtract tests known to fail with pristine C objects (kernel limits /
+    # environment) so bundled always-broken tests can't fail a translation.
+    # known-bad-tests: exact test names leave the -t list (an object whose every
+    # consumer is denied has no oracle), and every entry - a test name or
+    # test/subtest - also goes to test_progs as its -d glob denylist, which
+    # matches whole names: a -t name is a substring match and can pull a denied
+    # test back in (stack_arg selects verifier_stack_arg).
+    DENY_FILE="$(dirname "${BASH_SOURCE[0]}")/known-bad-tests"
+    if [ -f "${DENY_FILE}" ]; then
+        DENY="$(grep -v '^#' "${DENY_FILE}" | grep -v '^[[:space:]]*$' | paste -sd, -)"
+        KEPT=()
+        for n in "${EXPANDED[@]}"; do
+            grep -qxF "${n}" <(grep -v '^#' "${DENY_FILE}") || KEPT+=("${n}")
+        done
+        [ "${#KEPT[@]}" -lt "${#EXPANDED[@]}" ] && \
+            echo "[swap] denylisted: $(( ${#EXPANDED[@]} - ${#KEPT[@]} )) test(s)"
+        EXPANDED=("${KEPT[@]}")
+    fi
 
-TESTS=("${EXPANDED[@]}")
-echo "[swap] affected tests: ${TESTS[*]}"
+    TESTS=("${EXPANDED[@]}")
+    echo "[swap] affected tests: ${TESTS[*]}"
+fi
 
 # SWAP_ONLY=1: install the object and rebuild what derives from it, but do
 # not boot the guest (a batch driver restoring the C object between runs).

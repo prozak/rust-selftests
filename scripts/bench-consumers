@@ -1,0 +1,107 @@
+# Objects whose only consumer is the selftests' `bench` driver (benchs/
+# bench_*.c): no prog_tests file includes their skeleton, so
+# scripts/swap-and-test.sh finds no test and the gate records NO-ORACLE.
+# One bench run per line: `<object> <bench-name> [bench arguments...]`;
+# '#' comments. The swap relinks `bench` with the object installed and
+# writes the object's rows to .bench-runs; scripts/gate-bench-run executes
+# `bench -w1 -d2 -a <row> 2>&1` for each in the guest and judges exit 0
+# plus a result line with a non-zero rate (the Summary:/RESULT/events per
+# sec/ns-per-op line of the driver). Several objects serve several bench
+# names; one row each, so a broken program is named by its bench. The
+# file is part of the gate environment hash (scripts/qemu_gate.py
+# ENV_FILES): editing it is a full re-gate.
+#
+# The verdict is "the driver ran the program and produced a rate", not a
+# performance comparison: guest timings are too noisy for a gate.
+
+bpf_loop_bench bpf-loop
+bpf_nop_bench bpf-nop
+
+# trigger_bench: the kernel-side kinds; the uprobe/usdt kinds trigger
+# bench's own text and the usdt ones need the usdt_1/2 objects.
+trigger_bench trig-kernel-count
+trigger_bench trig-kprobe
+trigger_bench trig-kretprobe
+trigger_bench trig-kprobe-multi
+trigger_bench trig-fentry
+trigger_bench trig-fexit
+trigger_bench trig-fmodret
+trigger_bench trig-tp
+trigger_bench trig-rawtp
+
+# -c 1: the libbpf consumers need one consumer thread; more than one and
+# the pristine C run exits 1 in this guest too.
+ringbuf_bench rb-libbpf -c 1
+ringbuf_bench rb-custom -c 1
+perfbuf_bench pb-libbpf -c 1
+perfbuf_bench pb-custom -c 1
+
+bpf_hashmap_full_update_bench bpf-hashmap-full-update
+bpf_hashmap_full_update_bench bpf-rhashmap-full-update
+bpf_hashmap_lookup bpf-hashmap-lookup
+bpf_hashmap_lookup bpf-rhashmap-lookup
+
+strncmp_bench strncmp-no-helper
+strncmp_bench strncmp-helper
+
+bench_local_storage_create local-storage-create
+
+local_storage_bench local-storage-cache-seq-get
+local_storage_bench local-storage-cache-int-get
+local_storage_bench local-storage-cache-hashmap-control
+
+htab_mem_bench htab-mem
+htab_mem_bench rhtab-mem
+
+crypto_bench crypto-encrypt
+crypto_bench crypto-decrypt
+
+bloom_filter_bench bloom-lookup
+bloom_filter_bench bloom-update
+bloom_filter_bench bloom-false-positive
+bloom_filter_bench hashmap-without-bloom
+bloom_filter_bench hashmap-with-bloom
+
+# lpm_trie_bench holds the lookup/insert/update/delete programs,
+# lpm_trie_map the map lpm-trie-free loads and frees in a loop; the
+# noop/baseline benches run no program but load the first skeleton.
+lpm_trie_bench lpm-trie-noop
+lpm_trie_bench lpm-trie-baseline
+lpm_trie_bench lpm-trie-lookup
+lpm_trie_bench lpm-trie-insert
+lpm_trie_bench lpm-trie-update
+lpm_trie_bench lpm-trie-delete
+lpm_trie_map lpm-trie-free
+
+# xdp_lb_bench: the driver validates each scenario (packet bytes and
+# counters) before timing it and exits 1 on a mismatch, so every scenario
+# is a run; the Rust translation was accepted on all 24 by hand.
+xdp_lb_bench xdp-lb --scenario tcp-v4-lru-hit
+xdp_lb_bench xdp-lb --scenario tcp-v4-ch
+xdp_lb_bench xdp-lb --scenario tcp-v6-lru-hit
+xdp_lb_bench xdp-lb --scenario tcp-v6-ch
+xdp_lb_bench xdp-lb --scenario udp-v4-lru-hit
+xdp_lb_bench xdp-lb --scenario udp-v6-lru-hit
+xdp_lb_bench xdp-lb --scenario tcp-v4v6-lru-hit
+xdp_lb_bench xdp-lb --scenario tcp-v4-lru-diverse
+xdp_lb_bench xdp-lb --scenario tcp-v4-ch-diverse
+xdp_lb_bench xdp-lb --scenario tcp-v6-lru-diverse
+xdp_lb_bench xdp-lb --scenario tcp-v6-ch-diverse
+xdp_lb_bench xdp-lb --scenario udp-v4-lru-diverse
+xdp_lb_bench xdp-lb --scenario tcp-v4-lru-miss
+xdp_lb_bench xdp-lb --scenario udp-v4-lru-miss
+xdp_lb_bench xdp-lb --scenario tcp-v4-lru-warmup
+xdp_lb_bench xdp-lb --scenario tcp-v4-syn
+xdp_lb_bench xdp-lb --scenario tcp-v4-rst-miss
+xdp_lb_bench xdp-lb --scenario pass-v4-no-vip
+xdp_lb_bench xdp-lb --scenario pass-v6-no-vip
+xdp_lb_bench xdp-lb --scenario pass-v4-icmp
+xdp_lb_bench xdp-lb --scenario pass-non-ip
+xdp_lb_bench xdp-lb --scenario drop-v4-frag
+xdp_lb_bench xdp-lb --scenario drop-v4-options
+xdp_lb_bench xdp-lb --scenario drop-v6-frag
+
+# No oracle in this guest, with the pristine C object too (issue #73):
+# bench_sockmap_prog: `bench sockmap` exits 1 with no output;
+# local_storage_rcu_tasks_trace_bench: the kernel lacks the
+# rcu_tasks_trace_* symbols the program attaches to.

@@ -31,6 +31,7 @@ W="$1"
 OUT="$2"
 IDLE="${3:-600}"
 PROG=test_progs
+LOOP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 up() { cut -d' ' -f1 /proc/uptime; }
 
 mount -t bpf bpffs /sys/fs/bpf 2>/dev/null
@@ -77,7 +78,13 @@ while [ ! -e "${W}/stop" ]; do
         DENY_ARG=""
         [ ! -s "${OUT}/.test-deny" ] || DENY_ARG="-d @.test-deny"
         echo "[gate-guest-loop] job ${n} run $(up)" >> "${J}/log"
-        (cd "${OUT}" && "${RUN}" -t @.test-filter ${DENY_ARG}) >> "${J}/log" 2>&1
+        if [ -s "${OUT}/.bench-runs" ]; then
+            # a benchs/ object (scripts/bench-consumers): the bench driver
+            # in place of test_progs; the host's layer carries the rows
+            (cd "${OUT}" && "${LOOP_DIR}/gate-bench-run") >> "${J}/log" 2>&1
+        else
+            (cd "${OUT}" && "${RUN}" -t @.test-filter ${DENY_ARG}) >> "${J}/log" 2>&1
+        fi
         rc=$?
         # A test can leave a process behind holding the overlay; detach it
         # rather than wait.
